@@ -47,6 +47,7 @@ cdef class Bus:
     cdef int irq_flag                # $4211 bit 7
     cdef public int irq_pending      # level held for the CPU
     cdef int irq_line_done
+    cdef readonly int64_t nmi_count, irq_count
     cdef int in_vblank
     cdef int in_hblank
     cdef uint16_t htime, vtime

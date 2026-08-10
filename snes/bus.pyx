@@ -141,6 +141,8 @@ cdef class Bus:
         self.irq_flag = 0
         self.irq_pending = 0
         self.irq_line_done = 0
+        self.nmi_count = 0
+        self.irq_count = 0
         self.in_vblank = 0
         self.in_hblank = 0
         self.htime = 0x1FF
@@ -650,6 +652,7 @@ cdef class Bus:
             self.irq_flag = 1
             self.irq_pending = 1
             self.irq_line_done = 1
+            self.irq_count += 1
 
     cdef void _next_line(self) noexcept:
         self.vcount += 1
@@ -676,6 +679,7 @@ cdef class Bus:
             self.nmi_flag = 1
             if self.nmi_enabled:
                 self.nmi_pending = 1
+                self.nmi_count += 1
             if self.auto_joypad:
                 self.poll_joypads()
             self.frame_ready = 1
@@ -818,6 +822,20 @@ cdef class Bus:
     # =====================================================================
     # python interface
     # =====================================================================
+
+    def irq_state(self):
+        return dict(nmi_enabled=self.nmi_enabled, nmi_flag=self.nmi_flag,
+                    nmi_pending=self.nmi_pending, nmi_count=self.nmi_count,
+                    irq_mode=self.irq_mode, irq_flag=self.irq_flag,
+                    irq_pending=self.irq_pending, irq_count=self.irq_count,
+                    htime=self.htime, vtime=self.vtime,
+                    auto_joypad=self.auto_joypad, fast_rom=self.fast_rom)
+
+    def page_kind_at(self, addr):
+        """Which kind of memory backs this address: for spotting execution
+        that has run off into open bus."""
+        names = ("openbus", "rom", "wram", "sram", "mmio_lo", "mmio_hi")
+        return names[self.page_kind[(addr >> 13) & 0x7FF]]
 
     def dma_state(self):
         return dict(hdma_enabled=self.hdma_enabled,

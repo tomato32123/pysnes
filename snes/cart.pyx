@@ -102,6 +102,31 @@ def score_header(bytes rom, uint32_t off, int is_hi, int is_ex):
     return score
 
 
+def best_header_score(bytes rom):
+    """Best plausibility score over the three internal-header positions."""
+    return max(score_header(rom, 0x007FB0, 0, 0),
+               score_header(rom, 0x00FFB0, 1, 0),
+               score_header(rom, 0x40FFB0, 1, 1))
+
+
+def deinterleave(bytes data):
+    """Undo the block-interleaved dump format some copiers produced.
+
+    The image holds the odd 32 KB blocks first and the even ones after, so
+    file block i is real block 2i+1 and file block half+i is real block 2i.
+    A HiROM image stored this way puts its header at $7FB0 -- the LoROM
+    position -- which is what gives the format away."""
+    cdef Py_ssize_t size = len(data)
+    cdef Py_ssize_t blocks = size // 0x8000
+    cdef Py_ssize_t half = blocks // 2
+    cdef Py_ssize_t i
+    out = bytearray(size)
+    for i in range(half):
+        out[(2 * i + 1) * 0x8000:(2 * i + 2) * 0x8000] = data[i * 0x8000:(i + 1) * 0x8000]
+        out[(2 * i) * 0x8000:(2 * i + 1) * 0x8000] = data[(half + i) * 0x8000:(half + i + 1) * 0x8000]
+    return bytes(out)
+
+
 cdef class Cart:
     """The ROM image plus its battery-backed SRAM, and the detected map mode."""
 
@@ -129,6 +154,15 @@ cdef class Cart:
 
         if len(raw) < 0x10000:
             raise ValueError("ROM image too small: %d bytes" % len(raw))
+
+        # Some dumps are block-interleaved.  Trust whichever arrangement makes
+        # the internal header look more plausible.
+        self.was_interleaved = 0
+        if len(raw) % 0x10000 == 0 and (len(raw) // 0x8000) >= 2:
+            swapped = deinterleave(raw)
+            if best_header_score(swapped) > best_header_score(raw):
+                raw = swapped
+                self.was_interleaved = 1
 
         self.rom_data = raw
         self.rom_size = len(raw)
@@ -221,7 +255,7 @@ cdef class Cart:
             "sram size  : %d bytes\n"
             "chipset    : $%02X%s\n"
             "checksum   : $%04X (computed $%04X) %s\n"
-            "copier hdr : %s"
+            "copier hdr : %s   interleaved: %s"
             % (self.title,
                self.map_mode_name, "FastROM" if self.fast_rom else "SlowROM",
                self.rom_size, self.rom_size // 131072,
@@ -229,5 +263,5 @@ cdef class Cart:
                self.coprocessor, " battery" if self.has_battery else "",
                self.checksum, self.computed_checksum,
                "OK" if self.checksum_ok else "MISMATCH",
-               bool(self.had_copier_header))
+               bool(self.had_copier_header), bool(self.was_interleaved))
         )

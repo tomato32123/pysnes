@@ -163,6 +163,16 @@ Snapshots are three emulated frames apart, so holding rewind plays back at
 3x reverse speed. The framebuffer is part of the state — rewind restores
 without rendering, so leaving it out froze the picture while scrubbing.
 
+### ROM formats
+
+Copier headers (512 bytes) are stripped, and block-interleaved dumps are
+detected and undone.  Interleaved images hold the odd 32 KB blocks first
+and the even ones after, which puts a HiROM game's internal header at
+$7FB0 -- the LoROM position -- and is what gives the format away.  The
+loader scores the header both ways and keeps whichever looks more
+plausible; in a 66-ROM library this recovered six games that had been
+booting into garbage.
+
 ### Where saves go
 
 Battery saves are written to `saves/<rom name>.srm` inside this project, never
@@ -202,6 +212,8 @@ python tools/screenshot.py 300 600   # render frames to shots/frameNNNN.png
 python tools/bench.py 1600 300       # frames per second after a warm-up
 python tools/playtest.py             # scripted run from boot into the game
 python tools/soak.py 30000           # long run with random input
+python tools/batchtest.py <dir>      # boot every ROM in a tree, tabulate
+python tools/whystuck.py <rom>       # why a ROM shows no picture
 python tools/probe.py 3000000        # raw instruction throughput + hot PCs
 python tests/test_cart.py            # header parsing and ROM mirroring
 python tests/test_state.py           # save-state determinism

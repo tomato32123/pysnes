@@ -5,7 +5,6 @@ from tools.romarg import from_argv
 from snes.system import System
 
 W, H = 256, 239
-ROM = from_argv()
 def write_png(path, fb):
     """fb is 0xAARRGGBB little-endian -> bytes B,G,R,A."""
     raw = bytearray()
@@ -31,7 +30,7 @@ def main():
     frames = [int(a) for a in sys.argv[1:]] or [300]
     outdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "shots")
     os.makedirs(outdir, exist_ok=True)
-    s = System(ROM)
+    s = System(from_argv())
     for target in sorted(frames):
         while s.frame_count < target:
             s.run_frame()
