@@ -206,6 +206,10 @@ cdef class DSP:
         self.out_write = 0
         self.out_read = 0
         self.out_count = 0
+        self.solo = -1
+        self.echo_enabled = 1
+        for i in range(8):
+            self.kon_count[i] = 0
         self.last_l = 0
         self.last_r = 0
 
@@ -228,6 +232,7 @@ cdef class DSP:
 
     cdef void _key_on(self, int v) noexcept:
         cdef int i
+        self.kon_count[v] += 1
         cdef uint16_t dir_addr = (<uint16_t>self.reg[0x5D] << 8) + <uint16_t>(self.reg[v * 16 + 4]) * 4
         self.brr_addr[v] = (<uint16_t>self.apu.ram[dir_addr]
                             | (<uint16_t>self.apu.ram[<uint16_t>(dir_addr + 1)] << 8))
@@ -442,6 +447,8 @@ cdef class DSP:
             self.reg[v * 16 + 8] = <uint8_t>(envval >> 4)
             self.reg[v * 16 + 9] = <uint8_t>((sample >> 8) & 0xFF)
 
+            if self.solo >= 0 and v != self.solo:
+                continue
             l = (sample * <int32_t><signed char>self.reg[v * 16 + 0]) >> 7
             r = (sample * <int32_t><signed char>self.reg[v * 16 + 1]) >> 7
             main_l += l
@@ -465,8 +472,12 @@ cdef class DSP:
 
         for tap in range(8):
             i = (self.fir_pos - 7 + tap) & 7
-            echo_l += (self.fir_l[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 6
-            echo_r += (self.fir_r[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 6
+            # Coefficients are signed 8-bit with 128 meaning unity, so each tap
+            # is divided by 128.  Dividing by 64 instead gave the filter 2x gain
+            # -- with EFB it then resonated, burying the music under a loud
+            # high-frequency ring.
+            echo_l += (self.fir_l[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 7
+            echo_r += (self.fir_r[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 7
         echo_l = _clamp16(echo_l)
         echo_r = _clamp16(echo_r)
         self.fir_pos = (self.fir_pos + 1) & 7
@@ -486,8 +497,9 @@ cdef class DSP:
         # -- master mix ---------------------------------------------------------
         l = (main_l * <int32_t><signed char>self.reg[0x0C]) >> 7
         r = (main_r * <int32_t><signed char>self.reg[0x1C]) >> 7
-        l += (echo_l * <int32_t><signed char>self.reg[0x2C]) >> 7
-        r += (echo_r * <int32_t><signed char>self.reg[0x3C]) >> 7
+        if self.echo_enabled:
+            l += (echo_l * <int32_t><signed char>self.reg[0x2C]) >> 7
+            r += (echo_r * <int32_t><signed char>self.reg[0x3C]) >> 7
         l = _clamp16(l)
         r = _clamp16(r)
         if flg & 0x40:                              # mute
@@ -612,6 +624,20 @@ cdef class DSP:
         memcpy(<char *>self.reg, <char *><bytes>blobs[0], 128)
 
     # -- end generated save state ------------------------------------------
+
+    def set_solo(self, int v):
+        self.solo = v
+
+    def set_echo(self, int on):
+        self.echo_enabled = on
+
+    def kon_counts(self):
+        return [self.kon_count[i] for i in range(8)]
+
+    def reset_kon_counts(self):
+        cdef int i
+        for i in range(8):
+            self.kon_count[i] = 0
 
     # -- python side -----------------------------------------------------------
 

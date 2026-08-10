@@ -178,10 +178,51 @@ def test_gain_controls_level():
     assert 0.4 < ratio < 0.6, "half gain should roughly halve the level (got %.2f)" % ratio
 
 
+def test_echo_fir_gain_is_unity():
+    """The echo FIR taps are signed 8-bit with 128 meaning unity.
+
+    Dividing each tap by 64 instead of 128 gives the filter 2x gain, which with
+    any feedback turns the echo into a loud resonant ring that buries the music.
+    Send a signal through the echo path alone, with a single unity tap and no
+    feedback, and the level that comes back must match what went in.
+    """
+    src = [int(8000 * math.sin(2 * math.pi * i / 16.0)) for i in range(320)]
+    brr = encode_brr(src, loop=True)
+
+    apu = build_apu(brr, 0x1000)
+    dry = max(abs(v) for v in collect(apu, 600))
+
+    apu = build_apu(brr, 0x1000)
+    apu.dsp_write(0x0C, 0x00)          # MVOL off: hear the echo only
+    apu.dsp_write(0x1C, 0x00)
+    apu.dsp_write(0x2C, 0x7F)          # EVOL full
+    apu.dsp_write(0x3C, 0x7F)
+    apu.dsp_write(0x0D, 0x00)          # EFB: no feedback
+    apu.dsp_write(0x4D, 0x01)          # EON voice 0
+    apu.dsp_write(0x6D, 0x40)          # ESA: buffer at $4000, clear of the sample
+    apu.dsp_write(0x7D, 0x01)          # EDL: 2048 bytes = 512 samples
+    apu.dsp_write(0x6C, 0x00)          # FLG: echo writes enabled
+    apu.dsp_write(0x0F, 127)           # C0 = unity
+    for tap in range(1, 8):
+        apu.dsp_write((tap << 4) + 0x0F, 0)
+    apu.dsp_write(0x4C, 0x01)
+
+    apu.dsp_tick(1000)                 # let the delay line fill and settle
+    blob = apu.dsp.take_samples(99999)
+    vals = [int.from_bytes(blob[i:i+2], "little", signed=True) for i in range(0, len(blob), 2)]
+    wet = max(abs(v) for v in vals[-2000:]) if vals else 0
+
+    ratio = wet / float(dry or 1)
+    print("  dry voice peak %d, echo-only peak %d -> ratio %.2f" % (dry, wet, ratio))
+    assert 0.7 < ratio < 1.3, ("echo path gain is %.2f, expected about 1.0 "
+                               "(2.0 means the FIR is dividing by 64 not 128)" % ratio)
+
+
 def main():
     for fn in (test_playback_matches_reference,
                test_pitch_scales_playback_rate,
-               test_gain_controls_level):
+               test_gain_controls_level,
+               test_echo_fir_gain_is_unity):
         print(fn.__name__)
         fn()
     print("all DSP tests passed")

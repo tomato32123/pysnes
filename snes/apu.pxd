@@ -31,6 +31,9 @@ cdef class DSP:
     cdef int32_t fir_r[8]
     cdef int fir_pos
     cdef int16_t last_l, last_r
+    cdef int solo                   # -1 = normal mix, else only this voice
+    cdef int echo_enabled           # diagnostics: force the echo unit off
+    cdef int kon_count[8]           # diagnostics: key-on events per voice
 
     # -- output ring -------------------------------------------------------
     cdef int16_t out_buf[16384]
