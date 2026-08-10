@@ -1,5 +1,6 @@
 build/
 dist/
+config/
 *.pyd
 *.so
 snes/*.c

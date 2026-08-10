@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pygame
 
 from snes.system import System, BUTTONS
+from snes.gamepad import Pads
 
 WIDTH, HEIGHT = 256, 239
 FRAME_SECONDS = 1.0 / 60.098          # NTSC field rate
@@ -115,6 +116,9 @@ def main(argv=None):
     if not args.no_audio and not args.frames:
         audio = open_audio(machine)
 
+    pads = Pads(os.path.join(app_dir(), "config", "gamepad.json"))
+    print(pads.describe())
+
     held = set()
     state_path = machine.state_path
     running = True
@@ -125,6 +129,9 @@ def main(argv=None):
     while running:
         turbo = False
         for event in pygame.event.get():
+            if pads.handle_event(event):
+                print(pads.describe())
+                continue
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
@@ -143,12 +150,18 @@ def main(argv=None):
                     held.discard(KEYMAP[event.key])
 
         keys = pygame.key.get_pressed()
-        turbo = keys[pygame.K_TAB]
+        turbo = keys[pygame.K_TAB] or pads.any_function("FASTFORWARD")
+
+        if pads.pressed_once("SAVESTATE"):
+            save_state(machine, state_path)
+        if pads.pressed_once("LOADSTATE"):
+            load_state(machine, state_path)
 
         mask = 0
         for name in held:
             mask |= BUTTONS[name]
-        machine.set_pad(0, mask)
+        machine.set_pad(0, mask | pads.mask(0))
+        machine.set_pad(1, pads.mask(1))
 
         machine.run_frame()
         frames += 1
@@ -173,9 +186,17 @@ def main(argv=None):
             running = False
 
     machine.save_sram()
+    pads.close()
     pygame.quit()
     print("stopped after %d frames" % frames)
     return 0
+
+
+def app_dir():
+    """Where config and saves live: beside the executable when frozen."""
+    if FROZEN:
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 def blit(screen, surface, framebuffer, scale):

@@ -16,6 +16,10 @@ hidden = [
     "snes.cpu",
     "snes.system",
     "snes.audioout",
+    "snes.gamepad",
+    # imported lazily inside functions, so the scanner misses it
+    "pygame._sdl2",
+    "pygame._sdl2.controller",
 ]
 
 a = Analysis(

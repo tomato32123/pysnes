@@ -116,6 +116,36 @@ The cores are Cython extension modules, so PyInstaller's import scanner
 cannot see through them; every `snes.*` module is listed explicitly in the
 spec. Rebuild the extensions with `build.py` before packaging.
 
+### Gamepads
+
+Controllers are read through SDL's GameController layer, so one mapping
+covers Xbox, DualShock, Switch Pro and anything else SDL recognises. Plug
+one in and it is picked up, including while the emulator is running; a
+second pad becomes controller port 2.
+
+The default layout follows physical positions, not labels — the SNES face
+buttons sit a quarter turn round from an Xbox pad:
+
+| SNES | Xbox | position |
+| --- | --- | --- |
+| B | A | bottom |
+| A | B | right |
+| Y | X | left |
+| X | Y | top |
+| L / R | LB / RB | shoulders |
+| Start / Select | Menu / View | |
+| D-pad | d-pad and left stick | |
+| fast forward | right trigger | |
+
+`config/gamepad.json` is written on first run and can be edited. `_default`
+applies to every pad; add a section keyed by the controller's name to
+override just that model. `SAVESTATE` and `LOADSTATE` are unbound by
+default — set them to a button name such as `leftstick` to use them.
+
+```
+python tools/padtest.py     # live view of what each button maps to
+```
+
 ### Where saves go
 
 Battery saves are written to `saves/<rom name>.srm` inside this project, never
