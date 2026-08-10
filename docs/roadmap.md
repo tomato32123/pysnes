@@ -42,7 +42,9 @@ The largest single gap. Everything below the first item depends on it.
 - [x] **Offset-per-tile** (modes 2, 4 and 6), covered by unit tests; no title
       in the local library reaches those modes during boot, so it has not
       been seen against real software yet
-- [ ] VRAM, CGRAM and OAM access restrictions during active display
+- [x] VRAM, CGRAM and OAM access restrictions during active display
+      (OAM approximated: the write is dropped rather than redirected to
+      the address sprite evaluation holds, which needs a per-dot evaluator)
 - [ ] Sprite evaluation timing, and exact range-over / time-over
 - [ ] OAM address reload and priority rotation
 - [ ] Interlace, pseudo-hires, overscan, EXTBG

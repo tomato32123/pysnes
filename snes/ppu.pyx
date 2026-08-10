@@ -126,6 +126,7 @@ cdef class PPU:
         self.extbg = 0
         self.hcounter = 0
         self.vcounter = 0
+        self.vdisp = 225
         self.field = 0
         self.latched = 0
         self.hcounter_latch = 0
@@ -145,6 +146,25 @@ cdef class PPU:
         self.hcounter_latch = <uint16_t>self.hcounter
         self.vcounter_latch = <uint16_t>self.vcounter
         self.latched = 1
+
+    # -------------------------------------------------- access windows ---
+    #
+    # While a line is being drawn the PPU owns its memories, so the CPU cannot
+    # reach them.  Well-behaved software only touches VRAM, CGRAM and OAM
+    # during V-blank or forced blank; letting a write through outside those
+    # windows hides a bug that real hardware would show.
+
+    cdef inline int _display_active(self) noexcept:
+        """True while the PPU is drawing a visible line."""
+        if self.forced_blank:
+            return 0
+        return 1 if (0 < self.vcounter < self.vdisp) else 0
+
+    cdef inline int _cgram_blocked(self) noexcept:
+        """CGRAM is reachable in the margins of a visible line, unlike VRAM."""
+        if not self._display_active():
+            return 0
+        return 1 if (22 <= self.hcounter < 274) else 0
 
     # =====================================================================
     # register writes
@@ -179,6 +199,13 @@ cdef class PPU:
             self.oam_latch_active = 0
 
         elif reg == 0x04:                                 # OAMDATA
+            # The address still advances, but the byte goes to whatever entry
+            # sprite evaluation is holding rather than the one asked for.
+            # Without a per-dot evaluator the honest approximation is to drop
+            # the write and keep the address moving.
+            if self._display_active():
+                self.oam_addr = (self.oam_addr + 1) & 0x3FF
+                return
             latch_bit = self.oam_addr & 1
             va = self.oam_addr
             self.oam_addr = (self.oam_addr + 1) & 0x3FF
@@ -246,11 +273,15 @@ cdef class PPU:
             self.vram_addr = (self.vram_addr & 0x00FF) | ((<uint32_t>value & 0x7F) << 8)
             self.vram_prefetch = self.vram[_remap_vram(self.vmain, self.vram_addr) & 0x7FFF]
         elif reg == 0x18:                                 # VMDATAL
+            if self._display_active():
+                return
             va = _remap_vram(self.vmain, self.vram_addr) & 0x7FFF
             self.vram[va] = (self.vram[va] & 0xFF00) | value
             if not (self.vmain & 0x80):
                 self.vram_addr = (self.vram_addr + _vram_step(self.vmain)) & 0x7FFF
         elif reg == 0x19:                                 # VMDATAH
+            if self._display_active():
+                return
             va = _remap_vram(self.vmain, self.vram_addr) & 0x7FFF
             self.vram[va] = (self.vram[va] & 0x00FF) | (<uint16_t>value << 8)
             if self.vmain & 0x80:
@@ -275,6 +306,8 @@ cdef class PPU:
             self.cgram_addr = value
             self.cgram_flip = 0
         elif reg == 0x22:                                 # CGDATA
+            if self._cgram_blocked():
+                return
             if not self.cgram_flip:
                 self.cgram_latch = value
                 self.cgram_flip = 1

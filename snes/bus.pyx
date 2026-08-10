@@ -160,6 +160,7 @@ cdef class Bus:
         self.lines_per_frame = LINES_PAL if self.pal else LINES_NTSC
         self.vblank_start = 225
         self.ppu.pal = self.pal
+        self.ppu.vdisp = self.vblank_start
         self.apu.master_hz = MASTER_HZ_PAL if self.pal else MASTER_HZ_NTSC
 
         self.nmi_enabled = 0
@@ -394,6 +395,8 @@ cdef class Bus:
             # Draw everything to the left of this write with the old state, so
             # a mid-scanline change takes effect from here rather than from the
             # start of the line.
+            self.ppu.hcounter = self._hcount() >> 2
+            self.ppu.vcounter = self.vcount
             self.ppu.catch_up(self._screen_x())
             self.ppu.write_reg(a, value)
             return

@@ -88,6 +88,7 @@ cdef class PPU:
 
     # -- counters / status ---------------------------------------------------
     cdef int hcounter, vcounter, field
+    cdef public int vdisp            # first line of V-blank, 225 or 240
     cdef public int pal
     cdef int latched
     cdef uint16_t hcounter_latch, vcounter_latch
@@ -122,6 +123,8 @@ cdef class PPU:
     cdef void write_reg(self, uint32_t addr, uint8_t value) noexcept
     cdef void render_scanline(self, int line) noexcept
     cdef void latch_counters(self) noexcept
+    cdef int _display_active(self) noexcept
+    cdef int _cgram_blocked(self) noexcept
 
     cdef void _write_hofs(self, int n, uint8_t value) noexcept
     cdef void _write_vofs(self, int n, uint8_t value) noexcept

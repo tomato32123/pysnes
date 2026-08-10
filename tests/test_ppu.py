@@ -384,6 +384,146 @@ def test_offset_per_tile_ignores_the_other_layer_bit():
               pixel(bg2_only, x, 0), pixel(plain, x, 0))
 
 
+# -------------------------------------------------- access windows ----
+
+ACCESS_SOURCE = """
+        sep #$20
+        lda #$8F
+        sta $2100               ; forced blank: everything is reachable
+
+        lda #$80
+        sta $2115               ; VMAIN: step 1, increment on the high byte
+        rep #$20
+        lda #$0100
+        sta $2116
+        lda #$1234
+        sta $2118               ; seed word $0100 while blanked
+        lda #$0102
+        sta $2116
+        lda #$1234
+        sta $2118               ; and word $0102
+        sep #$20
+
+        lda #$0F
+        sta $2100               ; screen on
+
+        lda #$64
+        sta $4209               ; VTIME = line 100, well inside the display
+        stz $420A
+        lda #$96
+        sta $4207
+        stz $4208
+        lda #$B0                ; NMI on, IRQ on H and V
+        sta $4200
+        cli
+spin:   bra spin
+
+irq:    rep #$20
+        lda #$0100
+        sta $2116
+        lda #$BEEF
+        sta $2118               ; mid-display: the hardware drops this
+        sep #$20
+        lda $4211
+        rti
+
+nmi:    rep #$20
+        lda #$0102
+        sta $2116
+        lda #$ABCD
+        sta $2118               ; V-blank: this one must land
+        ; read both words back
+        lda #$0100
+        sta $2116
+        sep #$20
+        lda $2139
+        sta $7E4100
+        lda $213A
+        sta $7E4101
+        rep #$20
+        lda #$0102
+        sta $2116
+        sep #$20
+        lda $2139
+        sta $7E4102
+        lda $213A
+        sta $7E4103
+        lda $4210
+        rti
+"""
+
+
+def test_vram_writes_are_dropped_during_display():
+    machine = run(ACCESS_SOURCE, max_frames=6).machine
+    blocked = machine.bus.read(0x7E4100) | (machine.bus.read(0x7E4101) << 8)
+    allowed = machine.bus.read(0x7E4102) | (machine.bus.read(0x7E4103) << 8)
+    check("VRAM write during display was dropped", blocked, 0x1234, "$%04X")
+    check("VRAM write during V-blank landed", allowed, 0xABCD, "$%04X")
+
+
+def test_vram_writes_work_under_forced_blank():
+    """The restriction must not touch the case every game relies on at boot."""
+    machine = run("""
+        sep #$20
+        lda #$8F
+        sta $2100
+        lda #$80
+        sta $2115
+        rep #$20
+        lda #$0200
+        sta $2116
+        lda #$5A5A
+        sta $2118
+        lda #$0200
+        sta $2116
+        sep #$20
+        lda $2139
+        sta $7E4100
+        lda $213A
+        sta $7E4101
+""", max_frames=4)
+    got = machine.machine.bus.read(0x7E4100) | (machine.machine.bus.read(0x7E4101) << 8)
+    check("forced-blank VRAM write", got, 0x5A5A, "$%04X")
+
+
+def test_cgram_writes_are_dropped_mid_line():
+    """CGRAM is reachable in a line's margins but not while pixels are output."""
+    machine = run("""
+        sep #$20
+        lda #$8F
+        sta $2100
+        stz $2121
+        lda #$00
+        sta $2122
+        lda #$7C
+        sta $2122               ; entry 0 = blue, set while blanked
+        stz $212C
+        lda #$0F
+        sta $2100
+        lda #$64
+        sta $4209
+        stz $420A
+        lda #$96
+        sta $4207               ; dot 150, inside the visible part of the line
+        stz $4208
+        lda #$30
+        sta $4200
+        cli
+spin:   bra spin
+irq:    sep #$20
+        stz $2121
+        lda #$1F
+        sta $2122
+        lda #$00
+        sta $2122               ; try to make the backdrop red mid-line
+        lda $4211
+        rti
+""", max_frames=6).machine
+    # The backdrop must still be blue: the write never reached CGRAM.
+    check("CGRAM held its value through the line", pixel(machine, 200, 150),
+          (0, 0, expand(31)))
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:
