@@ -1,0 +1,141 @@
+# pysnes
+
+A Super Famicom / SNES emulator written in Python, with the hot cores compiled
+through Cython. It boots and plays commercial titles at roughly 110 fps — 1.8x real
+hardware — with video, input and audio.
+
+```
+  65816 S-CPU  ──▶  Bus (memory map, MMIO, DMA/HDMA, timing, IRQ/NMI)
+                      ├──▶  S-PPU   (BG modes 0-7, sprites, windows, colour math)
+                      └──▶  APU     (SPC700 core + timers) ──▶ S-DSP (8 BRR voices, echo)
+```
+
+## What is implemented
+
+**S-CPU (65816)** — all 256 opcodes, every addressing mode, emulation and native
+mode with the M/X width flags, decimal-mode ADC/SBC, block moves, and the full
+interrupt set (RESET/NMI/IRQ/BRK/COP/ABORT). Timing is bus-access driven: each
+access charges the master-clock cost of its address (6/8/12 cycles depending on
+region and the FastROM bit) and instructions add internal cycles where the real
+core has them, including the indexed page-cross and direct-page penalties.
+
+**Bus** — an 8 KB-granular page table over the 24-bit address space; HiROM,
+LoROM and ExHiROM mapping; 128 KB WRAM with its mirrors and the $2180 port;
+battery SRAM; open-bus latch; the $2100-$21FF and $4200-$43FF register files;
+multiply/divide units; scanline/dot timing driving V-blank, H/V IRQ and auto
+joypad read; general DMA and HDMA across all eight channels and all eight
+transfer modes.
+
+**S-PPU** — the complete register interface with the hardware's access quirks
+(VRAM address remapping and read prefetch, the write-twice scroll latches with
+their separate H latch, the OAM byte latch, CGRAM's low/high toggle). The
+renderer is per-scanline and covers BG modes 0-7 including mode 7's affine
+transform with its wrap/clip modes, 2/4/8 bpp tiles, 8x8 and 16x16 tiles,
+mosaic, all sprite sizes with the 32-sprite / 34-tile line limits, both
+windows with their four logic combinations, and colour math (add/subtract,
+half, fixed colour, sub-screen, and both CGWSEL region selectors).
+
+**APU** — the SPC700 with all 256 opcodes, the three timers with their real
+prescalers, the four communication ports, and the 64-byte IPL boot ROM that
+runs the upload handshake at reset. The S-DSP decodes BRR samples with all four
+filters, runs ADSR and all four GAIN modes, does gaussian interpolation, noise,
+pitch modulation, and the 8-tap FIR echo unit writing back into APU RAM.
+
+### Known gaps
+
+* No enhancement chips (SA-1, SuperFX, DSP-1, …). Plain LoROM/HiROM only.
+* The DSP interpolation kernel is a generated gaussian-windowed sinc normalised
+  to the hardware's 2048 gain, not a bit-exact copy of the on-chip table. It
+  sounds right but is not sample-exact.
+* The DSP is modelled per 32 kHz sample rather than per hardware sub-cycle.
+* Multiply/divide results appear immediately instead of after their real delay.
+* No interlace or pseudo-hires output; overscan is not extended past 239 lines.
+
+## Building
+
+Needs Python 3.8+, Cython, and a C compiler (MSVC Build Tools with the C++
+workload on Windows).
+
+```
+pip install cython pygame
+python build.py            # add --force to rebuild everything, -v for full output
+```
+
+`build.py` locates MSVC through `vswhere` and runs the compiler with a clean
+environment — a raw MSYS/Git-Bash environment makes `vcvars64.bat` fail
+silently, which is why the build is driven from this script rather than calling
+`setup.py` directly.
+
+## Running
+
+```
+python play.py <rom.smc> [--scale N] [--no-audio]
+```
+
+The extension modules only load in the exact CPython minor version they were
+built for, and a bare `python` is often a different install (or one without
+pygame). `run.cmd` / `run.ps1` probe the interpreters on PATH and use the first
+that can import both `snes.system` and `pygame`:
+
+```
+.\run.cmd "c:\path\to\rom.smc"
+```
+
+Set `PYSNES_PYTHON` to skip the search and name an interpreter directly.
+
+Options: `--scale N` (window size, default 3), `--no-audio`, and `--frames N`
+(run headless for N frames then exit, for testing).
+
+| Key | Button |
+| --- | --- |
+| Arrow keys | D-pad |
+| Z / X | B / A |
+| A / S | Y / X |
+| Q / W | L / R |
+| Enter | Start |
+| Right Shift | Select |
+| Tab (hold) | fast forward |
+| F2 / F4 | save / load state |
+| F5 | write SRAM now |
+| Esc | quit (SRAM is written on exit) |
+
+### Where saves go
+
+Battery saves are written to `saves/<rom name>.srm` inside this project, never
+next to the ROM. If no save exists there yet, an existing `.srm` beside the ROM
+is read once so an existing save carries over — but that file is never written
+to, so another emulator's saves stay intact.
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `snes/cart.pyx` | ROM loading, internal-header detection, SRAM |
+| `snes/bus.pyx` | address decoding, MMIO, DMA/HDMA, timing, interrupts |
+| `snes/cpu.pyx` | the 65816 interpreter |
+| `snes/ppu.pyx` | PPU registers and the scanline renderer |
+| `snes/apu.pyx` | SPC700 core, timers, and the S-DSP |
+| `snes/system.pyx` | the machine: wiring, frame loop, save states |
+| `snes/audioout.py` | pygame streaming audio |
+| `play.py` | the windowed frontend |
+| `tools/` | disassembler, tracer, screenshot, benchmark, soak test |
+
+`tools/gen_state.py` generates the save-state serialisers from one field list
+per class, so the save and load halves cannot drift apart. Re-run it and
+rebuild after adding a field to any core.
+
+## Tools
+
+Each tool takes the ROM as its first argument, or reads `$PYSNES_ROM`, or
+picks up a single image dropped into `roms/`.
+
+```
+python tools/trace.py <rom> [n]      # disassembled execution trace from reset
+python tools/screenshot.py 300 600   # render frames to shots/frameNNNN.png
+python tools/bench.py 1600 300       # frames per second after a warm-up
+python tools/playtest.py             # scripted run from boot into the game
+python tools/soak.py 30000           # long run with random input
+python tools/probe.py 3000000        # raw instruction throughput + hot PCs
+python tests/test_cart.py            # header parsing and ROM mirroring
+python tests/test_state.py           # save-state determinism
+```

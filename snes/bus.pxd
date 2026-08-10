@@ -1,0 +1,106 @@
+# cython: language_level=3
+from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
+
+from snes.cart cimport Cart
+from snes.ppu cimport PPU
+from snes.apu cimport APU
+
+
+cdef enum PageKind:
+    PK_OPENBUS = 0
+    PK_ROM     = 1
+    PK_WRAM    = 2
+    PK_SRAM    = 3
+    PK_MMIO_LO = 4      # $2000-$3FFF
+    PK_MMIO_HI = 5      # $4000-$5FFF
+
+
+cdef class Bus:
+    cdef readonly Cart cart
+    cdef readonly PPU ppu
+    cdef readonly APU apu
+
+    cdef uint8_t wram[0x20000]
+
+    # 8 KB page table over the whole 24-bit address space.
+    cdef uint8_t page_kind[2048]
+    cdef uint32_t page_base[2048]
+
+    cdef uint8_t mdr                 # open-bus latch
+
+    # -- timing ------------------------------------------------------------
+    cdef int64_t master_clock
+    cdef int hcount                  # master cycles into the current scanline
+    cdef int vcount                  # current scanline
+    cdef int field
+    cdef readonly int64_t frame
+    cdef int frame_ready
+    cdef int ticking          # guards tick() against re-entry from HDMA/DMA
+    cdef int lines_per_frame
+    cdef int vblank_start            # 225 or 240 with overscan
+
+    # -- interrupts --------------------------------------------------------
+    cdef int nmi_enabled
+    cdef int nmi_flag                # $4210 bit 7
+    cdef public int nmi_pending      # edge latched for the CPU
+    cdef int irq_mode                # bits 4-5 of $4200
+    cdef int irq_flag                # $4211 bit 7
+    cdef public int irq_pending      # level held for the CPU
+    cdef int irq_line_done
+    cdef int in_vblank
+    cdef int in_hblank
+    cdef uint16_t htime, vtime
+
+    # -- CPU-side registers ------------------------------------------------
+    cdef int fast_rom                # $420D bit 0
+    cdef uint8_t wrio
+    cdef uint8_t mul_a, mul_b
+    cdef uint16_t div_a
+    cdef uint8_t div_b
+    cdef uint16_t rd_div, rd_mpy
+    cdef uint32_t wram_addr          # $2181-$2183 port
+
+    # -- joypads -----------------------------------------------------------
+    cdef int auto_joypad
+    cdef int auto_joypad_busy
+    cdef uint16_t pad_state[4]       # live button state, set by the frontend
+    cdef uint16_t joy[4]             # latched $4218-$421F
+    cdef uint16_t pad_shift[4]
+    cdef int pad_latched
+
+    # -- DMA / HDMA --------------------------------------------------------
+    cdef uint8_t dma_param[8]
+    cdef uint8_t dma_bbus[8]
+    cdef uint32_t dma_abus[8]        # 24-bit A-bus address
+    cdef uint16_t dma_size[8]        # also HDMA indirect address
+    cdef uint8_t dma_indirect_bank[8]
+    cdef uint16_t hdma_table[8]      # A2An
+    cdef uint8_t hdma_line[8]        # NTRLn
+    cdef uint8_t dma_unused[8]
+    cdef int hdma_active[8]
+    cdef int hdma_do_transfer[8]
+    cdef uint8_t hdma_enabled
+    cdef uint8_t dma_enabled
+
+    # -- interface ---------------------------------------------------------
+    cdef uint8_t read8(self, uint32_t addr) noexcept
+    cdef void write8(self, uint32_t addr, uint8_t value) noexcept
+    cdef uint8_t read8_fast(self, uint32_t addr) noexcept   # no MDR/side effects
+    cdef uint32_t speed(self, uint32_t addr) noexcept
+    cdef void tick(self, int cycles) noexcept
+    cdef uint8_t read_mmio(self, uint32_t addr) noexcept
+    cdef void write_mmio(self, uint32_t addr, uint8_t value) noexcept
+    cdef void run_dma(self, uint8_t channels) noexcept
+    cdef void hdma_init(self) noexcept
+    cdef void hdma_run(self) noexcept
+    cdef void poll_joypads(self) noexcept
+
+    # -- internals ---------------------------------------------------------
+    cdef void _map_low_sram(self, uint32_t page, uint32_t bank) noexcept
+    cdef void _map_rom(self, uint32_t page, uint32_t bank, uint32_t addr) noexcept
+    cdef uint8_t _dma_read_a(self, uint32_t addr) noexcept
+    cdef void _dma_write_b(self, uint8_t bbus, uint8_t value) noexcept
+    cdef uint8_t _dma_read_b(self, uint8_t bbus) noexcept
+    cdef uint16_t _hdma_fetch16(self, int ch) noexcept
+    cdef void _check_irq(self) noexcept
+    cdef void _next_line(self) noexcept

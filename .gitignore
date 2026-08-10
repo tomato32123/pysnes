@@ -1,0 +1,11 @@
+build/
+*.pyd
+*.so
+snes/*.c
+*.html
+__pycache__/
+shots/
+saves/
+roms/
+*.state
+*.srm

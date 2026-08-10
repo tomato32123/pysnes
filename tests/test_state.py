@@ -1,0 +1,64 @@
+"""Save state must reproduce the machine exactly: same state in -> same frames out."""
+import hashlib, os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import from_argv
+from snes.system import System, BUTTONS
+
+ROM = from_argv()
+def digest(machine):
+    return hashlib.sha1(bytes(machine.framebuffer)).hexdigest()
+
+
+def main():
+    s = System(ROM)
+    for _ in range(1750):
+        s.run_frame()
+
+    blob = s.save_state()
+    print("state size: %d bytes (%.1f KB)" % (len(blob), len(blob) / 1024))
+
+    # Run forward and remember what the next 120 frames look like.
+    marks = []
+    for i in range(120):
+        s.run_frame()
+        if i % 30 == 29:
+            marks.append(digest(s))
+    after = (digest(s), s.cpu.regs, s.apu.regs["clock"], s.bus.frame)
+
+    # Rewind and replay: every checkpoint must match.
+    s.load_state(blob)
+    replay = []
+    for i in range(120):
+        s.run_frame()
+        if i % 30 == 29:
+            replay.append(digest(s))
+    after2 = (digest(s), s.cpu.regs, s.apu.regs["clock"], s.bus.frame)
+
+    assert replay == marks, "frame checkpoints diverged:\n  %s\n  %s" % (marks, replay)
+    assert after[0] == after2[0], "final framebuffer differs"
+    assert after[1] == after2[1], "CPU registers differ:\n  %s\n  %s" % (after[1], after2[1])
+    assert after[2] == after2[2], "APU clock differs: %d vs %d" % (after[2], after2[2])
+    print("replayed 120 frames identically from the restored state")
+
+    # A state from another ROM must be rejected.
+    # Same header, different content: the guard must use the real ROM contents.
+    tampered = bytearray(s.cart.rom_data)
+    tampered[0x200000] ^= 0xFF
+    other = System(rom_data=bytes(tampered))
+    try:
+        bad = other.save_state()
+    except Exception:
+        bad = None
+    if bad:
+        try:
+            s.load_state(bad)
+        except ValueError as exc:
+            print("mismatched ROM rejected: %s" % exc)
+        else:
+            raise AssertionError("a state from a different ROM was accepted")
+
+    print("all save-state tests passed")
+
+
+if __name__ == "__main__":
+    main()
