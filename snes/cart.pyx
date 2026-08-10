@@ -13,6 +13,7 @@ cdef enum:
     H_ROMTYPE    = 0x26
     H_ROMSIZE    = 0x27
     H_RAMSIZE    = 0x28
+    H_COUNTRY    = 0x29
     H_CKSUM_COMP = 0x2C   # 2 bytes
     H_CKSUM      = 0x2E   # 2 bytes
     H_VEC_NATIVE = 0x30   # $FFE0..$FFEF
@@ -213,6 +214,10 @@ cdef class Cart:
         self.computed_checksum = total & 0xFFFF
         self.checksum_ok = 1 if self.computed_checksum == self.checksum else 0
 
+        # Country byte: $02-$0C are the PAL territories, bar Korea ($0D).
+        self.region = rom[self.header_offset + H_COUNTRY]
+        self.is_pal = 1 if (0x02 <= self.region <= 0x0C or self.region in (0x10, 0x11)) else 0
+
         ram_k = rom[self.header_offset + H_RAMSIZE]
         self.sram_size = (<uint32_t>1024 << ram_k) if 0 < ram_k <= 0x09 else 0
 
@@ -254,6 +259,7 @@ cdef class Cart:
             "rom size   : %d bytes (%d Mbit)\n"
             "sram size  : %d bytes\n"
             "chipset    : $%02X%s\n"
+            "region     : $%02X (%s)\n"
             "checksum   : $%04X (computed $%04X) %s\n"
             "copier hdr : %s   interleaved: %s"
             % (self.title,
@@ -261,6 +267,7 @@ cdef class Cart:
                self.rom_size, self.rom_size // 131072,
                self.sram_size,
                self.coprocessor, " battery" if self.has_battery else "",
+               self.region, "PAL" if self.is_pal else "NTSC",
                self.checksum, self.computed_checksum,
                "OK" if self.checksum_ok else "MISMATCH",
                bool(self.had_copier_header), bool(self.was_interleaved))

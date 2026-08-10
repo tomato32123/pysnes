@@ -80,6 +80,7 @@ cdef class APU:
     cdef int64_t cycle_target       # absolute target, so overshoot is carried
     cdef int64_t master_prev
     cdef int64_t frac
+    cdef public int64_t master_hz
     cdef int32_t dsp_counter        # APU cycles until the next 32 kHz sample
     cdef int extra_cycles           # added by taken branches
     cdef int stopped                # STOP/SLEEP executed

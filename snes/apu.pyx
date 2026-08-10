@@ -704,6 +704,7 @@ cdef class APU:
         self.cycle_target = 0
         self.master_prev = 0
         self.frac = 0
+        self.master_hz = MASTER_HZ
         self.dsp_counter = DSP_DIV
         self.extra_cycles = 0
         self.stopped = 0
@@ -728,8 +729,8 @@ cdef class APU:
             return
         self.master_prev = master_clock
         self.frac += delta * APU_HZ
-        self.cycle_target += self.frac // MASTER_HZ
-        self.frac %= MASTER_HZ
+        self.cycle_target += self.frac // self.master_hz
+        self.frac %= self.master_hz
         while self.clock < self.cycle_target:
             if self.stopped:
                 self.tick(<int>(self.cycle_target - self.clock))

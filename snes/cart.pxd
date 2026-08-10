@@ -23,6 +23,8 @@ cdef class Cart:
     cdef readonly int coprocessor           # chipset byte at $FFD6
     cdef readonly int had_copier_header
     cdef readonly int was_interleaved
+    cdef readonly int region          # country byte at $FFD9
+    cdef readonly int is_pal
     cdef readonly uint32_t header_offset
     cdef readonly uint32_t checksum
     cdef readonly uint32_t checksum_complement

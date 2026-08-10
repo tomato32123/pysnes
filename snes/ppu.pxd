@@ -88,6 +88,7 @@ cdef class PPU:
 
     # -- counters / status ---------------------------------------------------
     cdef int hcounter, vcounter, field
+    cdef public int pal
     cdef int latched
     cdef uint16_t hcounter_latch, vcounter_latch
     cdef int hcounter_flip, vcounter_flip

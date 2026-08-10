@@ -433,6 +433,8 @@ cdef class PPU:
 
         if reg == 0x3F:                                   # STAT78
             result = 0x03                                  # PPU2 version
+            if self.pal:
+                result |= 0x10                             # 50 Hz part
             if self.field:
                 result |= 0x80
             if self.latched:

@@ -173,6 +173,14 @@ loader scores the header both ways and keeps whichever looks more
 plausible; in a 66-ROM library this recovered six games that had been
 booting into garbage.
 
+### PAL
+
+The region comes from the header's country byte.  PAL images run 312 lines
+per frame against NTSC's 262, use the 21.28 MHz master clock, and report
+50 Hz in STAT78 bit 4.  Without that last bit a European cartridge stops at
+its own lockout screen -- Donkey Kong Country was displaying "this game pak
+is not designed for use on your Super Famicom" rather than booting.
+
 ### Where saves go
 
 Battery saves are written to `saves/<rom name>.srm` inside this project, never

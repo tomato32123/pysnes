@@ -20,6 +20,10 @@ cdef enum:
     LINES_NTSC = 262
     LINES_PAL = 312
 
+# Master clock in each region; the APU keeps its own crystal either way.
+DEF MASTER_HZ_NTSC = 21477272
+DEF MASTER_HZ_PAL = 21281370
+
 
 # Bytes written per transfer unit, and the B-bus offset pattern, for each of
 # the eight DMA transfer modes.
@@ -131,8 +135,11 @@ cdef class Bus:
         self.frame = 0
         self.frame_ready = 0
         self.ticking = 0
-        self.lines_per_frame = LINES_NTSC
+        self.pal = self.cart.is_pal
+        self.lines_per_frame = LINES_PAL if self.pal else LINES_NTSC
         self.vblank_start = 225
+        self.ppu.pal = self.pal
+        self.apu.master_hz = MASTER_HZ_PAL if self.pal else MASTER_HZ_NTSC
 
         self.nmi_enabled = 0
         self.nmi_flag = 0

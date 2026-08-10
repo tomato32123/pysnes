@@ -37,6 +37,7 @@ cdef class Bus:
     cdef int frame_ready
     cdef int ticking          # guards tick() against re-entry from HDMA/DMA
     cdef int lines_per_frame
+    cdef readonly int pal
     cdef int vblank_start            # 225 or 240 with overscan
 
     # -- interrupts --------------------------------------------------------
