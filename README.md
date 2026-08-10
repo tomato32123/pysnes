@@ -257,6 +257,28 @@ to, so another emulator's saves stay intact.
 per class, so the save and load halves cannot drift apart. Re-run it and
 rebuild after adding a field to any core.
 
+## Accuracy and tests
+
+Test ROMs live in this repository as 65816 source.  `tools/asm65816.py` is a
+small assembler whose opcode table is inverted from the disassembler's, so
+the two cannot disagree; `tools/testrom.py` wraps a fragment in a real LoROM
+image, boots it through the ordinary cartridge path and reads back what the
+program wrote to WRAM.  Tests therefore assert on values the emulated
+program computed.
+
+The CPU can emit a deterministic trace -- one record per instruction, and
+optionally per bus access, each stamped with the master clock -- which
+`tools/tracefmt.py` renders as canonical text.  Two traces line up cycle by
+cycle, so `first_difference` locates the exact instruction where this
+emulator and a reference diverge.
+
+```
+python tools/runtests.py             # every test module
+```
+
+`docs/accuracy.md` records where the emulator stands against hardware
+behaviour and what is parked.
+
 ## Tools
 
 Each tool takes the ROM as its first argument, or reads `$PYSNES_ROM`, or

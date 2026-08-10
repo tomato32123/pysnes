@@ -12,6 +12,7 @@ and taken branches pay one more when they cross a page in emulation mode.
 from cpython.bytes cimport PyBytes_FromStringAndSize
 from libc.string cimport memcpy
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, int8_t, int16_t, int32_t, int64_t
+from libc.stdlib cimport malloc, free
 
 from snes.bus cimport Bus
 
@@ -43,7 +44,19 @@ cdef class CPU:
 
     def __init__(self, Bus bus):
         self.bus = bus
+        self.tracing = 0
+        self.insn_log = NULL
+        self.bus_log = NULL
+        self.insn_cap = 0
+        self.bus_cap = 0
+        self.trace_wrap = 0
         self.reset()
+
+    def __dealloc__(self):
+        if self.insn_log != NULL:
+            free(self.insn_log)
+        if self.bus_log != NULL:
+            free(self.bus_log)
 
     cdef void reset(self) noexcept:
         self.a = 0
@@ -59,6 +72,8 @@ cdef class CPU:
         self.waiting = 0
         self.instructions = 0
         self.ea_wrap = 0
+        self.insn_len = 0
+        self.bus_len = 0
         self.pc = (<uint16_t>self.bus.read8(VEC_EMU_RESET)
                    | (<uint16_t>self.bus.read8(VEC_EMU_RESET + 1) << 8))
 
@@ -70,12 +85,54 @@ cdef class CPU:
         self.bus.tick(6)
 
     cdef inline uint8_t read(self, uint32_t addr) noexcept:
+        cdef uint8_t value
         self.bus.tick(<int>self.bus.speed(addr))
-        return self.bus.read8(addr)
+        value = self.bus.read8(addr)
+        if self.tracing >= 2:
+            self._log_bus(addr, value, 0)
+        return value
 
     cdef inline void write(self, uint32_t addr, uint8_t value) noexcept:
         self.bus.tick(<int>self.bus.speed(addr))
         self.bus.write8(addr, value)
+        if self.tracing >= 2:
+            self._log_bus(addr, value, 1)
+
+    cdef void _log_bus(self, uint32_t addr, uint8_t value, int write) noexcept:
+        cdef int i
+        if self.bus_len >= self.bus_cap:
+            if not self.trace_wrap:
+                return
+            for i in range(self.bus_cap - 1):
+                self.bus_log[i] = self.bus_log[i + 1]
+            self.bus_len = self.bus_cap - 1
+        self.bus_log[self.bus_len].clock = self.bus.master_clock
+        self.bus_log[self.bus_len].addr = addr
+        self.bus_log[self.bus_len].value = value
+        self.bus_log[self.bus_len].write = <unsigned char>write
+        self.bus_len += 1
+
+    cdef void _log_insn(self, uint8_t op) noexcept:
+        cdef int i
+        if self.insn_len >= self.insn_cap:
+            if not self.trace_wrap:
+                return
+            for i in range(self.insn_cap - 1):
+                self.insn_log[i] = self.insn_log[i + 1]
+            self.insn_len = self.insn_cap - 1
+        self.insn_log[self.insn_len].clock = self.bus.master_clock
+        self.insn_log[self.insn_len].pc = self.pc
+        self.insn_log[self.insn_len].a = self.a
+        self.insn_log[self.insn_len].x = self.x
+        self.insn_log[self.insn_len].y = self.y
+        self.insn_log[self.insn_len].s = self.s
+        self.insn_log[self.insn_len].d = self.d
+        self.insn_log[self.insn_len].pb = self.pb
+        self.insn_log[self.insn_len].db = self.db
+        self.insn_log[self.insn_len].p = self.p
+        self.insn_log[self.insn_len].e = <unsigned char>self.e
+        self.insn_log[self.insn_len].op = op
+        self.insn_len += 1
 
     cdef inline uint8_t fetch(self) noexcept:
         cdef uint32_t addr = (<uint32_t>self.pb << 16) | self.pc
@@ -559,6 +616,10 @@ cdef class CPU:
                 self.interrupt(VEC_NATIVE_IRQ, 0)
             return
 
+        if self.tracing:
+            # State before the fetch, so a record describes the machine as the
+            # instruction saw it.
+            self._log_insn(self.bus.read8_fast((<uint32_t>self.pb << 16) | self.pc))
         op = self.fetch()
         self.instructions += 1
         self.execute(op)
@@ -1390,6 +1451,62 @@ cdef class CPU:
     # =====================================================================
     # python interface
     # =====================================================================
+
+    # -- deterministic trace -------------------------------------------------
+
+    def trace_start(self, int capacity=200000, int level=1, bint wrap=False):
+        """level 1 records instructions, level 2 also records every bus access."""
+        self.trace_stop()
+        self.insn_cap = capacity
+        self.bus_cap = capacity * 4 if level >= 2 else 1
+        self.insn_log = <InsnRec *>malloc(self.insn_cap * sizeof(InsnRec))
+        self.bus_log = <BusRec *>malloc(self.bus_cap * sizeof(BusRec))
+        if self.insn_log == NULL or self.bus_log == NULL:
+            self.trace_stop()
+            raise MemoryError("could not allocate the trace buffers")
+        self.insn_len = 0
+        self.bus_len = 0
+        self.trace_wrap = 1 if wrap else 0
+        self.tracing = level
+
+    def trace_stop(self):
+        self.tracing = 0
+        if self.insn_log != NULL:
+            free(self.insn_log)
+            self.insn_log = NULL
+        if self.bus_log != NULL:
+            free(self.bus_log)
+            self.bus_log = NULL
+        self.insn_cap = 0
+        self.bus_cap = 0
+
+    def trace_reset(self):
+        self.insn_len = 0
+        self.bus_len = 0
+
+    @property
+    def trace_full(self):
+        return self.insn_len >= self.insn_cap
+
+    def trace_instructions(self):
+        """[(clock, pb, pc, op, a, x, y, s, d, db, p, e), ...]"""
+        cdef int i
+        out = []
+        for i in range(self.insn_len):
+            out.append((self.insn_log[i].clock, self.insn_log[i].pb, self.insn_log[i].pc,
+                        self.insn_log[i].op, self.insn_log[i].a, self.insn_log[i].x,
+                        self.insn_log[i].y, self.insn_log[i].s, self.insn_log[i].d,
+                        self.insn_log[i].db, self.insn_log[i].p, self.insn_log[i].e))
+        return out
+
+    def trace_bus(self):
+        """[(clock, addr, value, is_write), ...]"""
+        cdef int i
+        out = []
+        for i in range(self.bus_len):
+            out.append((self.bus_log[i].clock, self.bus_log[i].addr,
+                        self.bus_log[i].value, bool(self.bus_log[i].write)))
+        return out
 
     @property
     def regs(self):

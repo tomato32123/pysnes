@@ -4,6 +4,20 @@ from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
 from snes.bus cimport Bus
 
 
+cdef struct InsnRec:
+    int64_t clock
+    unsigned short pc, a, x, y, s, d
+    unsigned char pb, db, p, e, op
+
+
+cdef struct BusRec:
+    int64_t clock
+    unsigned int addr
+    unsigned char value
+    unsigned char write
+
+
+
 cdef class CPU:
     cdef readonly Bus bus
 
@@ -20,10 +34,20 @@ cdef class CPU:
     # direct page (emulation mode with DL == 0).
     cdef int ea_wrap
 
+    # -- deterministic trace -------------------------------------------
+    cdef int tracing                 # 0 off, 1 instructions, 2 + bus
+    cdef InsnRec *insn_log
+    cdef BusRec *bus_log
+    cdef int insn_cap, insn_len
+    cdef int bus_cap, bus_len
+    cdef int trace_wrap              # keep the newest records once full
+
     cdef void reset(self) noexcept
     cdef void step(self) noexcept
     cdef void execute(self, uint8_t op) noexcept
     cdef void interrupt(self, uint16_t vector, int is_brk) noexcept
+    cdef void _log_bus(self, uint32_t addr, uint8_t value, int write) noexcept
+    cdef void _log_insn(self, uint8_t op) noexcept
 
     # -- bus primitives ----------------------------------------------------
     cdef void io(self) noexcept
