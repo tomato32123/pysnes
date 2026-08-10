@@ -30,15 +30,18 @@ cdef class Bus:
 
     # -- timing ------------------------------------------------------------
     cdef int64_t master_clock
-    cdef int hcount                  # master cycles into the current scanline
+    cdef int hcount                  # unused; the H counter is derived now
+    cdef int64_t line_start          # master clock at the start of this line
+    cdef int64_t ev_time[5]          # absolute deadline per event kind
+    cdef int64_t next_event          # cached earliest deadline
     cdef int vcount                  # current scanline
     cdef int field
     cdef readonly int64_t frame
     cdef int frame_ready
     cdef int ticking          # guards tick() against re-entry from HDMA/DMA
-    cdef int lines_per_frame
+    cdef readonly int lines_per_frame
     cdef readonly int pal
-    cdef int vblank_start            # 225 or 240 with overscan
+    cdef readonly int vblank_start   # 225, or 240 with overscan
 
     # -- interrupts --------------------------------------------------------
     cdef int nmi_enabled
@@ -105,5 +108,10 @@ cdef class Bus:
     cdef void _dma_write_b(self, uint8_t bbus, uint8_t value) noexcept
     cdef uint8_t _dma_read_b(self, uint8_t bbus) noexcept
     cdef uint16_t _hdma_fetch16(self, int ch) noexcept
-    cdef void _check_irq(self) noexcept
-    cdef void _next_line(self) noexcept
+    cdef void _schedule(self, int kind, int64_t when) noexcept
+    cdef void _cancel(self, int kind) noexcept
+    cdef void _rescan(self) noexcept
+    cdef void _run_events(self) noexcept
+    cdef void _event_line(self, int64_t when) noexcept
+    cdef void _arm_irq(self, int64_t line_start) noexcept
+    cdef int _hcount(self) noexcept

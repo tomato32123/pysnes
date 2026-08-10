@@ -16,7 +16,7 @@ What that leaves:
 | | state |
 | --- | --- |
 | S-CPU timing | bus-access driven, with the datasheet's idle-cycle rules |
-| Central scheduler | **none** — the CPU is an implicit master and the rest catch up |
+| Central scheduler | events on absolute deadlines: line, HDMA, IRQ, joypad, APU |
 | PPU granularity | **scanline** — a mid-scanline register write is lost |
 | Deterministic trace | instructions and bus accesses, with the master clock |
 | Test-ROM regression suite | CPU flags, addressing, decimal, RMW, block move, timing |
@@ -60,15 +60,31 @@ to slow ROM is 8 master cycles and an internal cycle is 6, so an instruction
 the datasheet calls "2 cycles" -- one fetch plus one internal cycle -- must
 take 14. `LDA dp` must take 24, and 30 when the low byte of D is non-zero.
 
+## The scheduler
+
+Time has one owner.  Anything that must happen at a particular master cycle is
+registered with an absolute deadline, and `tick()` advances the clock and fires
+whatever has come due, earliest first.  The hot path stays a single comparison:
+the earliest deadline is cached and recomputed only when an event is scheduled
+or fires.
+
+This replaced a version that tested every condition on every bus access and
+acted on line boundaries, which put an IRQ at the first access *after* its dot
+rather than at the dot, and ran HDMA at the end of a line rather than at dot
+278.  Events now sit where the hardware puts them.
+
+Interrupts are still taken at instruction boundaries, as on hardware, so a
+measured handler entry can be up to one instruction late.  The timing tests
+assert on the accumulated span across many periods rather than on individual
+gaps, which distinguishes that jitter from drift.
+
 ## Next
 
-1. **Central scheduler.** Give time its own owner, and let each device advance
-   to a deadline rather than having the CPU drag everything along behind it.
-2. **Dot-aware PPU.** Render from the H counter so that scroll, mode, window,
+1. **Dot-aware PPU.** Render from the H counter so that scroll, mode, window,
    colour-math and brightness writes take effect from the dot they happen at.
    This is what mid-scanline effects need, and it is the part of the internal
    state a 2.5D renderer would consume.
-3. **Widen the suite** as each of those lands: PPU register timing, H/V
+2. **Widen the suite** as each of those lands: PPU register timing, H/V
    counter latching, DMA and HDMA cycle costs, NMI and IRQ edges.
 
 ## Parked

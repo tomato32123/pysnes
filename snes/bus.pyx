@@ -20,6 +20,8 @@ cdef enum:
     # holds $4212 bit 0 for this many master cycles -- about three lines.
     JOYPAD_READ_CYCLES = 4224
     CYCLES_PER_LINE = 1364
+    HDMA_DOT = 278              # HDMA transfers late in the line, not at its end
+    APU_SYNC_CYCLES = 1364      # catch the APU up at least once per line
     LINES_NTSC = 262
     LINES_PAL = 312
 
@@ -41,6 +43,18 @@ DMA_OFF[4][:] = [0, 1, 2, 3]
 DMA_OFF[5][:] = [0, 1, 0, 1]
 DMA_OFF[6][:] = [0, 0, 0, 0]
 DMA_OFF[7][:] = [0, 0, 1, 1]
+
+
+cdef enum:
+    EV_LINE = 0
+    EV_HDMA = 1
+    EV_IRQ = 2
+    EV_JOYPAD = 3
+    EV_APU = 4
+    EV_COUNT = 5
+
+
+DEF NEVER = 0x7FFFFFFFFFFFFFFF
 
 
 cdef class Bus:
@@ -132,12 +146,16 @@ cdef class Bus:
         memset(self.wram, 0x55, sizeof(self.wram))
         self.mdr = 0
         self.master_clock = 0
+        self.line_start = 0
         self.hcount = 0
         self.vcount = 0
         self.field = 0
         self.frame = 0
         self.frame_ready = 0
         self.ticking = 0
+        for i in range(EV_COUNT):
+            self.ev_time[i] = NEVER
+        self.next_event = NEVER
         self.pal = self.cart.is_pal
         self.lines_per_frame = LINES_PAL if self.pal else LINES_NTSC
         self.vblank_start = 225
@@ -190,6 +208,10 @@ cdef class Bus:
             self.hdma_do_transfer[i] = 0
         self.hdma_enabled = 0
         self.dma_enabled = 0
+
+        # Prime the timeline.
+        self._schedule(EV_LINE, CYCLES_PER_LINE)
+        self._schedule(EV_APU, APU_SYNC_CYCLES)
 
     # =====================================================================
     # access speed
@@ -272,6 +294,8 @@ cdef class Bus:
         cdef uint8_t v
 
         if 0x2100 <= a <= 0x213F:
+            self.ppu.hcounter = self._hcount() >> 2
+            self.ppu.vcounter = self.vcount
             return self.ppu.read_reg(a)
 
         if 0x2140 <= a <= 0x217F:
@@ -311,7 +335,7 @@ cdef class Bus:
             v = self.mdr & 0x3E
             if self.in_vblank:
                 v |= 0x80
-            if self.in_hblank:
+            if self._hcount() >= 1096:                    # H-blank from dot 274
                 v |= 0x40
             if self.auto_joypad_busy:
                 v |= 0x01
@@ -404,6 +428,9 @@ cdef class Bus:
             if self.irq_mode == 0:
                 self.irq_flag = 0
                 self.irq_pending = 0
+                self._cancel(EV_IRQ)
+            else:
+                self._arm_irq(self.line_start)
             # Enabling NMI while the flag is already set fires immediately.
             if (value & 0x80) and not self.nmi_enabled and self.nmi_flag:
                 self.nmi_pending = 1
@@ -438,15 +465,19 @@ cdef class Bus:
             return
         if a == 0x4207:
             self.htime = (self.htime & 0x100) | value
+            self._arm_irq(self.line_start)
             return
         if a == 0x4208:
             self.htime = (self.htime & 0x0FF) | ((<uint16_t>value & 1) << 8)
+            self._arm_irq(self.line_start)
             return
         if a == 0x4209:
             self.vtime = (self.vtime & 0x100) | value
+            self._arm_irq(self.line_start)
             return
         if a == 0x420A:
             self.vtime = (self.vtime & 0x0FF) | ((<uint16_t>value & 1) << 8)
+            self._arm_irq(self.line_start)
             return
         if a == 0x420B:                                   # MDMAEN
             self.dma_enabled = value
@@ -631,52 +662,80 @@ cdef class Bus:
     # =====================================================================
     # timing
     # =====================================================================
+    #
+    # Time has one owner.  Each thing that must happen at a particular master
+    # cycle is registered as an event with an absolute deadline, and tick()
+    # advances the clock and fires whatever has come due, earliest first.
+    #
+    # The previous arrangement checked every condition on every bus access and
+    # acted on line boundaries, which made an IRQ fire at the first access
+    # after its dot rather than at the dot.  Deadlines put those events where
+    # the hardware puts them.
+    #
+    # The hot path stays one comparison: the earliest deadline is cached, and
+    # only recomputed when an event is scheduled or fires.
+
+    cdef inline void _schedule(self, int kind, int64_t when) noexcept:
+        self.ev_time[kind] = when
+        if when < self.next_event:
+            self.next_event = when
+
+    cdef inline void _cancel(self, int kind) noexcept:
+        self.ev_time[kind] = NEVER
+        self._rescan()
+
+    cdef void _rescan(self) noexcept:
+        cdef int i
+        cdef int64_t best = NEVER
+        for i in range(EV_COUNT):
+            if self.ev_time[i] < best:
+                best = self.ev_time[i]
+        self.next_event = best
 
     cdef void tick(self, int cycles) noexcept:
         self.master_clock += cycles
-        self.hcount += cycles
         if self.ticking:
+            # DMA and HDMA charge their own cycles from inside an event; the
+            # outer tick owns event processing.
             return
-        self.ticking = 1
+        if self.master_clock >= self.next_event:
+            self.ticking = 1
+            self._run_events()
+            self.ticking = 0
 
-        # H-blank starts around dot 274 (cycle 1096).
-        self.in_hblank = 1 if self.hcount >= 1096 else 0
+    cdef void _run_events(self) noexcept:
+        cdef int i, which
+        cdef int64_t when
+        while True:
+            which = -1
+            when = NEVER
+            for i in range(EV_COUNT):
+                if self.ev_time[i] < when:
+                    when = self.ev_time[i]
+                    which = i
+            if which < 0 or when > self.master_clock:
+                self.next_event = when
+                return
+            self.ev_time[which] = NEVER
+            if which == EV_LINE:
+                self._event_line(when)
+            elif which == EV_HDMA:
+                self.hdma_run()
+            elif which == EV_IRQ:
+                self.irq_flag = 1
+                self.irq_pending = 1
+                self.irq_count += 1
+            elif which == EV_JOYPAD:
+                self.auto_joypad_busy = 0
+            else:
+                self.apu.run_until(self.master_clock)
+                self._schedule(EV_APU, self.master_clock + APU_SYNC_CYCLES)
 
-        if self.auto_joypad_busy and self.master_clock >= self.joypad_busy_until:
-            self.auto_joypad_busy = 0
-
-        if self.irq_mode and not self.irq_line_done:
-            self._check_irq()
-
-        while self.hcount >= CYCLES_PER_LINE:
-            self.hcount -= CYCLES_PER_LINE
-            self._next_line()
-        self.ticking = 0
-
-    cdef void _check_irq(self) noexcept:
-        cdef int trigger = 0
-        cdef int dot = self.hcount >> 2
-        if self.irq_mode == 1:                            # H only
-            trigger = 1 if dot >= self.htime else 0
-        elif self.irq_mode == 2:                          # V only
-            trigger = 1 if (self.vcount == self.vtime and self.hcount >= 0) else 0
-        elif self.irq_mode == 3:                          # H and V
-            trigger = 1 if (self.vcount == self.vtime and dot >= self.htime) else 0
-        if trigger:
-            self.irq_flag = 1
-            self.irq_pending = 1
-            self.irq_line_done = 1
-            self.irq_count += 1
-
-    cdef void _next_line(self) noexcept:
+    cdef void _event_line(self, int64_t when) noexcept:
+        """Start of a scanline."""
+        self.line_start = when
         self.vcount += 1
-        self.irq_line_done = 0
         self.in_hblank = 0
-
-        # The APU must be driven from the timeline, not only when the S-CPU
-        # touches $2140-$2143: once a game has handed the sound driver its
-        # commands it may never poll the ports again.
-        self.apu.run_until(self.master_clock)
 
         if self.vcount >= self.lines_per_frame:
             self.vcount = 0
@@ -695,34 +754,59 @@ cdef class Bus:
                 self.nmi_pending = 1
                 self.nmi_count += 1
             if self.auto_joypad:
-                # Games wait for bit 0 of $4212 to go high and then low again;
+                # Games watch bit 0 of $4212 go high and then low again;
                 # leaving it permanently low hangs them at boot.
                 self.auto_joypad_busy = 1
-                self.joypad_busy_until = self.master_clock + JOYPAD_READ_CYCLES
                 self.poll_joypads()
+                self._schedule(EV_JOYPAD, when + JOYPAD_READ_CYCLES)
             self.frame_ready = 1
         elif self.vcount == 0:
             self.in_vblank = 0
 
         if 1 <= self.vcount <= self.vblank_start:
             self.ppu.render_scanline(self.vcount - 1)
-        if self.vcount < self.vblank_start:
-            self.hdma_run()
+
+        # HDMA runs late in the line, not at the boundary.
+        if self.vcount < self.vblank_start and self.hdma_enabled:
+            self._schedule(EV_HDMA, when + HDMA_DOT * 4)
+
+        self._arm_irq(when)
+        self._schedule(EV_LINE, when + CYCLES_PER_LINE)
+
+    cdef void _arm_irq(self, int64_t line_start) noexcept:
+        """Place this line's IRQ at the exact cycle its condition is met."""
+        cdef int64_t at
+        if self.irq_mode == 0:
+            return
+        if self.irq_mode == 2:                       # V match, at dot 0
+            if self.vcount != self.vtime:
+                return
+            at = line_start
+        elif self.irq_mode == 1:                     # H match, every line
+            at = line_start + <int64_t>self.htime * 4
+        else:                                        # H and V
+            if self.vcount != self.vtime:
+                return
+            at = line_start + <int64_t>self.htime * 4
+        if at <= self.master_clock:
+            at = self.master_clock + 1
+        self._schedule(EV_IRQ, at)
+
+    cdef inline int _hcount(self) noexcept:
+        return <int>(self.master_clock - self.line_start)
 
     cdef void poll_joypads(self) noexcept:
         cdef int i
         for i in range(4):
             self.joy[i] = self.pad_state[i]
 
-
-
-
-
     # -- save state (generated by tools/gen_state.py; do not edit) --------
 
     def state_ints(self):
         cdef int i, j
-        v = [self.mdr, self.master_clock, self.hcount, self.vcount, self.field, self.frame, self.frame_ready, self.ticking, self.lines_per_frame, self.vblank_start, self.nmi_enabled, self.nmi_flag, self.nmi_pending, self.irq_mode, self.irq_flag, self.irq_pending, self.irq_line_done, self.in_vblank, self.in_hblank, self.htime, self.vtime, self.fast_rom, self.wrio, self.mul_a, self.mul_b, self.div_a, self.div_b, self.rd_div, self.rd_mpy, self.wram_addr, self.auto_joypad, self.auto_joypad_busy, self.joypad_busy_until, self.pad_latched, self.hdma_enabled, self.dma_enabled]
+        v = [self.mdr, self.master_clock, self.hcount, self.line_start, self.next_event, self.vcount, self.field, self.frame, self.frame_ready, self.ticking, self.lines_per_frame, self.vblank_start, self.nmi_enabled, self.nmi_flag, self.nmi_pending, self.irq_mode, self.irq_flag, self.irq_pending, self.irq_line_done, self.in_vblank, self.in_hblank, self.htime, self.vtime, self.fast_rom, self.wrio, self.mul_a, self.mul_b, self.div_a, self.div_b, self.rd_div, self.rd_mpy, self.wram_addr, self.auto_joypad, self.auto_joypad_busy, self.joypad_busy_until, self.pad_latched, self.hdma_enabled, self.dma_enabled]
+        for i in range(5):
+            v.append(self.ev_time[i])
         for i in range(4):
             v.append(self.pad_state[i])
         for i in range(4):
@@ -752,43 +836,48 @@ cdef class Bus:
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 36
+        cdef int i, j, k = 38
         self.mdr = v[0]
         self.master_clock = v[1]
         self.hcount = v[2]
-        self.vcount = v[3]
-        self.field = v[4]
-        self.frame = v[5]
-        self.frame_ready = v[6]
-        self.ticking = v[7]
-        self.lines_per_frame = v[8]
-        self.vblank_start = v[9]
-        self.nmi_enabled = v[10]
-        self.nmi_flag = v[11]
-        self.nmi_pending = v[12]
-        self.irq_mode = v[13]
-        self.irq_flag = v[14]
-        self.irq_pending = v[15]
-        self.irq_line_done = v[16]
-        self.in_vblank = v[17]
-        self.in_hblank = v[18]
-        self.htime = v[19]
-        self.vtime = v[20]
-        self.fast_rom = v[21]
-        self.wrio = v[22]
-        self.mul_a = v[23]
-        self.mul_b = v[24]
-        self.div_a = v[25]
-        self.div_b = v[26]
-        self.rd_div = v[27]
-        self.rd_mpy = v[28]
-        self.wram_addr = v[29]
-        self.auto_joypad = v[30]
-        self.auto_joypad_busy = v[31]
-        self.joypad_busy_until = v[32]
-        self.pad_latched = v[33]
-        self.hdma_enabled = v[34]
-        self.dma_enabled = v[35]
+        self.line_start = v[3]
+        self.next_event = v[4]
+        self.vcount = v[5]
+        self.field = v[6]
+        self.frame = v[7]
+        self.frame_ready = v[8]
+        self.ticking = v[9]
+        self.lines_per_frame = v[10]
+        self.vblank_start = v[11]
+        self.nmi_enabled = v[12]
+        self.nmi_flag = v[13]
+        self.nmi_pending = v[14]
+        self.irq_mode = v[15]
+        self.irq_flag = v[16]
+        self.irq_pending = v[17]
+        self.irq_line_done = v[18]
+        self.in_vblank = v[19]
+        self.in_hblank = v[20]
+        self.htime = v[21]
+        self.vtime = v[22]
+        self.fast_rom = v[23]
+        self.wrio = v[24]
+        self.mul_a = v[25]
+        self.mul_b = v[26]
+        self.div_a = v[27]
+        self.div_b = v[28]
+        self.rd_div = v[29]
+        self.rd_mpy = v[30]
+        self.wram_addr = v[31]
+        self.auto_joypad = v[32]
+        self.auto_joypad_busy = v[33]
+        self.joypad_busy_until = v[34]
+        self.pad_latched = v[35]
+        self.hdma_enabled = v[36]
+        self.dma_enabled = v[37]
+        for i in range(5):
+            self.ev_time[i] = v[k + i]
+        k += 5
         for i in range(4):
             self.pad_state[i] = v[k + i]
         k += 4
@@ -874,7 +963,7 @@ cdef class Bus:
 
     @property
     def hcounter(self):
-        return self.hcount
+        return self._hcount()
 
     def take_frame_ready(self):
         r = self.frame_ready
