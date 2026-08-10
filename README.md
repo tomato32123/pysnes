@@ -53,6 +53,30 @@ pitch modulation, and the 8-tap FIR echo unit writing back into APU RAM.
 * Multiply/divide results appear immediately instead of after their real delay.
 * No interlace or pseudo-hires output; overscan is not extended past 239 lines.
 
+## Compatibility
+
+Boot-tested across a 66-image library with `tools/batchtest.py`, running
+each for 2400 frames and checking that something is drawn:
+
+| | count |
+| --- | --- |
+| boots and draws | 53 |
+| needs a coprocessor we do not emulate | 8 |
+| open bugs | 5 |
+
+That is 53 of the 58 images needing no coprocessor. The eight remaining
+are SA-1 (Super Mario RPG, Kirby Super Deluxe, Jikkyou Oshaberi
+Parodius, Mini Yonku Shining Scorpion), S-DD1 (Street Fighter Zero 2)
+and DSP-1 (Super Mario Kart).
+
+Give slow starters room: several titles need well over a thousand frames
+before they draw anything. Rudra no Hihou, Sim City 2000 and Zero 4
+Champ RR all looked dead at 900 frames and were fine at 2400.
+
+Still open: Dragon Ball Z Super Butouden 3, Super Puyo Puyo 2 Remix,
+Super Famista 5 (draws early, goes black later), and the SMWREX and Mix
+ROM hacks.
+
 ## Building
 
 Needs Python 3.8+, Cython, and a C compiler (MSVC Build Tools with the C++
@@ -103,7 +127,31 @@ Options: `--scale N` (window size, default 3), `--no-audio`,
 | F5 | write SRAM now |
 | Esc | quit (SRAM is written on exit) |
 
-### Building a standalone .exe
+### Compatibility
+
+Boot-tested across a 66-image library with `tools/batchtest.py`, running
+each for 2400 frames and checking that something is drawn:
+
+| | count |
+| --- | --- |
+| boots and draws | 53 |
+| needs a coprocessor we do not emulate | 8 |
+| open bugs | 5 |
+
+That is 53 of the 58 images needing no coprocessor. The eight remaining
+are SA-1 (Super Mario RPG, Kirby Super Deluxe, Jikkyou Oshaberi
+Parodius, Mini Yonku Shining Scorpion), S-DD1 (Street Fighter Zero 2)
+and DSP-1 (Super Mario Kart).
+
+Give slow starters room: several titles need well over a thousand frames
+before they draw anything. Rudra no Hihou, Sim City 2000 and Zero 4
+Champ RR all looked dead at 900 frames and were fine at 2400.
+
+Still open: Dragon Ball Z Super Butouden 3, Super Puyo Puyo 2 Remix,
+Super Famista 5 (draws early, goes black later), and the SMWREX and Mix
+ROM hacks.
+
+## Building a standalone .exe
 
 ```
 pip install pyinstaller
