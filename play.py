@@ -109,6 +109,8 @@ def main(argv=None):
     if args.frames:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
 
+    if not args.no_audio and not args.frames:
+        pygame.mixer.pre_init(frequency=32000, size=-16, channels=2, buffer=1024)
     pygame.init()
     pygame.display.set_caption("pysnes - %s" % machine.cart.title)
     screen = pygame.display.set_mode((WIDTH * args.scale, HEIGHT * args.scale))
@@ -200,6 +202,7 @@ def main(argv=None):
             running = False
 
     machine.save_sram()
+    rewind.close()
     pads.close()
     pygame.quit()
     print("stopped after %d frames" % frames)

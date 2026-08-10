@@ -74,6 +74,7 @@ cdef class APU:
 
     # -- clocking ---------------------------------------------------------
     cdef int64_t clock              # APU cycles executed so far
+    cdef int64_t cycle_target       # absolute target, so overshoot is carried
     cdef int64_t master_prev
     cdef int64_t frac
     cdef int32_t dsp_counter        # APU cycles until the next 32 kHz sample

@@ -73,6 +73,7 @@ SPECS = [
         marker="    # =====================================================================\n"
                "    # python helpers",
         scalars=["pc", "a", "x", "y", "sp", "psw", "ipl_enabled", "clock",
+                 "cycle_target",
                  "master_prev", "frac", "dsp_counter", "extra_cycles", "stopped",
                  "dsp_addr"],
         arrays=[("port_in", 4), ("port_out", 4), ("timer_target", 3),

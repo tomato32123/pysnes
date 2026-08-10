@@ -13,20 +13,27 @@ BYTES_PER_FRAME = CHANNELS * 2          # signed 16-bit stereo
 
 
 class AudioOut:
-    def __init__(self, machine, chunk_frames=1024, max_backlog_chunks=4):
+    def __init__(self, machine, chunk_frames=1024, max_backlog_chunks=6):
         self.machine = machine
         self.chunk_bytes = chunk_frames * BYTES_PER_FRAME
         self.max_backlog = self.chunk_bytes * max_backlog_chunks
 
-        if not pygame.mixer.get_init():
-            pygame.mixer.init(frequency=SAMPLE_RATE, size=-16,
-                              channels=CHANNELS, buffer=512)
+        # Sound(buffer=...) reads raw bytes in the mixer's own format -- it does
+        # not resample.  A mixer opened at 44100 would therefore replay our
+        # 32 kHz samples 1.378x too fast, so re-open it if the rate is wrong.
         got = pygame.mixer.get_init()
+        if got is not None and got[0] != SAMPLE_RATE:
+            pygame.mixer.quit()
+            got = None
+        if got is None:
+            pygame.mixer.init(frequency=SAMPLE_RATE, size=-16,
+                              channels=CHANNELS, buffer=1024)
+            got = pygame.mixer.get_init()
         if got is None:
             raise RuntimeError("could not open an audio device")
         if got[0] != SAMPLE_RATE:
-            # The mixer resamples for us, but warn since pitch accuracy suffers.
-            print("audio: device runs at %d Hz, DSP output is %d Hz" % (got[0], SAMPLE_RATE))
+            raise RuntimeError("audio device would not open at %d Hz (got %d)"
+                               % (SAMPLE_RATE, got[0]))
 
         pygame.mixer.set_num_channels(max(8, pygame.mixer.get_num_channels()))
         self.channel = pygame.mixer.Channel(0)

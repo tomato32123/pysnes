@@ -44,9 +44,11 @@ pitch modulation, and the 8-tap FIR echo unit writing back into APU RAM.
 ### Known gaps
 
 * No enhancement chips (SA-1, SuperFX, DSP-1, …). Plain LoROM/HiROM only.
-* The DSP interpolation kernel is a generated gaussian-windowed sinc normalised
-  to the hardware's 2048 gain, not a bit-exact copy of the on-chip table. It
-  sounds right but is not sample-exact.
+* The DSP interpolation kernel is a generated gaussian rather than a dump of
+  the chip's table.  Its width is solved so the peak tap lands on the real
+  table's 1305 and each group of four taps sums to 2048, which reproduces the
+  published values closely (0, 364, 368, 1308 against 0, 370, 370, 1305) but
+  is not bit-exact.
 * The DSP is modelled per 32 kHz sample rather than per hardware sub-cycle.
 * Multiply/divide results appear immediately instead of after their real delay.
 * No interlace or pseudo-hires output; overscan is not extended past 239 lines.
@@ -204,4 +206,7 @@ python tools/probe.py 3000000        # raw instruction throughput + hot PCs
 python tests/test_cart.py            # header parsing and ROM mirroring
 python tests/test_state.py           # save-state determinism
 python tests/test_rewind.py          # rewind accuracy, bounds and cost
+python tests/test_dsp.py             # DSP against an independent BRR decoder
+python tools/dumpwav.py <rom> 15     # record 15 s of audio to shots/audio.wav
+python tools/frameprof.py 900        # per-stage frame timing, with percentiles
 ```
