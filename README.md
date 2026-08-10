@@ -83,7 +83,8 @@ that can import both `snes.system` and `pygame`:
 
 Set `PYSNES_PYTHON` to skip the search and name an interpreter directly.
 
-Options: `--scale N` (window size, default 3), `--no-audio`, and `--frames N`
+Options: `--scale N` (window size, default 3), `--no-audio`,
+`--rewind-seconds N` (default 20, 0 to disable), and `--frames N`
 (run headless for N frames then exit, for testing).
 
 | Key | Button |
@@ -95,6 +96,7 @@ Options: `--scale N` (window size, default 3), `--no-audio`, and `--frames N`
 | Enter | Start |
 | Right Shift | Select |
 | Tab (hold) | fast forward |
+| Backspace (hold) | rewind |
 | F2 / F4 | save / load state |
 | F5 | write SRAM now |
 | Esc | quit (SRAM is written on exit) |
@@ -136,6 +138,7 @@ buttons sit a quarter turn round from an Xbox pad:
 | Start / Select | Menu / View | |
 | D-pad | d-pad and left stick | |
 | fast forward | right trigger | |
+| rewind | left trigger | |
 
 `config/gamepad.json` is written on first run and can be edited. `_default`
 applies to every pad; add a section keyed by the controller's name to
@@ -145,6 +148,18 @@ default — set them to a button name such as `leftstick` to use them.
 ```
 python tools/padtest.py     # live view of what each button maps to
 ```
+
+### Rewind
+
+Hold Backspace, or the left trigger, to scrub backwards. Snapshot cost set
+the design: a state is 267 KB raw and takes 0.38 ms to build, while zlib
+level 1 gets it to 87 KB for 3.4 ms and higher levels buy almost nothing.
+Recording every third frame at level 1 costs about 1.4 ms per frame against
+a 16.7 ms budget, and twenty seconds of history is roughly 45 MB.
+
+Snapshots are three emulated frames apart, so holding rewind plays back at
+3x reverse speed. The framebuffer is part of the state — rewind restores
+without rendering, so leaving it out froze the picture while scrubbing.
 
 ### Where saves go
 
@@ -165,7 +180,10 @@ to, so another emulator's saves stay intact.
 | `snes/system.pyx` | the machine: wiring, frame loop, save states |
 | `snes/audioout.py` | pygame streaming audio |
 | `play.py` | the windowed frontend |
+| `snes/gamepad.py` | SDL GameController input |
+| `snes/rewind.py` | the rewind ring buffer |
 | `tools/` | disassembler, tracer, screenshot, benchmark, soak test |
+| `docs/android.md` | why the Android port is parked, and what it needs |
 
 `tools/gen_state.py` generates the save-state serialisers from one field list
 per class, so the save and load halves cannot drift apart. Re-run it and
@@ -185,4 +203,5 @@ python tools/soak.py 30000           # long run with random input
 python tools/probe.py 3000000        # raw instruction throughput + hot PCs
 python tests/test_cart.py            # header parsing and ROM mirroring
 python tests/test_state.py           # save-state determinism
+python tests/test_rewind.py          # rewind accuracy, bounds and cost
 ```

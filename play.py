@@ -11,6 +11,7 @@ Controls
     Enter           Start
     Right Shift     Select
     Tab (hold)      fast forward
+    Backspace(hold) rewind
     F2 / F4         save / load state
     F5              save SRAM now
     Escape          quit (SRAM is written on exit)
@@ -28,6 +29,7 @@ import pygame
 
 from snes.system import System, BUTTONS
 from snes.gamepad import Pads
+from snes.rewind import Rewind
 
 WIDTH, HEIGHT = 256, 239
 FRAME_SECONDS = 1.0 / 60.098          # NTSC field rate
@@ -39,7 +41,6 @@ KEYMAP = {
     pygame.K_a: "Y", pygame.K_s: "X",
     pygame.K_q: "L", pygame.K_w: "R",
     pygame.K_RETURN: "START", pygame.K_RSHIFT: "SELECT",
-    pygame.K_BACKSPACE: "SELECT",
 }
 
 
@@ -88,6 +89,8 @@ def parse_args(argv):
     ap.add_argument("--no-audio", action="store_true", help="do not open an audio device")
     ap.add_argument("--frames", type=int, default=0,
                     help="run this many frames headless and exit (for testing)")
+    ap.add_argument("--rewind-seconds", type=float, default=20.0,
+                    help="how much rewind history to keep; 0 disables it")
     return ap.parse_args(argv)
 
 
@@ -118,6 +121,8 @@ def main(argv=None):
 
     pads = Pads(os.path.join(app_dir(), "config", "gamepad.json"))
     print(pads.describe())
+
+    rewind = Rewind(seconds=args.rewind_seconds, enabled=args.rewind_seconds > 0)
 
     held = set()
     state_path = machine.state_path
@@ -163,14 +168,20 @@ def main(argv=None):
         machine.set_pad(0, mask | pads.mask(0))
         machine.set_pad(1, pads.mask(1))
 
-        machine.run_frame()
+        rewinding = (keys[pygame.K_BACKSPACE] or pads.any_function("REWIND")) and rewind.enabled
+        if rewinding:
+            if not rewind.step_back(machine):
+                rewinding = False
+        if not rewinding:
+            machine.run_frame()
+            rewind.capture(machine)
         frames += 1
         fps_n += 1
 
         blit(screen, surface, machine.framebuffer, args.scale)
         pygame.display.flip()
 
-        if audio is not None:
+        if audio is not None and not rewinding:
             audio.feed(machine)
 
         if not turbo:
@@ -178,8 +189,11 @@ def main(argv=None):
 
         now = time.perf_counter()
         if now - fps_t0 >= 2.0:
-            pygame.display.set_caption("pysnes - %s  [%.1f fps]"
-                                       % (machine.cart.title, fps_n / (now - fps_t0)))
+            pygame.display.set_caption(
+                "pysnes - %s  [%.1f fps]%s"
+                % (machine.cart.title, fps_n / (now - fps_t0),
+                   "  rewind %.0fs/%.0fMB" % (rewind.seconds_held, rewind.megabytes)
+                   if rewind.enabled else ""))
             fps_t0, fps_n = now, 0
 
         if args.frames and frames >= args.frames:

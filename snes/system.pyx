@@ -125,10 +125,8 @@ cdef class System:
 
     # -- save states ---------------------------------------------------------
 
-    def save_state(self):
-        """Serialise the whole machine to a compressed blob."""
-        import pickle, zlib
-        data = {
+    def _state_dict(self):
+        return {
             "version": 1,
             "title": self.cart.title,
             "checksum": self.cart.computed_checksum,
@@ -140,11 +138,8 @@ cdef class System:
             "dsp": (self.apu.dsp.state_ints(), self.apu.dsp.state_blobs()),
             "sram": bytes(self.cart.sram_data),
         }
-        return zlib.compress(pickle.dumps(data, 4), 6)
 
-    def load_state(self, blob):
-        import pickle, zlib
-        data = pickle.loads(zlib.decompress(blob))
+    def _apply_state(self, data):
         if data.get("version") != 1:
             raise ValueError("unsupported save-state version")
         if (data.get("checksum") != self.cart.computed_checksum
@@ -160,6 +155,25 @@ cdef class System:
         n = min(len(sram), len(self.cart.sram_data))
         self.cart.sram_data[:n] = sram[:n]
         return True
+
+    def save_state_raw(self):
+        """Uncompressed snapshot.  Rewind uses this and picks its own codec,
+        since compression dominates the cost of taking one."""
+        import pickle
+        return pickle.dumps(self._state_dict(), 4)
+
+    def load_state_raw(self, blob):
+        import pickle
+        return self._apply_state(pickle.loads(blob))
+
+    def save_state(self):
+        """Serialise the whole machine to a compressed blob."""
+        import zlib
+        return zlib.compress(self.save_state_raw(), 6)
+
+    def load_state(self, blob):
+        import zlib
+        return self.load_state_raw(zlib.decompress(blob))
 
     # -- introspection --------------------------------------------------------
 

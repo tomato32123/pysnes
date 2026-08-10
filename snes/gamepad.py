@@ -41,6 +41,7 @@ DEFAULT_MAPPING = {
 # Emulator functions, not SNES buttons.  Empty string = unbound.
 DEFAULT_FUNCTIONS = {
     "FASTFORWARD": "righttrigger",
+    "REWIND": "lefttrigger",
     "SAVESTATE": "",
     "LOADSTATE": "",
 }
