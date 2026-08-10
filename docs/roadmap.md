@@ -46,8 +46,10 @@ The largest single gap. Everything below the first item depends on it.
 - [x] VRAM, CGRAM and OAM access restrictions during active display
       (OAM approximated: the write is dropped rather than redirected to
       the address sprite evaluation holds, which needs a per-dot evaluator)
-- [ ] Sprite evaluation timing, and exact range-over / time-over
-- [ ] OAM address reload and priority rotation
+- [x] Sprite evaluation in two passes: 32 sprites per line and 34 tiles,
+      with range-over and time-over reported per frame
+- [~] OAM priority rotation moves the first sprite of the scan; the
+      address reload's own timing is not modelled
 - [ ] Interlace, pseudo-hires, overscan, EXTBG
 - [ ] Direct colour mode; the remaining colour-math corners
 - [ ] Mosaic exactness, including mode 7

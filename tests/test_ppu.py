@@ -665,6 +665,222 @@ irq:    sep #$20
           brightness_of_row(machine, 150), 15, "%d")
 
 
+# ------------------------------------------------------------ sprites ----
+
+OBJ_SETUP = """
+        sep #$20
+        lda #$8F
+        sta $2100
+
+        ; backdrop blue, sprite palette 0 colour 1 = green
+        stz $2121
+        lda #$00
+        sta $2122
+        lda #$7C
+        sta $2122
+        lda #$81
+        sta $2121               ; CGRAM 129: sprite palette 0, colour 1
+        lda #$E0
+        sta $2122
+        lda #$03
+        sta $2122
+
+        ; sprite tile 0 at VRAM word 0: bitplane 0 all ones
+        lda #$80
+        sta $2115
+        rep #$20
+        lda #$0000
+        sta $2116
+        ldx #$0008
+objlo:  lda #$00FF
+        sta $2118
+        dex
+        bne objlo
+        ldx #$0008
+objhi:  lda #$0000
+        sta $2118
+        dex
+        bne objhi
+        sep #$20
+
+        stz $2101               ; OBJ characters at $0000, 8x8 / 16x16
+
+        ; park all 128 sprites below the display first
+        stz $2102
+        stz $2103
+        ldx #$00
+park:   lda #$00
+        sta $2104               ; X
+        lda #$F0
+        sta $2104               ; Y = 240, off the bottom
+        lda #$00
+        sta $2104
+        lda #$00
+        sta $2104
+        inx
+        cpx #$80
+        bne park
+
+        ; %(count)s sprites along one line, eight pixels apart
+        stz $2102
+        stz $2103
+        lda #$00
+        sta $00                 ; running X
+        ldx #$00
+oaml:   lda $00
+        sta $2104               ; X
+        lda #$10
+        sta $2104               ; Y = 16
+        lda #$00
+        sta $2104               ; tile 0
+        lda #%(attr)s
+        sta $2104               ; attributes
+        lda $00
+        clc
+        adc #$08
+        sta $00
+        inx
+        cpx #%(count)s
+        bne oaml
+
+        lda #%(size)s
+        sta $2101               ; OBSEL: sprite size selection
+        lda #$10
+        sta $212C               ; OBJ on the main screen
+        lda #$0F
+        sta $2100
+spin:   bra spin
+"""
+
+
+def objects(count, attr="$20", size="$00"):
+    return run(OBJ_SETUP % {"count": "$%02X" % count, "attr": attr, "size": size},
+               max_frames=4).machine
+
+
+def test_sprite_is_drawn_where_oam_puts_it():
+    machine = objects(1)
+    green = (0, expand(31), 0)
+    blue = (0, 0, expand(31))
+    check("sprite pixel", pixel(machine, 0, 16), green)
+    check("sprite pixel at its far corner", pixel(machine, 7, 23), green)
+    check("just right of the sprite", pixel(machine, 8, 16), blue)
+    check("just below the sprite", pixel(machine, 0, 24), blue)
+
+
+def test_thirty_three_sprites_raise_range_over():
+    """Only 32 sprites per line survive evaluation; a 33rd sets the flag and
+    is not drawn."""
+    machine = objects(33)
+    check("range over set", machine.ppu.range_over, 1, "%d")
+    check("time over not set", machine.ppu.time_over, 0, "%d")
+    green = (0, expand(31), 0)
+    blue = (0, 0, expand(31))
+    # Sprites sit at X = 8n, so 0..31 cover the whole line and the 33rd, at
+    # X = 256, is off screen -- but it still consumed a slot, and the slot it
+    # was refused is what the flag reports.
+    check("the 32nd sprite is drawn", pixel(machine, 248, 16), green)
+
+
+def test_thirty_two_large_sprites_raise_time_over():
+    """32 sprites is within the range limit, but 16x16 sprites need two tiles
+    each and only 34 tiles fit on a line."""
+    # OBSEL size selection 3 is 16x16 / 32x32, so the small size -- which is
+    # what the OAM high table selects here -- is already two tiles wide.
+    machine = objects(32, size="$60")
+    check("range over not set", machine.ppu.range_over, 0, "%d")
+    check("time over set", machine.ppu.time_over, 1, "%d")
+
+
+def test_a_single_sprite_raises_neither_flag():
+    machine = objects(4)
+    check("range over clear", machine.ppu.range_over, 0, "%d")
+    check("time over clear", machine.ppu.time_over, 0, "%d")
+
+
+def test_lower_index_sprites_are_in_front():
+    """Two overlapping sprites with the same priority: the lower OAM index wins."""
+    machine = run("""
+        sep #$20
+        lda #$8F
+        sta $2100
+        stz $2121
+        lda #$00
+        sta $2122
+        lda #$7C
+        sta $2122
+        lda #$81
+        sta $2121
+        lda #$E0
+        sta $2122
+        lda #$03
+        sta $2122               ; palette 0 colour 1 = green
+        lda #$91
+        sta $2121
+        lda #$1F
+        sta $2122
+        lda #$00
+        sta $2122               ; palette 1 colour 1 = red
+
+        lda #$80
+        sta $2115
+        rep #$20
+        lda #$0000
+        sta $2116
+        ldx #$0008
+p1:     lda #$00FF
+        sta $2118
+        dex
+        bne p1
+        ldx #$0008
+p2:     lda #$0000
+        sta $2118
+        dex
+        bne p2
+        sep #$20
+        stz $2101
+
+        stz $2102
+        stz $2103
+        lda #$20
+        sta $2104               ; sprite 0 at X = 32
+        lda #$10
+        sta $2104
+        lda #$00
+        sta $2104
+        lda #$20
+        sta $2104               ; palette 0, priority 2
+        lda #$20
+        sta $2104               ; sprite 1 at the same place
+        lda #$10
+        sta $2104
+        lda #$00
+        sta $2104
+        lda #$22
+        sta $2104               ; palette 1, same priority
+
+        lda #$10
+        sta $212C
+        lda #$0F
+        sta $2100
+spin:   bra spin
+""", max_frames=4).machine
+    check("sprite 0 covers sprite 1", pixel(machine, 32, 16), (0, expand(31), 0))
+
+
+def test_overflow_flags_clear_each_frame():
+    """$213E bits 6 and 7 describe one frame, so they must not accumulate."""
+    machine = objects(33)
+    check("range over after a busy frame", machine.ppu.range_over, 1, "%d")
+    machine.ppu.range_over = 1
+    machine.ppu.time_over = 1
+    # Reaching the next frame clears them before evaluation refills them.
+    machine.run_frame()
+    machine.run_frame()
+    check("still set by the same busy line", machine.ppu.range_over, 1, "%d")
+    check("time over stayed clear", machine.ppu.time_over, 0, "%d")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:

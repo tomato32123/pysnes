@@ -952,13 +952,25 @@ cdef class PPU:
                       | <uint32_t>((b << 3) | (b >> 2)))
 
     cdef void _render_objects(self, int line) noexcept:
+        """Evaluate and draw the sprites for one line.
+
+        The hardware makes two passes.  The first walks all 128 entries in
+        order from the first-sprite index, keeping the first 32 that touch this
+        line and raising range-over if more do.  The second walks that list
+        backwards counting 8-pixel tiles, stopping at 34 and raising time-over.
+
+        Walking the list backwards is also what gives the priority order: a
+        sprite earlier in the list is drawn later, so it ends up in front.
+        """
         cdef int widths[8][2]
         cdef int heights[8][2]
-        cdef int i, s, sx, sy, w, h, size_bit, tile, palette, prio, hflip, vflip
-        cdef int px, py, col, row, tx, ty, colour, screen_x, tiles_wide
+        cdef int collected[32]
+        cdef int i, s, sx, sy, w, h, size_bit, count, k
+        cdef int tile, palette, prio, hflip, vflip
+        cdef int px, py, col, tx, ty, colour, screen_x, row_in
+        cdef int first, tiles, columns, allowed, drawn
         cdef uint32_t chr_addr, base_tile
         cdef uint16_t plane
-        cdef int drawn_tiles = 0, drawn_sprites = 0
         cdef uint8_t hi
 
         widths[0][0] = 8;  widths[0][1] = 16
@@ -975,8 +987,42 @@ cdef class PPU:
         heights[6][0] = 32; heights[6][1] = 64        # 16x32 / 32x64
         heights[7][0] = 32; heights[7][1] = 32        # 16x32 / 32x32
 
-        # Sprites are evaluated highest-index-last so that lower indices win.
-        for s in range(127, -1, -1):
+        # Priority rotation moves the start of the scan, which changes both
+        # which sprites survive the 32 limit and which of them is in front.
+        first = ((self.oam_addr_reload >> 2) & 0x7F) if self.oam_priority_rotation else 0
+
+        # -- pass one: which sprites touch this line ------------------------
+        count = 0
+        for i in range(128):
+            s = (first + i) & 0x7F
+            hi = self.oam[512 + (s >> 2)]
+            size_bit = (hi >> (((s & 3) << 1) + 1)) & 1
+            w = widths[self.obj_size_sel][size_bit]
+            h = heights[self.obj_size_sel][size_bit]
+
+            sx = self.oam[s * 4 + 0]
+            if (hi >> ((s & 3) << 1)) & 1:
+                sx -= 256
+            sy = self.oam[s * 4 + 1]
+
+            # Range evaluation looks at Y alone: a sprite whose X puts it
+            # off the side still occupies one of the 32 slots.
+            py = line - sy
+            if py < 0:
+                py += 256
+            if py < 0 or py >= h:
+                continue
+
+            if count == 32:
+                self.range_over = 1
+                break
+            collected[count] = s
+            count += 1
+
+        # -- pass two: count tiles backwards, drawing as we go ---------------
+        tiles = 0
+        for k in range(count - 1, -1, -1):
+            s = collected[k]
             hi = self.oam[512 + (s >> 2)]
             size_bit = (hi >> (((s & 3) << 1) + 1)) & 1
             w = widths[self.obj_size_sel][size_bit]
@@ -994,51 +1040,57 @@ cdef class PPU:
             hflip = (i >> 6) & 1
             vflip = (i >> 7) & 1
 
-            # Vertical range test, with 256-line wraparound.
             py = line - sy
             if py < 0:
                 py += 256
-            if py < 0 or py >= h:
-                continue
-            if sx >= SCREEN_W or sx + w <= 0:
-                continue
-
-            drawn_sprites += 1
-            if drawn_sprites > 32:
-                self.range_over = 1
-                break
-
             if vflip:
                 py = h - 1 - py
-            tiles_wide = w >> 3
-            drawn_tiles += tiles_wide
-            if drawn_tiles > 34:
-                self.time_over = 1
-
             ty = py >> 3
-            row = py & 7
-            for px in range(w):
-                screen_x = sx + px
-                if screen_x < 0 or screen_x >= SCREEN_W:
-                    continue
-                col = (w - 1 - px) if hflip else px
-                tx = col >> 3
-                # The sprite tile map is a 16x16 grid that wraps.
-                tile = ((base_tile + ty * 16 + tx) & 0x1FF)
-                chr_addr = self.obj_base + ((tile & 0xFF) << 4)
-                if tile & 0x100:
-                    chr_addr += self.obj_gap
-                chr_addr = (chr_addr + row) & 0x7FFF
+            row_in = py & 7
 
-                i = col & 7
-                plane = self.vram[chr_addr]
-                colour = ((plane >> (7 - i)) & 1) | (((plane >> (15 - i)) & 1) << 1)
-                plane = self.vram[(chr_addr + 8) & 0x7FFF]
-                colour |= (((plane >> (7 - i)) & 1) << 2) | (((plane >> (15 - i)) & 1) << 3)
-                if colour:
-                    self.obj_idx[screen_x] = 128 + palette * 16 + colour
-                    self.obj_pri[screen_x] = prio
-                    self.obj_pal[screen_x] = palette
+            # Only the 8-pixel columns that land on screen are fetched.
+            columns = 0
+            for col in range(0, w, 8):
+                screen_x = sx + col
+                if screen_x > -8 and screen_x < SCREEN_W:
+                    columns += 1
+
+            allowed = columns
+            if tiles + columns > 34:
+                self.time_over = 1
+                allowed = 34 - tiles
+                if allowed < 0:
+                    allowed = 0
+            tiles += columns
+
+            drawn = 0
+            for col in range(0, w, 8):
+                screen_x = sx + col
+                if screen_x <= -8 or screen_x >= SCREEN_W:
+                    continue
+                if drawn >= allowed:
+                    break
+                drawn += 1
+                for px in range(col, col + 8):
+                    screen_x = sx + px
+                    if screen_x < 0 or screen_x >= SCREEN_W:
+                        continue
+                    tx = ((w - 1 - px) if hflip else px)
+                    tile = (base_tile + ty * 16 + (tx >> 3)) & 0x1FF
+                    chr_addr = self.obj_base + ((tile & 0xFF) << 4)
+                    if tile & 0x100:
+                        chr_addr += self.obj_gap
+                    chr_addr = (chr_addr + row_in) & 0x7FFF
+
+                    i = tx & 7
+                    plane = self.vram[chr_addr]
+                    colour = ((plane >> (7 - i)) & 1) | (((plane >> (15 - i)) & 1) << 1)
+                    plane = self.vram[(chr_addr + 8) & 0x7FFF]
+                    colour |= (((plane >> (7 - i)) & 1) << 2) | (((plane >> (15 - i)) & 1) << 3)
+                    if colour:
+                        self.obj_idx[screen_x] = 128 + palette * 16 + colour
+                        self.obj_pri[screen_x] = prio
+                        self.obj_pal[screen_x] = palette
 
     cdef inline int _region(self, int mode, int inside) noexcept:
         """CGWSEL bits 5-4, colour-math enable: 0=always 1=inside 2=outside 3=never."""

@@ -784,6 +784,9 @@ cdef class Bus:
             self.frame += 1
             self.in_vblank = 0
             self.ppu.field = self.field
+            # $213E bits 6 and 7 report what happened during this frame.
+            self.ppu.range_over = 0
+            self.ppu.time_over = 0
             self.hdma_init()
 
         self.ppu.vcounter = self.vcount

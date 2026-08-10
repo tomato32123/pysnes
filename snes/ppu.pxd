@@ -93,7 +93,7 @@ cdef class PPU:
     cdef int latched
     cdef uint16_t hcounter_latch, vcounter_latch
     cdef int hcounter_flip, vcounter_flip
-    cdef int range_over, time_over
+    cdef public int range_over, time_over
     cdef uint8_t ppu1_mdr, ppu2_mdr
     cdef int dbg_lines, dbg_lines_enabled, dbg_lines_blank
 
