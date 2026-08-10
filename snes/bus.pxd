@@ -115,3 +115,4 @@ cdef class Bus:
     cdef void _event_line(self, int64_t when) noexcept
     cdef void _arm_irq(self, int64_t line_start) noexcept
     cdef int _hcount(self) noexcept
+    cdef int _screen_x(self) noexcept

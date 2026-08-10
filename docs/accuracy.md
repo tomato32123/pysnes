@@ -17,7 +17,7 @@ What that leaves:
 | --- | --- |
 | S-CPU timing | bus-access driven, with the datasheet's idle-cycle rules |
 | Central scheduler | events on absolute deadlines: line, HDMA, IRQ, joypad, APU |
-| PPU granularity | **scanline** — a mid-scanline register write is lost |
+| PPU granularity | dot: a row is drawn in spans, caught up before each register write |
 | Deterministic trace | instructions and bus accesses, with the master clock |
 | Test-ROM regression suite | CPU flags, addressing, decimal, RMW, block move, timing |
 | Cartridge | LoROM / HiROM / ExHiROM, interleaved dumps, PAL; no coprocessors |
@@ -78,14 +78,28 @@ measured handler entry can be up to one instruction late.  The timing tests
 assert on the accumulated span across many periods rather than on individual
 gaps, which distinguishes that jitter from drift.
 
+## Dot-based rendering
+
+A row is produced in spans.  The bus calls `catch_up()` before every write to
+$2100-$213F, so the pixels left of the write come from the old register state
+and those to its right from the new one.  Sprites are the exception: the
+hardware evaluates them during the previous line's H-blank, so they are
+latched once per row and an OAM write part-way along a line does not affect
+it.
+
+Mosaic is handled by snapping the sample coordinate to the left edge of its
+block rather than by a pass over the finished line, which gives the same
+result and works when only part of a line is being drawn.
+
+The change immediately surfaced a real defect: INIDISP brightness 0 means a
+black screen, but the old scaling of `(colour * (level + 1)) / 16` left a
+sixteenth of the colour showing at level 0.  Brightness is a 4-bit level from
+0 to 15 scaling by `level / 15`, and is now a precomputed table.
+
 ## Next
 
-1. **Dot-aware PPU.** Render from the H counter so that scroll, mode, window,
-   colour-math and brightness writes take effect from the dot they happen at.
-   This is what mid-scanline effects need, and it is the part of the internal
-   state a 2.5D renderer would consume.
-2. **Widen the suite** as each of those lands: PPU register timing, H/V
-   counter latching, DMA and HDMA cycle costs, NMI and IRQ edges.
+See docs/roadmap.md.  Immediately: offset-per-tile for modes 2, 4 and 6, which
+is unimplemented and needs the span pipeline underneath it.
 
 ## Parked
 

@@ -109,6 +109,9 @@ cdef class PPU:
     cdef uint8_t sub_src[256]
     cdef int bg_bpp[4]
     cdef int bg_pal_base[4]
+    cdef uint8_t light[16][32]       # brightness level -> 5-bit channel
+    cdef int render_row              # framebuffer row being drawn, -1 if none
+    cdef int rendered_x              # how far along that row we have drawn
 
     # -- output --------------------------------------------------------------
     cdef readonly object framebuffer_obj
@@ -123,14 +126,19 @@ cdef class PPU:
     cdef void _write_hofs(self, int n, uint8_t value) noexcept
     cdef void _write_vofs(self, int n, uint8_t value) noexcept
     cdef void _write_winsel(self, int layer, uint8_t bits) noexcept
-    cdef void _render_bg(self, int bg, int line, int bpp, int pal_base) noexcept
-    cdef void _render_mode7(self, int line) noexcept
+    cdef void begin_line(self, int row) noexcept
+    cdef void catch_up(self, int x) noexcept
+    cdef void end_line(self) noexcept
+    cdef void _render_span(self, int x0, int x1) noexcept
+    cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept
+    cdef void _render_bg(self, int bg, int line, int bpp, int pal_base,
+                         int x0, int x1) noexcept
+    cdef void _render_mode7(self, int line, int x0, int x1) noexcept
     cdef void _render_objects(self, int line) noexcept
-    cdef void _compute_windows(self, int line) noexcept
-    cdef void _clear_layers(self) noexcept
-    cdef void _paint(self, int layer, int prio, int to_sub) noexcept
+    cdef void _compute_windows(self, int x0, int x1) noexcept
+    cdef void _paint(self, int layer, int prio, int to_sub, int x0, int x1) noexcept
     cdef int _mosaic_y(self, int bg, int line) noexcept
-    cdef void _mosaic_x(self, int bg) noexcept
+    cdef int _mosaic_x(self, int bg, int x) noexcept
     cdef int _region(self, int mode, int inside) noexcept
     cdef int _region_black(self, int mode, int inside) noexcept
     cdef int _order_mode0(self, int order[16][2]) noexcept

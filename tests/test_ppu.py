@@ -143,7 +143,7 @@ spin:   bra spin
 
 
 def test_brightness_scales_the_output():
-    """INIDISP brightness n scales a channel by (n+1)/16."""
+    """INIDISP brightness n scales a channel by n/15: level 0 is black."""
     source = (SETUP % {"c0": "$%04X" % BLUE, "c1": "$%04X" % RED}) + """
         lda #$01
         sta $212C
@@ -152,8 +152,21 @@ def test_brightness_scales_the_output():
 spin:   bra spin
 """
     machine = run(source, max_frames=4).machine
-    want = expand((31 * 8) >> 4)
-    check("half-bright red", pixel(machine, 0, 0)[0], want, "%d")
+    want = expand((31 * 7 + 7) // 15)
+    check("brightness 7 of 15 on red", pixel(machine, 0, 0)[0], want, "%d")
+
+
+def test_brightness_zero_is_black():
+    source = (SETUP % {"c0": "$%04X" % BLUE, "c1": "$%04X" % RED}) + """
+        lda #$01
+        sta $212C
+        lda #$00
+        sta $2100               ; brightness 0, screen not forced blank
+spin:   bra spin
+"""
+    machine = run(source, max_frames=4).machine
+    check("brightness 0 on the tile", pixel(machine, 0, 0), (0, 0, 0))
+    check("brightness 0 on the backdrop", pixel(machine, 128, 100), (0, 0, 0))
 
 
 def test_scroll_moves_the_layer():
@@ -179,6 +192,95 @@ def test_scene_hash_is_stable():
         check("scene hash", digest, expected)
     else:
         print("      scene hash: %s" % digest)
+
+
+def test_register_write_takes_effect_mid_scanline():
+    """The point of drawing by dot: a write part-way along a line must change
+    only the pixels to its right.
+
+    An IRQ is armed for one dot of one line and its handler blanks the screen;
+    the NMI handler puts the brightness back during V-blank so the split
+    repeats every frame.  Row 99 is the one being scanned out during line 100,
+    so that is the row that ends up half drawn.
+    """
+    source = (SETUP % {"c0": "$%04X" % BLUE, "c1": "$%04X" % RED}) + """
+        stz $212C               ; backdrop only, so every pixel is CGRAM 0
+        lda #$0F
+        sta $2100
+
+        lda #$64
+        sta $4209               ; VTIME = line 100
+        stz $420A
+        lda #$96
+        sta $4207               ; HTIME = dot 150
+        stz $4208
+        lda #$B0                ; NMI on, IRQ on H and V together
+        sta $4200
+        cli
+spin:   bra spin
+irq:    sep #$20
+        lda #$00
+        sta $2100               ; blank from this dot rightwards
+        lda $4211
+        rti
+nmi:    sep #$20
+        lda #$0F
+        sta $2100               ; restore during V-blank, ready for the next frame
+        lda $4210
+        rti
+"""
+    machine = run(source, max_frames=6).machine
+    blue = (0, 0, expand(31))
+    black = (0, 0, 0)
+    check("row above the split is whole", pixel(machine, 200, 50), blue)
+    check("left of the write on the split row", pixel(machine, 40, 99), blue)
+    check("right of the write on the split row", pixel(machine, 220, 99), black)
+    check("row below the split is blank", pixel(machine, 128, 150), black)
+
+
+def test_mid_scanline_split_lands_near_the_requested_dot():
+    """Scan the split row for the transition and check it is where HTIME put it."""
+    source = (SETUP % {"c0": "$%04X" % BLUE, "c1": "$%04X" % RED}) + """
+        stz $212C
+        lda #$0F
+        sta $2100
+        lda #$64
+        sta $4209
+        stz $420A
+        lda #$96
+        sta $4207               ; HTIME = dot 150 -> screen column 128
+        stz $4208
+        lda #$B0
+        sta $4200
+        cli
+spin:   bra spin
+irq:    sep #$20
+        lda #$00
+        sta $2100
+        lda $4211
+        rti
+nmi:    sep #$20
+        lda #$0F
+        sta $2100
+        lda $4210
+        rti
+"""
+    machine = run(source, max_frames=6).machine
+    edge = None
+    for x in range(W):
+        if pixel(machine, x, 99) == (0, 0, 0):
+            edge = x
+            break
+    if edge is None:
+        FAILURES.append("the split row never goes dark")
+        return
+    # Output starts at dot 22, so HTIME 150 is column 128.  The interrupt is
+    # taken at an instruction boundary and the handler takes a few more, so the
+    # edge sits a little to the right of that.
+    if not 128 <= edge <= 128 + 40:
+        FAILURES.append("split at column %d, expected between 128 and 168" % edge)
+    else:
+        print("      split column: %d (HTIME 150 -> column 128)" % edge)
 
 
 def main():

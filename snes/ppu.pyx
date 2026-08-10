@@ -42,6 +42,13 @@ cdef inline uint32_t _vram_step(uint8_t vmain) noexcept:
 cdef class PPU:
 
     def __init__(self):
+        # INIDISP brightness is a 4-bit level where 0 is black and 15 is full,
+        # so a channel scales by brightness/15 -- not by (brightness+1)/16,
+        # which would leave level 0 showing a sixteenth of the colour.
+        cdef int level, value
+        for level in range(16):
+            for value in range(32):
+                self.light[level][value] = <uint8_t>((value * level + 7) // 15)
         self.framebuffer_obj = bytearray(SCREEN_W * SCREEN_H * 4)
         self.framebuffer = <uint32_t *><unsigned char *>self.framebuffer_obj
         self.reset()
@@ -452,29 +459,143 @@ cdef class PPU:
     # =====================================================================
     # rendering
     # =====================================================================
+    #
+    # A row is drawn in spans rather than all at once.  The bus calls
+    # catch_up() before every PPU register write, so the pixels to the left of
+    # the write are produced from the old register state and those to its right
+    # from the new one.  That is what makes a mid-scanline change visible.
+    #
+    # Sprites are the exception: the hardware evaluates them during the
+    # previous line's H-blank, so they are latched once in begin_line() and an
+    # OAM write part-way through a line does not affect it.
+
+    cdef inline int _mosaic_x(self, int bg, int x) noexcept:
+        """Snap a screen coordinate to the left edge of its mosaic block.
+
+        Sampling at the snapped coordinate gives the same result as a
+        post-pass over the whole line, and works when only part of the line
+        is being drawn.
+        """
+        cdef int size
+        if not self.mosaic_enable[bg] or self.mosaic_size == 0:
+            return x
+        size = self.mosaic_size + 1
+        return x - (x % size)
 
     cdef inline int _mosaic_y(self, int bg, int line) noexcept:
-        """Snap a scanline to the top of its mosaic block."""
         if not self.mosaic_enable[bg] or self.mosaic_size == 0:
             return line
         return line - (line % (self.mosaic_size + 1))
 
-    cdef void _clear_layers(self) noexcept:
-        cdef int i, b
-        for b in range(4):
-            for i in range(SCREEN_W):
-                self.bg_idx[b][i] = 0
-                self.bg_pri[b][i] = 0
+    cdef void begin_line(self, int row) noexcept:
+        """Start a new output row.  row < 0 means nothing is being displayed."""
+        cdef int i
+        self.render_row = row
+        self.rendered_x = 0
+        if row < 0 or row >= SCREEN_H:
+            return
         for i in range(SCREEN_W):
             self.obj_idx[i] = 0
             self.obj_pri[i] = 0xFF
             self.obj_pal[i] = 0
+        if not self.forced_blank:
+            self._render_objects(row)
 
-    # ---------------------------------------------------------------- BG ---
+    cdef void catch_up(self, int x) noexcept:
+        """Draw up to, but not including, screen column x."""
+        if self.render_row < 0:
+            return
+        if x > SCREEN_W:
+            x = SCREEN_W
+        if x <= self.rendered_x:
+            return
+        self._render_span(self.rendered_x, x)
+        self.rendered_x = x
 
-    cdef void _render_bg(self, int bg, int line, int bpp, int pal_base) noexcept:
-        """Render one tiled background layer into bg_idx[bg] / bg_pri[bg]."""
-        cdef int tile_shift = 3 + self.bg_tile_size[bg]      # 8 or 16 pixels
+    cdef void end_line(self) noexcept:
+        self.catch_up(SCREEN_W)
+        self.render_row = -1
+
+    cdef void render_scanline(self, int line) noexcept:
+        """Draw a whole row in one go; used by tools that step frame by frame."""
+        self.begin_line(line)
+        self.end_line()
+
+    # ---------------------------------------------------------------- span ---
+
+    cdef void _render_span(self, int x0, int x1) noexcept:
+        cdef int line = self.render_row
+        cdef int x, i, b, order_len
+        cdef uint32_t *row
+        cdef int order[16][2]
+
+        if line < 0 or line >= SCREEN_H:
+            return
+        row = self.framebuffer + line * SCREEN_W
+
+        if self.forced_blank:
+            for x in range(x0, x1):
+                row[x] = 0xFF000000
+            return
+
+        for b in range(4):
+            for x in range(x0, x1):
+                self.bg_idx[b][x] = 0
+                self.bg_pri[b][x] = 0
+
+        self._compute_windows(x0, x1)
+
+        if self.bg_mode == 0:
+            self._render_bg(0, line, 2, 0, x0, x1)
+            self._render_bg(1, line, 2, 32, x0, x1)
+            self._render_bg(2, line, 2, 64, x0, x1)
+            self._render_bg(3, line, 2, 96, x0, x1)
+            order_len = self._order_mode0(order)
+        elif self.bg_mode == 1:
+            self._render_bg(0, line, 4, 0, x0, x1)
+            self._render_bg(1, line, 4, 0, x0, x1)
+            self._render_bg(2, line, 2, 0, x0, x1)
+            order_len = self._order_mode1(order)
+        elif self.bg_mode == 2:
+            self._render_bg(0, line, 4, 0, x0, x1)
+            self._render_bg(1, line, 4, 0, x0, x1)
+            order_len = self._order_mode23(order)
+        elif self.bg_mode == 3:
+            self._render_bg(0, line, 8, 0, x0, x1)
+            self._render_bg(1, line, 4, 0, x0, x1)
+            order_len = self._order_mode23(order)
+        elif self.bg_mode == 4:
+            self._render_bg(0, line, 8, 0, x0, x1)
+            self._render_bg(1, line, 2, 0, x0, x1)
+            order_len = self._order_mode23(order)
+        elif self.bg_mode == 5:
+            self._render_bg(0, line, 4, 0, x0, x1)
+            self._render_bg(1, line, 2, 0, x0, x1)
+            order_len = self._order_mode23(order)
+        elif self.bg_mode == 6:
+            self._render_bg(0, line, 4, 0, x0, x1)
+            order_len = self._order_mode6(order)
+        else:
+            self._render_mode7(line, x0, x1)
+            order_len = self._order_mode7(order)
+
+        for x in range(x0, x1):
+            self.main_buf[x] = self.cgram[0]
+            self.sub_buf[x] = self.cgram[0]
+            self.main_src[x] = 5
+            self.sub_src[x] = 5
+
+        for i in range(order_len):
+            self._paint(order[i][0], order[i][1], 0, x0, x1)
+            self._paint(order[i][0], order[i][1], 1, x0, x1)
+
+        self._compose(row, x0, x1)
+
+    # ------------------------------------------------------------------ BG ---
+
+    cdef void _render_bg(self, int bg, int line, int bpp, int pal_base,
+                         int x0, int x1) noexcept:
+        cdef int tile_shift = 3 + self.bg_tile_size[bg]
         cdef int y = self._mosaic_y(bg, line) + self.bg_vofs[bg]
         cdef int hofs = self.bg_hofs[bg]
         cdef uint32_t map_base = self.bg_map_base[bg]
@@ -483,11 +604,11 @@ cdef class PPU:
         cdef int x, sx, tile_x, tile_y, screen, sub_x, sub_y
         cdef uint32_t map_addr, chr_addr
         cdef uint16_t entry, plane
-        cdef int tile_num, palette, prio, hflip, vflip, row, col, colour
+        cdef int tile_num, palette, prio, hflip, vflip, row_in, col, colour
         cdef int px_in_tile, py_in_tile
 
-        for x in range(SCREEN_W):
-            sx = x + hofs
+        for x in range(x0, x1):
+            sx = self._mosaic_x(bg, x) + hofs
             tile_x = sx >> tile_shift
             tile_y = y >> tile_shift
 
@@ -512,15 +633,14 @@ cdef class PPU:
             if vflip:
                 py_in_tile = ((1 << tile_shift) - 1) - py_in_tile
 
-            # 16x16 tiles are a 2x2 block of 8x8 characters.
             if self.bg_tile_size[bg]:
                 sub_x = (px_in_tile >> 3) & 1
                 sub_y = (py_in_tile >> 3) & 1
                 tile_num = (tile_num + sub_y * 16 + sub_x) & 0x03FF
-            row = py_in_tile & 7
+            row_in = py_in_tile & 7
             col = px_in_tile & 7
 
-            chr_addr = (chr_base + tile_num * words_per_tile + row) & 0x7FFF
+            chr_addr = (chr_base + tile_num * words_per_tile + row_in) & 0x7FFF
             plane = self.vram[chr_addr]
             colour = ((plane >> (7 - col)) & 1) | (((plane >> (15 - col)) & 1) << 1)
             if bpp >= 4:
@@ -539,21 +659,9 @@ cdef class PPU:
                     self.bg_idx[bg][x] = pal_base + palette * (1 << bpp) + colour
                 self.bg_pri[bg][x] = prio
 
-        # Horizontal mosaic: replicate the leftmost pixel of each block.
-        if self.mosaic_enable[bg] and self.mosaic_size:
-            self._mosaic_x(bg)
+    # -------------------------------------------------------------- mode 7 ---
 
-    cdef void _mosaic_x(self, int bg) noexcept:
-        cdef int size = self.mosaic_size + 1
-        cdef int x, src
-        for x in range(SCREEN_W):
-            src = x - (x % size)
-            self.bg_idx[bg][x] = self.bg_idx[bg][src]
-            self.bg_pri[bg][x] = self.bg_pri[bg][src]
-
-    # ------------------------------------------------------------ mode 7 ---
-
-    cdef void _render_mode7(self, int line) noexcept:
+    cdef void _render_mode7(self, int line, int x0, int x1) noexcept:
         cdef int y = self._mosaic_y(0, line)
         cdef int32_t a = self.m7a, b = self.m7b, c = self.m7c, d = self.m7d
         cdef int32_t cx = self.m7x, cy = self.m7y
@@ -563,21 +671,22 @@ cdef class PPU:
         cdef int32_t sy = oy + ty
         cdef int32_t px_base = a * ox + b * sy + (cx << 8)
         cdef int32_t py_base = c * ox + d * sy + (cy << 8)
-        cdef int x, tx, colour
+        cdef int x, tx, colour, outside
         cdef int32_t px, py
         cdef uint32_t tile, addr
-        cdef int outside
 
-        for x in range(SCREEN_W):
-            tx = (255 - x) if (self.m7sel & 0x01) else x
+        for x in range(x0, x1):
+            tx = self._mosaic_x(0, x)
+            if self.m7sel & 0x01:
+                tx = 255 - tx
             px = (px_base + a * tx) >> 8
             py = (py_base + c * tx) >> 8
 
             outside = 0
             if (px | py) & ~1023:
-                if (self.m7sel & 0xC0) == 0x80:          # transparent outside
+                if (self.m7sel & 0xC0) == 0x80:
                     continue
-                if (self.m7sel & 0xC0) == 0xC0:          # character 0 outside
+                if (self.m7sel & 0xC0) == 0xC0:
                     outside = 1
                 px &= 1023
                 py &= 1023
@@ -592,10 +701,159 @@ cdef class PPU:
                 self.bg_idx[0][x] = colour
                 self.bg_pri[0][x] = 0
 
-        if self.mosaic_enable[0] and self.mosaic_size:
-            self._mosaic_x(0)
+    # ------------------------------------------------------------- windows ---
 
-    # ------------------------------------------------------------ sprites ---
+    cdef void _compute_windows(self, int x0, int x1) noexcept:
+        cdef int layer, x, in1, in2, r
+        cdef int l1 = self.win1_left, r1 = self.win1_right
+        cdef int l2 = self.win2_left, r2 = self.win2_right
+
+        for layer in range(6):
+            if not self.win_enabled[layer] and not self.win2_enabled[layer]:
+                for x in range(x0, x1):
+                    self.win_mask[layer][x] = 0
+                continue
+            for x in range(x0, x1):
+                in1 = 1 if (l1 <= x <= r1) else 0
+                if self.win_inverted[layer]:
+                    in1 = 1 - in1
+                in2 = 1 if (l2 <= x <= r2) else 0
+                if self.win2_inverted[layer]:
+                    in2 = 1 - in2
+
+                if self.win_enabled[layer] and self.win2_enabled[layer]:
+                    if self.win_logic[layer] == 0:
+                        r = in1 | in2
+                    elif self.win_logic[layer] == 1:
+                        r = in1 & in2
+                    elif self.win_logic[layer] == 2:
+                        r = in1 ^ in2
+                    else:
+                        r = 1 - (in1 ^ in2)
+                elif self.win_enabled[layer]:
+                    r = in1
+                else:
+                    r = in2
+                self.win_mask[layer][x] = r
+
+    # ------------------------------------------------------------- compose ---
+
+    cdef void _paint(self, int layer, int prio, int to_sub, int x0, int x1) noexcept:
+        cdef int x
+        cdef uint16_t idx
+        cdef int enabled, windowed
+
+        if to_sub:
+            enabled = self.sub_enable[layer]
+            windowed = self.sub_window[layer]
+        else:
+            enabled = self.main_enable[layer]
+            windowed = self.main_window[layer]
+        if not enabled:
+            return
+
+        if layer == 4:
+            for x in range(x0, x1):
+                if self.obj_pri[x] != prio:
+                    continue
+                if windowed and self.win_mask[4][x]:
+                    continue
+                idx = self.obj_idx[x]
+                if idx == 0:
+                    continue
+                if to_sub:
+                    self.sub_buf[x] = self.cgram[idx]
+                    self.sub_src[x] = 4
+                else:
+                    self.main_buf[x] = self.cgram[idx]
+                    self.main_src[x] = 4
+        else:
+            for x in range(x0, x1):
+                idx = self.bg_idx[layer][x]
+                if idx == 0 or self.bg_pri[layer][x] != prio:
+                    continue
+                if windowed and self.win_mask[layer][x]:
+                    continue
+                if to_sub:
+                    self.sub_buf[x] = self.cgram[idx]
+                    self.sub_src[x] = layer
+                else:
+                    self.main_buf[x] = self.cgram[idx]
+                    self.main_src[x] = layer
+
+    cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept:
+        cdef int x, i, sub_used, math_here, clip_here, halve, subtract
+        cdef int r, g, b, sr, sg, sb
+        cdef uint16_t main, sub, fixed
+        cdef int bright = self.brightness
+
+        fixed = <uint16_t>(self.fixed_r | (self.fixed_g << 5) | (self.fixed_b << 10))
+        subtract = 1 if (self.cgadsub & 0x80) else 0
+        sub_used = 1 if (self.cgwsel & 0x02) else 0
+
+        for x in range(x0, x1):
+            main = self.main_buf[x]
+
+            clip_here = self._region_black(self.cgwsel >> 6, self.win_mask[5][x])
+            if clip_here:
+                main = 0
+
+            math_here = self._region(self.cgwsel >> 4, self.win_mask[5][x])
+            if math_here and not clip_here:
+                i = self.main_src[x]
+                if i == 5:
+                    math_here = 1 if (self.cgadsub & 0x20) else 0
+                elif i == 4:
+                    math_here = 1 if ((self.cgadsub & 0x10) and self.obj_pal[x] >= 4) else 0
+                else:
+                    math_here = 1 if (self.cgadsub & (1 << i)) else 0
+
+            if math_here:
+                if sub_used:
+                    sub = self.sub_buf[x]
+                    halve = 1 if ((self.cgadsub & 0x40) and self.sub_src[x] != 5) else 0
+                else:
+                    sub = fixed
+                    halve = 1 if (self.cgadsub & 0x40) else 0
+
+                r = main & 0x1F
+                g = (main >> 5) & 0x1F
+                b = (main >> 10) & 0x1F
+                sr = sub & 0x1F
+                sg = (sub >> 5) & 0x1F
+                sb = (sub >> 10) & 0x1F
+                if subtract:
+                    r -= sr
+                    g -= sg
+                    b -= sb
+                    if r < 0: r = 0
+                    if g < 0: g = 0
+                    if b < 0: b = 0
+                else:
+                    r += sr
+                    g += sg
+                    b += sb
+                if halve:
+                    r >>= 1
+                    g >>= 1
+                    b >>= 1
+                if r > 31: r = 31
+                if g > 31: g = 31
+                if b > 31: b = 31
+            else:
+                r = main & 0x1F
+                g = (main >> 5) & 0x1F
+                b = (main >> 10) & 0x1F
+
+            if bright != 15:
+                r = self.light[bright][r]
+                g = self.light[bright][g]
+                b = self.light[bright][b]
+
+            row[x] = (0xFF000000
+                      | (<uint32_t>((r << 3) | (r >> 2)) << 16)
+                      | (<uint32_t>((g << 3) | (g >> 2)) << 8)
+                      | <uint32_t>((b << 3) | (b >> 2)))
 
     cdef void _render_objects(self, int line) noexcept:
         cdef int widths[8][2]
@@ -685,233 +943,6 @@ cdef class PPU:
                     self.obj_idx[screen_x] = 128 + palette * 16 + colour
                     self.obj_pri[screen_x] = prio
                     self.obj_pal[screen_x] = palette
-
-    # ------------------------------------------------------------ windows ---
-
-    cdef void _compute_windows(self, int line) noexcept:
-        cdef int layer, x, in1, in2, r
-        cdef int l1 = self.win1_left, r1 = self.win1_right
-        cdef int l2 = self.win2_left, r2 = self.win2_right
-
-        for layer in range(6):
-            if not self.win_enabled[layer] and not self.win2_enabled[layer]:
-                for x in range(SCREEN_W):
-                    self.win_mask[layer][x] = 0
-                continue
-            for x in range(SCREEN_W):
-                in1 = 1 if (l1 <= x <= r1) else 0
-                if self.win_inverted[layer]:
-                    in1 = 1 - in1
-                in2 = 1 if (l2 <= x <= r2) else 0
-                if self.win2_inverted[layer]:
-                    in2 = 1 - in2
-
-                if self.win_enabled[layer] and self.win2_enabled[layer]:
-                    if self.win_logic[layer] == 0:
-                        r = in1 | in2
-                    elif self.win_logic[layer] == 1:
-                        r = in1 & in2
-                    elif self.win_logic[layer] == 2:
-                        r = in1 ^ in2
-                    else:
-                        r = 1 - (in1 ^ in2)
-                elif self.win_enabled[layer]:
-                    r = in1
-                else:
-                    r = in2
-                self.win_mask[layer][x] = r
-
-    # ------------------------------------------------------------ compose ---
-
-    cdef void _paint(self, int layer, int prio, int to_sub) noexcept:
-        """Copy one layer/priority level onto the main or sub screen."""
-        cdef int x
-        cdef uint16_t idx
-        cdef int enabled, windowed
-
-        if to_sub:
-            enabled = self.sub_enable[layer]
-            windowed = self.sub_window[layer]
-        else:
-            enabled = self.main_enable[layer]
-            windowed = self.main_window[layer]
-        if not enabled:
-            return
-
-        if layer == 4:
-            for x in range(SCREEN_W):
-                if self.obj_pri[x] != prio:
-                    continue
-                if windowed and self.win_mask[4][x]:
-                    continue
-                idx = self.obj_idx[x]
-                if idx == 0:
-                    continue
-                if to_sub:
-                    self.sub_buf[x] = self.cgram[idx]
-                    self.sub_src[x] = 4
-                else:
-                    self.main_buf[x] = self.cgram[idx]
-                    self.main_src[x] = 4
-        else:
-            for x in range(SCREEN_W):
-                idx = self.bg_idx[layer][x]
-                if idx == 0 or self.bg_pri[layer][x] != prio:
-                    continue
-                if windowed and self.win_mask[layer][x]:
-                    continue
-                if to_sub:
-                    self.sub_buf[x] = self.cgram[idx]
-                    self.sub_src[x] = layer
-                else:
-                    self.main_buf[x] = self.cgram[idx]
-                    self.main_src[x] = layer
-
-    cdef void render_scanline(self, int line) noexcept:
-        cdef int x, i, sub_used
-        cdef uint32_t *row
-        cdef uint16_t main, sub, fixed
-        cdef int r, g, b, sr, sg, sb
-        cdef int math_here, clip_here, halve, subtract
-        cdef int bright = self.brightness
-        cdef int order_len
-        cdef int order[16][2]
-
-        if line < 0 or line >= SCREEN_H:
-            return
-        row = self.framebuffer + line * SCREEN_W
-
-        self.dbg_lines += 1
-        if (self.main_enable[0] or self.main_enable[1] or self.main_enable[2]
-                or self.main_enable[3] or self.main_enable[4]):
-            self.dbg_lines_enabled += 1
-        if self.forced_blank:
-            self.dbg_lines_blank += 1
-            for x in range(SCREEN_W):
-                row[x] = 0xFF000000
-            return
-
-        self._clear_layers()
-        self._compute_windows(line)
-
-        # Per-mode layer set and paint order (lowest priority painted first).
-        if self.bg_mode == 0:
-            self._render_bg(0, line, 2, 0)
-            self._render_bg(1, line, 2, 32)
-            self._render_bg(2, line, 2, 64)
-            self._render_bg(3, line, 2, 96)
-            order_len = self._order_mode0(order)
-        elif self.bg_mode == 1:
-            self._render_bg(0, line, 4, 0)
-            self._render_bg(1, line, 4, 0)
-            self._render_bg(2, line, 2, 0)
-            order_len = self._order_mode1(order)
-        elif self.bg_mode == 2:
-            self._render_bg(0, line, 4, 0)
-            self._render_bg(1, line, 4, 0)
-            order_len = self._order_mode23(order)
-        elif self.bg_mode == 3:
-            self._render_bg(0, line, 8, 0)
-            self._render_bg(1, line, 4, 0)
-            order_len = self._order_mode23(order)
-        elif self.bg_mode == 4:
-            self._render_bg(0, line, 8, 0)
-            self._render_bg(1, line, 2, 0)
-            order_len = self._order_mode23(order)
-        elif self.bg_mode == 5:
-            self._render_bg(0, line, 4, 0)
-            self._render_bg(1, line, 2, 0)
-            order_len = self._order_mode23(order)
-        elif self.bg_mode == 6:
-            self._render_bg(0, line, 4, 0)
-            order_len = self._order_mode6(order)
-        else:
-            self._render_mode7(line)
-            order_len = self._order_mode7(order)
-
-        self._render_objects(line)
-
-        # Backdrop.
-        for x in range(SCREEN_W):
-            self.main_buf[x] = self.cgram[0]
-            self.sub_buf[x] = self.cgram[0]
-            self.main_src[x] = 5
-            self.sub_src[x] = 5
-
-        for i in range(order_len):
-            self._paint(order[i][0], order[i][1], 0)
-            self._paint(order[i][0], order[i][1], 1)
-
-        # Colour math and brightness.
-        fixed = <uint16_t>(self.fixed_r | (self.fixed_g << 5) | (self.fixed_b << 10))
-        subtract = 1 if (self.cgadsub & 0x80) else 0
-        sub_used = 1 if (self.cgwsel & 0x02) else 0
-
-        for x in range(SCREEN_W):
-            main = self.main_buf[x]
-
-            # $2130 bits 6-7: force the main screen black in this region.
-            clip_here = self._region_black(self.cgwsel >> 6, self.win_mask[5][x])
-            if clip_here:
-                main = 0
-
-            math_here = self._region(self.cgwsel >> 4, self.win_mask[5][x])
-            if math_here and not clip_here:
-                i = self.main_src[x]
-                if i == 5:
-                    math_here = 1 if (self.cgadsub & 0x20) else 0
-                elif i == 4:
-                    # Only sprite palettes 4-7 take part in colour math.
-                    math_here = 1 if ((self.cgadsub & 0x10) and self.obj_pal[x] >= 4) else 0
-                else:
-                    math_here = 1 if (self.cgadsub & (1 << i)) else 0
-
-            if math_here:
-                if sub_used:
-                    sub = self.sub_buf[x]
-                    halve = 1 if ((self.cgadsub & 0x40) and self.sub_src[x] != 5) else 0
-                else:
-                    sub = fixed
-                    halve = 1 if (self.cgadsub & 0x40) else 0
-
-                r = main & 0x1F
-                g = (main >> 5) & 0x1F
-                b = (main >> 10) & 0x1F
-                sr = sub & 0x1F
-                sg = (sub >> 5) & 0x1F
-                sb = (sub >> 10) & 0x1F
-                if subtract:
-                    r -= sr
-                    g -= sg
-                    b -= sb
-                    if r < 0: r = 0
-                    if g < 0: g = 0
-                    if b < 0: b = 0
-                else:
-                    r += sr
-                    g += sg
-                    b += sb
-                if halve:
-                    r >>= 1
-                    g >>= 1
-                    b >>= 1
-                if r > 31: r = 31
-                if g > 31: g = 31
-                if b > 31: b = 31
-            else:
-                r = main & 0x1F
-                g = (main >> 5) & 0x1F
-                b = (main >> 10) & 0x1F
-
-            if bright != 15:
-                r = (r * (bright + 1)) >> 4
-                g = (g * (bright + 1)) >> 4
-                b = (b * (bright + 1)) >> 4
-
-            row[x] = (0xFF000000
-                      | (<uint32_t>((r << 3) | (r >> 2)) << 16)
-                      | (<uint32_t>((g << 3) | (g >> 2)) << 8)
-                      | <uint32_t>((b << 3) | (b >> 2)))
 
     cdef inline int _region(self, int mode, int inside) noexcept:
         """CGWSEL bits 5-4, colour-math enable: 0=always 1=inside 2=outside 3=never."""

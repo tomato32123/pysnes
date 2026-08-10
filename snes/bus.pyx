@@ -391,6 +391,10 @@ cdef class Bus:
         cdef uint32_t quotient, remainder
 
         if 0x2100 <= a <= 0x213F:
+            # Draw everything to the left of this write with the old state, so
+            # a mid-scanline change takes effect from here rather than from the
+            # start of the line.
+            self.ppu.catch_up(self._screen_x())
             self.ppu.write_reg(a, value)
             return
 
@@ -763,8 +767,11 @@ cdef class Bus:
         elif self.vcount == 0:
             self.in_vblank = 0
 
+        self.ppu.end_line()
         if 1 <= self.vcount <= self.vblank_start:
-            self.ppu.render_scanline(self.vcount - 1)
+            self.ppu.begin_line(self.vcount - 1)
+        else:
+            self.ppu.begin_line(-1)
 
         # HDMA runs late in the line, not at the boundary.
         if self.vcount < self.vblank_start and self.hdma_enabled:
@@ -791,6 +798,15 @@ cdef class Bus:
         if at <= self.master_clock:
             at = self.master_clock + 1
         self._schedule(EV_IRQ, at)
+
+    cdef inline int _screen_x(self) noexcept:
+        """Screen column the beam is at.  Output starts at dot 22."""
+        cdef int x = (<int>(self.master_clock - self.line_start) >> 2) - 22
+        if x < 0:
+            return 0
+        if x > 256:
+            return 256
+        return x
 
     cdef inline int _hcount(self) noexcept:
         return <int>(self.master_clock - self.line_start)
