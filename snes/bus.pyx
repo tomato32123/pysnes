@@ -546,6 +546,9 @@ cdef class Bus:
         cdef uint8_t bbus, param
         cdef uint32_t count
 
+        # DMA is clocked at one eighth of the master clock, so starting a
+        # transfer first waits for that edge: one to eight cycles, never zero.
+        self.tick(<int>(8 - (self.master_clock & 7)))
         self.tick(8)                                     # DMA startup overhead
         for ch in range(8):
             if not (channels & (1 << ch)):

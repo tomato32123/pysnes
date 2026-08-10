@@ -13,8 +13,8 @@ a suspicion into a located defect.
 - [x] Bus-access driven CPU timing: every access charges its address's cost
 - [x] Event scheduler on absolute deadlines (line, HDMA, IRQ, joypad, APU)
 - [x] Interrupts taken at instruction boundaries, as on hardware
-- [ ] **DMA cycle exactness**: alignment to the 8-cycle DMA clock, the CPU
-      stall, per-channel and per-transfer overhead measured rather than assumed
+- [x] **DMA cycle exactness**: eight cycles per byte, eight to start, eight
+      per channel, plus the wait for the DMA clock edge; asserted by tests
 - [ ] **HDMA init and reload timing**: the init pass at the top of the frame,
       indirect reloads, channels disabled mid-frame
 - [ ] **DRAM refresh**: 40 cycles stolen once per scanline, at a fixed dot
@@ -37,9 +37,8 @@ a suspicion into a located defect.
 
 The largest single gap. Everything below the first item depends on it.
 
-- [ ] **Dot-based rendering.** Registers written mid-scanline must take effect
-      from the dot they were written at. Today a line is drawn from the state
-      at its start, so every mid-scanline effect is lost.
+- [x] **Dot-based rendering**: a row is drawn in spans, caught up before every
+      write to $2100-$213F, so a mid-scanline change takes effect from its dot
 - [x] **Offset-per-tile** (modes 2, 4 and 6), covered by unit tests; no title
       in the local library reaches those modes during boot, so it has not
       been seen against real software yet
@@ -84,21 +83,21 @@ This is the part that decides whether any of the above converges.
       stamped, with first-difference reporting
 - [x] CPU suite: flags, addressing, decimal, RMW, block moves, timing
 - [x] Interrupt timing suite
-- [ ] **PPU output tests**: per-frame framebuffer hashes, so a rendering change
-      that alters output has to be justified
+- [x] **PPU output tests**: pixel-level assertions on backdrop, tiles, scroll,
+      brightness and the mid-scanline split, plus a scene hash
 - [ ] **Differential trace against a reference emulator.** The single highest
       -value item left: run the same test ROM here and in bsnes or ares, diff
       the traces, fix the first divergence. Turns "something looks wrong" into
       a cycle number.
-- [ ] DMA/HDMA and PPU register timing tests
+- [~] DMA timing tests done; HDMA reload and PPU register timing still open
 - [ ] SPC700 and DSP test ROMs
 - [ ] CI running the suite on every change
 
 ## Order of work
 
-1. Dot-based PPU rendering, with framebuffer-hash tests to hold it in place.
-2. Offset-per-tile, which needs the dot pipeline underneath it.
-3. DMA and HDMA cycle exactness, with tests.
+1. ~~Dot-based PPU rendering~~ done.
+2. ~~Offset-per-tile~~ done.
+3. ~~DMA cycle exactness~~ done; HDMA init and reload timing still open.
 4. The cartridge device layer, then SA-1 on top of it.
 5. Differential tracing against a reference, once there is a reference to hand.
 6. The DSP pipeline and SPC700 bus timing.

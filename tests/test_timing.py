@@ -214,6 +214,130 @@ loop:   lda $4212
         FAILURES.append("H-blank reported at dot %d, expected >= 274" % dot)
 
 
+# ------------------------------------------------------------------ DMA ----
+
+DMA_SOURCE = """
+        sep #$20
+        lda #$80
+        sta $2115
+        rep #$20
+        lda #$0000
+        sta $2116
+        sep #$20
+        lda #$01
+        sta $4300               ; channel 0: two registers, A -> B
+        lda #$18
+        sta $4301               ; to $2118
+        lda #$01
+        sta $4310               ; channel 1, same shape
+        lda #$18
+        sta $4311
+        rep #$20
+        lda #$0000
+        sta $4302
+        sta $4312
+        sep #$20
+        lda #$7E
+        sta $4304
+        sta $4314
+        rep #$20
+        lda #$%(count)04X
+        sta $4305
+        lda #$%(count)04X
+        sta $4315
+        sep #$20
+        nop                     ; marker
+        lda #$%(mask)02X
+        sta $420B
+        nop
+"""
+
+
+def dma_cost(nbytes, mask=0x01):
+    """Master cycles the STA $420B takes, including the transfer."""
+    image, _labels = assemble_image(DMA_SOURCE % {"count": nbytes, "mask": mask})
+    machine = System(rom_data=image)
+    machine.cpu.trace_start(capacity=20000, level=1)
+    for _ in range(2):
+        machine.run_frame()
+        if machine.bus.read(0x7E4FFF):
+            break
+    recs = machine.cpu.trace_instructions()
+    for i in range(2, len(recs) - 1):
+        if recs[i][3] == 0x8D and recs[i - 1][3] == 0xA9 and recs[i - 2][3] == 0xEA:
+            return recs[i + 1][0] - recs[i][0]
+    raise AssertionError("could not find the STA $420B")
+
+
+# STA abs from slow ROM: three fetches at 8 plus a write to $420B at 6.
+STA_COST = 8 * 3 + 6
+
+
+def test_dma_costs_eight_cycles_per_byte():
+    small = dma_cost(8)
+    large = dma_cost(40)
+    check("DMA per-byte cost", (large - small) // 32, 8)
+
+
+def test_dma_fixed_overhead():
+    """One channel: eight cycles to start, eight for the channel, eight per
+    byte, plus one to eight cycles waiting for the DMA clock edge."""
+    total = dma_cost(1)
+    overhead = total - STA_COST - 8          # take off the single byte
+    check_near("DMA fixed overhead", overhead, 16 + 4, 4)
+
+
+def test_a_second_channel_costs_one_more_setup():
+    one = dma_cost(4, mask=0x01)
+    two = dma_cost(4, mask=0x03)
+    # The second channel adds its own eight-cycle setup and its four bytes.
+    check_near("second channel cost", two - one, 8 + 4 * 8, 8)
+
+
+def test_hdma_steals_time_from_the_cpu():
+    """An active HDMA channel must cost the CPU cycles every visible line."""
+    def instructions_per_frame(enable_hdma):
+        source = """
+        sep #$20
+        lda #$00
+        sta $4300               ; one register, A -> B
+        lda #$00
+        sta $4301               ; $2100
+        rep #$20
+        lda #$5000
+        sta $4302               ; table in WRAM
+        sep #$20
+        lda #$7E
+        sta $4304
+        ; table: 127 lines of repeat, then a terminator
+        lda #$FF
+        sta $7E5000
+        ldx #$00
+fill:   lda #$0F
+        sta $7E5001,x
+        inx
+        bne fill
+        lda #%s
+        sta $420C
+spin:   bra spin
+""" % ("$01" if enable_hdma else "$00")
+        image, _ = assemble_image(source)
+        machine = System(rom_data=image)
+        machine.run_frame()
+        before = machine.cpu.instructions
+        machine.run_frame()
+        return machine.cpu.instructions - before
+
+    without = instructions_per_frame(False)
+    with_hdma = instructions_per_frame(True)
+    if with_hdma >= without:
+        FAILURES.append("HDMA stole no CPU time: %d instructions with, %d without"
+                        % (with_hdma, without))
+    else:
+        print("      HDMA cost the CPU %d instructions per frame (%.1f%%)"
+              % (without - with_hdma, (without - with_hdma) * 100.0 / without))
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:
