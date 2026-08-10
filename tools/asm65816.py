@@ -245,7 +245,10 @@ class Assembler:
             width = disasm.LENGTH[c] - 1
             if value < (1 << (8 * width)):
                 return c
-        return usable[-1]
+        # Silently truncating here would emit a store to a completely
+        # different address, which is very hard to see afterwards.
+        raise AsmError("$%X does not fit any addressing mode %s accepts "
+                       "(widest is %s)" % (value, upper, usable[-1]))
 
     def _emit_immediate(self, upper, value, forced):
         for mode in (IMM_M, IMM_X, IMM8):

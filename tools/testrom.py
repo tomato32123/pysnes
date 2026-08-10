@@ -43,6 +43,9 @@ __entry:
         sep #$30
         phk
         plb                             ; data bank = program bank
+        lda #$00                        ; WRAM powers up filled, so clear the
+        sta $7E4FFF                     ; completion flag before anyone reads it
+                                        ; (STZ has no long addressing mode)
         jmp __main
 __nmi:  rti
 __irq:  rti

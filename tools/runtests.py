@@ -4,8 +4,8 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULES = ["test_cpu", "test_timing", "test_dsp", "test_cart",
-           "test_state", "test_rewind"]
+MODULES = ["test_cpu", "test_timing", "test_ppu", "test_dsp",
+           "test_cart", "test_state", "test_rewind"]
 
 
 def main():
