@@ -15,8 +15,9 @@ a suspicion into a located defect.
 - [x] Interrupts taken at instruction boundaries, as on hardware
 - [x] **DMA cycle exactness**: eight cycles per byte, eight to start, eight
       per channel, plus the wait for the DMA clock edge; asserted by tests
-- [ ] **HDMA init and reload timing**: the init pass at the top of the frame,
-      indirect reloads, channels disabled mid-frame
+- [x] **HDMA init and reload**: the init pass at the top of the frame, the
+      transfer-then-advance order, repeat and non-repeat counts, indirect
+      reloads, and a mid-frame enable waiting for the next frame
 - [ ] **DRAM refresh**: 40 cycles stolen once per scanline, at a fixed dot
 - [ ] **Short and long scanlines**: 1360-cycle line 240 on a non-interlaced
       odd field, and the PAL equivalents
@@ -91,7 +92,7 @@ This is the part that decides whether any of the above converges.
       -value item left: run the same test ROM here and in bsnes or ares, diff
       the traces, fix the first divergence. Turns "something looks wrong" into
       a cycle number.
-- [~] DMA timing tests done; HDMA reload and PPU register timing still open
+- [x] DMA and HDMA timing tests; PPU register timing still open
 - [ ] SPC700 and DSP test ROMs
 - [ ] CI running the suite on every change
 
@@ -99,7 +100,7 @@ This is the part that decides whether any of the above converges.
 
 1. ~~Dot-based PPU rendering~~ done.
 2. ~~Offset-per-tile~~ done.
-3. ~~DMA cycle exactness~~ done; HDMA init and reload timing still open.
+3. ~~DMA and HDMA exactness~~ done.
 4. The cartridge device layer, then SA-1 on top of it.
 5. Differential tracing against a reference, once there is a reference to hand.
 6. The DSP pipeline and SPC700 bus timing.

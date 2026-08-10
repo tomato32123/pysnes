@@ -594,26 +594,49 @@ cdef class Bus:
     # =====================================================================
     # HDMA
     # =====================================================================
+    #
+    # A channel walks a table in the cartridge.  Each entry is a line count
+    # followed, in direct mode, by the bytes to send.  Bit 7 of the count
+    # selects repeat mode: send on every one of those lines rather than once
+    # and hold.  A count of zero ends the channel for the frame.
+    #
+    # The per-line pass transfers for every channel first and only then
+    # advances them, which is the order the hardware uses and which matters
+    # because reloading reads more of the table.
+
+    cdef void _hdma_reload(self, int ch) noexcept:
+        """Read the next line count, and an indirect address if the channel
+        uses one.  A zero count finishes the channel."""
+        cdef uint32_t bank = self.dma_abus[ch] & 0xFF0000
+        self.hdma_line[ch] = self.read8(bank | self.hdma_table[ch])
+        self.hdma_table[ch] += 1
+        if self.hdma_line[ch] == 0:
+            self.hdma_active[ch] = 0
+            self.hdma_do_transfer[ch] = 0
+        else:
+            self.hdma_active[ch] = 1
+            self.hdma_do_transfer[ch] = 1
+        # The indirect address is fetched even for a terminating entry: the
+        # hardware has already started the read by the time it sees the zero.
+        if self.dma_param[ch] & 0x40:
+            self.dma_size[ch] = self._hdma_fetch16(ch)
 
     cdef void hdma_init(self) noexcept:
+        """Start of frame: point every enabled channel at its table."""
         cdef int ch
         for ch in range(8):
             self.hdma_active[ch] = 0
             self.hdma_do_transfer[ch] = 0
+        if not self.hdma_enabled:
+            return
+        self.tick(<int>(8 - (self.master_clock & 7)))
+        self.tick(18)
+        for ch in range(8):
             if not (self.hdma_enabled & (1 << ch)):
                 continue
+            self.tick(8)
             self.hdma_table[ch] = <uint16_t>(self.dma_abus[ch] & 0xFFFF)
-            self.hdma_line[ch] = self.read8((self.dma_abus[ch] & 0xFF0000)
-                                            | self.hdma_table[ch])
-            self.hdma_table[ch] += 1
-            if self.hdma_line[ch] == 0:
-                continue
-            self.hdma_active[ch] = 1
-            self.hdma_do_transfer[ch] = 1
-            if self.dma_param[ch] & 0x40:                # indirect
-                self.dma_size[ch] = self._hdma_fetch16(ch)
-        if self.hdma_enabled:
-            self.tick(18)
+            self._hdma_reload(ch)
 
     cdef inline uint16_t _hdma_fetch16(self, int ch) noexcept:
         cdef uint32_t bank = self.dma_abus[ch] & 0xFF0000
@@ -623,51 +646,59 @@ cdef class Bus:
         self.hdma_table[ch] += 1
         return lo | (hi << 8)
 
-    cdef void hdma_run(self) noexcept:
-        cdef int ch, i, mode, unit
+    cdef void _hdma_transfer(self, int ch) noexcept:
+        cdef uint8_t param = self.dma_param[ch]
+        cdef int mode = param & 7
+        cdef int unit = DMA_LEN[mode]
+        cdef uint8_t bbus = self.dma_bbus[ch]
         cdef uint32_t src
-        cdef uint8_t bbus, param, line
+        cdef int i
+
+        self.tick(8)
+        for i in range(unit):
+            if param & 0x40:                             # indirect
+                src = ((<uint32_t>self.dma_indirect_bank[ch] << 16)
+                       | ((self.dma_size[ch] + i) & 0xFFFF))
+            else:
+                src = (self.dma_abus[ch] & 0xFF0000) | self.hdma_table[ch]
+                self.hdma_table[ch] += 1
+            self.tick(8)
+            if param & 0x80:
+                self.write8(src, self._dma_read_b(bbus + DMA_OFF[mode][i]))
+            else:
+                self._dma_write_b(bbus + DMA_OFF[mode][i], self.read8(src))
+        if param & 0x40:
+            self.dma_size[ch] = (self.dma_size[ch] + unit) & 0xFFFF
+
+    cdef void _hdma_advance(self, int ch) noexcept:
+        """Count this line off, and reload when the entry runs out."""
+        self.hdma_line[ch] -= 1
+        self.hdma_do_transfer[ch] = 1 if (self.hdma_line[ch] & 0x80) else 0
+        if (self.hdma_line[ch] & 0x7F) == 0:
+            self._hdma_reload(ch)
+
+    cdef void hdma_run(self) noexcept:
+        cdef int ch
+        cdef int any = 0
 
         if not self.hdma_enabled:
             return
+        for ch in range(8):
+            if self.hdma_active[ch] and (self.hdma_enabled & (1 << ch)):
+                any = 1
+                break
+        if not any:
+            return
+
+        self.tick(<int>(8 - (self.master_clock & 7)))
         self.tick(18)
         for ch in range(8):
-            if not self.hdma_active[ch] or not (self.hdma_enabled & (1 << ch)):
-                continue
-            param = self.dma_param[ch]
-            mode = param & 7
-            unit = DMA_LEN[mode]
-            bbus = self.dma_bbus[ch]
-
-            if self.hdma_do_transfer[ch]:
-                self.tick(8)
-                for i in range(unit):
-                    if param & 0x40:                     # indirect
-                        src = ((<uint32_t>self.dma_indirect_bank[ch] << 16)
-                               | ((self.dma_size[ch] + i) & 0xFFFF))
-                    else:
-                        src = (self.dma_abus[ch] & 0xFF0000) | self.hdma_table[ch]
-                        self.hdma_table[ch] += 1
-                    self.tick(8)
-                    if param & 0x80:
-                        self.write8(src, self._dma_read_b(bbus + DMA_OFF[mode][i]))
-                    else:
-                        self._dma_write_b(bbus + DMA_OFF[mode][i], self.read8(src))
-                if param & 0x40:
-                    self.dma_size[ch] = (self.dma_size[ch] + unit) & 0xFFFF
-
-            self.hdma_line[ch] -= 1
-            self.hdma_do_transfer[ch] = 1 if (self.hdma_line[ch] & 0x80) else 0
-
-            if (self.hdma_line[ch] & 0x7F) == 0:
-                line = self.read8((self.dma_abus[ch] & 0xFF0000) | self.hdma_table[ch])
-                self.hdma_table[ch] += 1
-                self.hdma_line[ch] = line
-                if param & 0x40:
-                    self.dma_size[ch] = self._hdma_fetch16(ch)
-                self.hdma_do_transfer[ch] = 1
-                if line == 0:
-                    self.hdma_active[ch] = 0
+            if (self.hdma_active[ch] and (self.hdma_enabled & (1 << ch))
+                    and self.hdma_do_transfer[ch]):
+                self._hdma_transfer(ch)
+        for ch in range(8):
+            if self.hdma_active[ch] and (self.hdma_enabled & (1 << ch)):
+                self._hdma_advance(ch)
 
     # =====================================================================
     # timing

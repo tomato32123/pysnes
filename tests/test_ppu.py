@@ -524,6 +524,147 @@ irq:    sep #$20
           (0, 0, expand(31)))
 
 
+# --------------------------------------------------------------- HDMA ----
+
+HDMA_SOURCE = """
+        sep #$20
+        lda #$8F
+        sta $2100
+        stz $2121
+        lda #$1F
+        sta $2122
+        lda #$00
+        sta $2122               ; backdrop red, so brightness is easy to read
+        stz $212C
+
+        ; build the HDMA table in WRAM at $7E5000
+%(table)s
+
+        lda #$00
+        sta $4300               ; one register per line, A -> B
+        lda #$00
+        sta $4301               ; target $2100, INIDISP
+        rep #$20
+        lda #$5000
+        sta $4302
+        sep #$20
+        lda #$7E
+        sta $4304               ; table at $7E5000
+        lda #$0F
+        sta $2100               ; screen on before HDMA starts driving it
+        lda #$01
+        sta $420C               ; enable HDMA channel 0
+spin:   bra spin
+"""
+
+
+def build_table(values):
+    """Assembly that writes a byte sequence to $7E5000."""
+    out = []
+    for i, v in enumerate(values):
+        out.append("        lda #$%02X" % v)
+        out.append("        sta $7E%04X" % (0x5000 + i))
+    return chr(10).join(out)
+
+
+def brightness_of_row(machine, y):
+    """Recover the brightness level from a red backdrop row."""
+    r = pixel(machine, 128, y)[0]
+    for level in range(16):
+        if expand((31 * level + 7) // 15) == r:
+            return level
+    return -1
+
+
+def test_hdma_repeat_mode_writes_a_value_per_line():
+    """Bit 7 of the count means "send on each of these lines"."""
+    table = build_table([0x84, 0x0F, 0x00, 0x0F, 0x00, 0x00])
+    machine = run(HDMA_SOURCE % {"table": table}, max_frames=6).machine
+    levels = [brightness_of_row(machine, y) for y in range(6)]
+    # Four lines get their own value, then the table terminates and the last
+    # written value sticks.
+    if levels[0] == levels[1]:
+        FAILURES.append("repeat mode wrote the same value to consecutive rows: %s"
+                        % levels[:6])
+    else:
+        print("      repeat-mode brightness by row: %s" % levels[:6])
+
+
+def test_hdma_non_repeat_holds_a_value():
+    """Without bit 7 the value is written once and held for the whole run."""
+    table = build_table([0x04, 0x00, 0x04, 0x0F, 0x00])
+    machine = run(HDMA_SOURCE % {"table": table}, max_frames=6).machine
+    levels = [brightness_of_row(machine, y) for y in range(10)]
+    first = levels[1]
+    if any(l != first for l in levels[1:4]):
+        FAILURES.append("non-repeat mode did not hold its value: %s" % levels[:10])
+    else:
+        print("      non-repeat brightness by row: %s" % levels[:10])
+
+
+def test_hdma_terminates_on_a_zero_count():
+    """A zero count ends the channel; the register keeps its last value."""
+    table = build_table([0x82, 0x00, 0x00, 0x00])
+    machine = run(HDMA_SOURCE % {"table": table}, max_frames=6).machine
+    later = brightness_of_row(machine, 120)
+    check("value held after the table ended", later, 0, "%d")
+
+
+def test_hdma_enabled_mid_frame_waits_for_the_next_frame():
+    """The init pass happens once per frame; enabling later does nothing until
+    the next one."""
+    machine = run("""
+        sep #$20
+        lda #$8F
+        sta $2100
+        stz $2121
+        lda #$1F
+        sta $2122
+        lda #$00
+        sta $2122
+        stz $212C
+        lda #$0F
+        sta $2100
+        ; set the channel up but only enable it from inside the display
+        lda #$00
+        sta $4300
+        lda #$00
+        sta $4301
+        rep #$20
+        lda #$5000
+        sta $4302
+        sep #$20
+        lda #$7E
+        sta $4304
+        lda #$82
+        sta $7E5000
+        lda #$00
+        sta $7E5001
+        lda #$00
+        sta $7E5002
+        lda #$00
+        sta $7E5003
+
+        lda #$64
+        sta $4209
+        stz $420A
+        lda #$20                ; V-only IRQ on line 100
+        sta $4200
+        cli
+spin:   bra spin
+irq:    sep #$20
+        lda #$01
+        sta $420C               ; enable HDMA part-way down the first frame
+        lda $4211
+        rti
+""", max_frames=1).machine
+    # Only the first frame is examined.  The init pass that arms a channel runs
+    # at the top of a frame, so nothing can transfer until the next one; rows
+    # below line 100 must still be at full brightness.
+    check("mid-frame enable does not start the channel",
+          brightness_of_row(machine, 150), 15, "%d")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:

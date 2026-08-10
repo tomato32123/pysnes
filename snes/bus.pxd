@@ -108,6 +108,9 @@ cdef class Bus:
     cdef void _dma_write_b(self, uint8_t bbus, uint8_t value) noexcept
     cdef uint8_t _dma_read_b(self, uint8_t bbus) noexcept
     cdef uint16_t _hdma_fetch16(self, int ch) noexcept
+    cdef void _hdma_reload(self, int ch) noexcept
+    cdef void _hdma_transfer(self, int ch) noexcept
+    cdef void _hdma_advance(self, int ch) noexcept
     cdef void _schedule(self, int kind, int64_t when) noexcept
     cdef void _cancel(self, int kind) noexcept
     cdef void _rescan(self) noexcept
