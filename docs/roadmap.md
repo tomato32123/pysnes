@@ -40,7 +40,9 @@ The largest single gap. Everything below the first item depends on it.
 - [ ] **Dot-based rendering.** Registers written mid-scanline must take effect
       from the dot they were written at. Today a line is drawn from the state
       at its start, so every mid-scanline effect is lost.
-- [ ] **Offset-per-tile** (modes 2, 4 and 6) — not implemented at all
+- [x] **Offset-per-tile** (modes 2, 4 and 6), covered by unit tests; no title
+      in the local library reaches those modes during boot, so it has not
+      been seen against real software yet
 - [ ] VRAM, CGRAM and OAM access restrictions during active display
 - [ ] Sprite evaluation timing, and exact range-over / time-over
 - [ ] OAM address reload and priority rotation

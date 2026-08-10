@@ -283,6 +283,107 @@ nmi:    sep #$20
         print("      split column: %d (HTIME 150 -> column 128)" % edge)
 
 
+# --------------------------------------------------- offset-per-tile ----
+
+OPT_SETUP = """
+        sep #$20
+        lda #$8F
+        sta $2100
+
+        ; palette 0 = blue backdrop, 1 = red
+        stz $2121
+        lda #$00
+        sta $2122
+        lda #$7C
+        sta $2122
+        lda #$1F
+        sta $2122
+        lda #$00
+        sta $2122
+
+        lda #$80
+        sta $2115
+
+        ; tile 1 at word $0010: solid colour 1
+        rep #$20
+        lda #$0010
+        sta $2116
+        ldx #$0008
+optlo:  lda #$00FF
+        sta $2118
+        dex
+        bne optlo
+        ldx #$0008
+opthi:  lda #$0000
+        sta $2118
+        dex
+        bne opthi
+
+        ; BG1 tilemap at word $0400: the first two tiles are solid, the rest
+        ; empty, so shifting a column has something visible to reveal
+        lda #$0400
+        sta $2116
+        lda #$0001
+        sta $2118
+        lda #$0001
+        sta $2118
+        ldx #$001E
+map1:   lda #$0000
+        sta $2118
+        dex
+        bne map1
+
+        ; BG3 tilemap at word $0800 holds the per-column offsets.
+        ; Entry for screen column 1 sits at BG3 tile column 0.
+        lda #$0800
+        sta $2116
+        lda #%(entry)s
+        sta $2118
+        sep #$20
+
+        lda #$04
+        sta $2107               ; BG1 map base $0400
+        lda #$08
+        sta $2109               ; BG3 map base $0800
+        stz $210B               ; BG1 characters at $0000
+        stz $210C               ; BG3 characters at $0000
+        lda #$02
+        sta $2105               ; mode 2: BG3 is the offset source
+        lda #$01
+        sta $212C               ; BG1 on the main screen
+        lda #$0F
+        sta $2100
+spin:   bra spin
+"""
+
+
+def test_offset_per_tile_shifts_one_column():
+    """Mode 2: a BG3 entry with bit 13 set moves that column of BG1.
+
+    Only the first two tiles of the BG1 row are solid.  Column 1 normally
+    shows the second of them; an offset of 16 makes it sample two tiles
+    further along, which is empty, so the column turns into backdrop while
+    column 0 -- which has no entry -- stays solid.
+    """
+    plain = run(OPT_SETUP % {"entry": "$0000"}, max_frames=4).machine
+    shifted = run(OPT_SETUP % {"entry": "$2010"}, max_frames=4).machine
+
+    red = (expand(31), 0, 0)
+    blue = (0, 0, expand(31))
+    check("column 0 has no entry and stays solid", pixel(shifted, 4, 0), red)
+    check("column 1 is solid without an offset", pixel(plain, 12, 0), red)
+    check("column 1 moves to empty tilemap with one", pixel(shifted, 12, 0), blue)
+
+
+def test_offset_per_tile_ignores_the_other_layer_bit():
+    """An entry marked for BG2 only must leave BG1 alone."""
+    bg2_only = run(OPT_SETUP % {"entry": "$4020"}, max_frames=4).machine
+    plain = run(OPT_SETUP % {"entry": "$0000"}, max_frames=4).machine
+    for x in (4, 12, 20):
+        check("BG2-only entry leaves BG1 at x=%d" % x,
+              pixel(bg2_only, x, 0), pixel(plain, x, 0))
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:

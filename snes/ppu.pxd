@@ -134,6 +134,8 @@ cdef class PPU:
     cdef void _render_bg(self, int bg, int line, int bpp, int pal_base,
                          int x0, int x1) noexcept
     cdef void _render_mode7(self, int line, int x0, int x1) noexcept
+    cdef uint16_t _bg3_entry(self, int tile_x, int tile_y) noexcept
+    cdef void _opt_offsets(self, int bg, int x, int *out_h, int *out_v) noexcept
     cdef void _render_objects(self, int line) noexcept
     cdef void _compute_windows(self, int x0, int x1) noexcept
     cdef void _paint(self, int layer, int prio, int to_sub, int x0, int x1) noexcept

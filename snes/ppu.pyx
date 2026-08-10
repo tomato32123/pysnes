@@ -559,7 +559,7 @@ cdef class PPU:
         elif self.bg_mode == 2:
             self._render_bg(0, line, 4, 0, x0, x1)
             self._render_bg(1, line, 4, 0, x0, x1)
-            order_len = self._order_mode23(order)
+            order_len = self._order_mode23(order)      # BG3 supplies offsets
         elif self.bg_mode == 3:
             self._render_bg(0, line, 8, 0, x0, x1)
             self._render_bg(1, line, 4, 0, x0, x1)
@@ -591,13 +591,72 @@ cdef class PPU:
 
         self._compose(row, x0, x1)
 
+    # --------------------------------------------------- offset-per-tile ---
+    #
+    # In modes 2, 4 and 6, BG3 is not drawn.  Its tilemap instead supplies a
+    # scroll offset for each 8-pixel column of BG1 and BG2, which is how those
+    # modes bend a layer column by column.
+    #
+    # An entry carries the offset in its low bits, with bit 13 meaning "apply
+    # to BG1" and bit 14 "apply to BG2".  Modes 2 and 6 read two entries, one
+    # row apart, for the horizontal and vertical offsets; mode 4 reads one and
+    # takes bit 15 to say which of the two it is.  The leftmost column has no
+    # entry and keeps the layer's own scroll.
+
+    cdef uint16_t _bg3_entry(self, int tile_x, int tile_y) noexcept:
+        cdef uint32_t base = self.bg_map_base[2]
+        cdef uint32_t screen = 0
+        if self.bg_map_wide[2] and (tile_x & 0x20):
+            screen += 0x400
+        if self.bg_map_tall[2] and (tile_y & 0x20):
+            screen += 0x800 if self.bg_map_wide[2] else 0x400
+        return self.vram[(base + screen + ((tile_y & 0x1F) << 5) + (tile_x & 0x1F)) & 0x7FFF]
+
+    cdef void _opt_offsets(self, int bg, int x, int *out_h, int *out_v) noexcept:
+        cdef int col = x >> 3
+        cdef int h = self.bg_hofs[bg]
+        cdef int v = self.bg_vofs[bg]
+        cdef int applies = 0x2000 if bg == 0 else 0x4000
+        cdef int tile_x, tile_y
+        cdef uint16_t he, ve
+
+        if col == 0:
+            out_h[0] = h
+            out_v[0] = v
+            return
+
+        tile_x = (((col - 1) << 3) + self.bg_hofs[2]) >> 3
+        tile_y = self.bg_vofs[2] >> 3
+        he = self._bg3_entry(tile_x, tile_y)
+
+        # The offset is the low 13 bits; bits 13-15 are the apply flags and the
+        # mode 4 direction bit, and must not leak into the scroll value.
+        if self.bg_mode == 4:
+            if he & applies:
+                if he & 0x8000:
+                    v = he & 0x1FFF
+                else:
+                    h = ((he & 0x1FFF) & ~7) | (self.bg_hofs[bg] & 7)
+        else:
+            ve = self._bg3_entry(tile_x, tile_y + 1)
+            if he & applies:
+                h = ((he & 0x1FFF) & ~7) | (self.bg_hofs[bg] & 7)
+            if ve & applies:
+                v = ve & 0x1FFF
+        out_h[0] = h
+        out_v[0] = v
+
     # ------------------------------------------------------------------ BG ---
 
     cdef void _render_bg(self, int bg, int line, int bpp, int pal_base,
                          int x0, int x1) noexcept:
         cdef int tile_shift = 3 + self.bg_tile_size[bg]
-        cdef int y = self._mosaic_y(bg, line) + self.bg_vofs[bg]
+        cdef int base_y = self._mosaic_y(bg, line)
+        cdef int y = base_y + self.bg_vofs[bg]
         cdef int hofs = self.bg_hofs[bg]
+        cdef int opt = 1 if (bg < 2 and (self.bg_mode == 2 or self.bg_mode == 4
+                                         or self.bg_mode == 6)) else 0
+        cdef int opt_h, opt_v
         cdef uint32_t map_base = self.bg_map_base[bg]
         cdef uint32_t chr_base = self.bg_chr_base[bg]
         cdef int words_per_tile = bpp * 4
@@ -608,6 +667,10 @@ cdef class PPU:
         cdef int px_in_tile, py_in_tile
 
         for x in range(x0, x1):
+            if opt:
+                self._opt_offsets(bg, x, &opt_h, &opt_v)
+                hofs = opt_h
+                y = base_y + opt_v
             sx = self._mosaic_x(bg, x) + hofs
             tile_x = sx >> tile_shift
             tile_y = y >> tile_shift
