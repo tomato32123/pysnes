@@ -42,9 +42,47 @@ KEYMAP = {
 }
 
 
+FROZEN = getattr(sys, "frozen", False)
+
+
+def ask_for_rom():
+    """No ROM on the command line: offer a file picker, or explain how to pass one."""
+    try:
+        import tkinter
+        from tkinter import filedialog
+    except ImportError:
+        fail("Pass a ROM: drag a .smc onto this program, or run it from a"
+             + chr(10) + "terminal with the path as its argument.")
+        return None
+    root = tkinter.Tk()
+    root.withdraw()
+    path = filedialog.askopenfilename(
+        title="pysnes - choose a ROM",
+        filetypes=[("SNES ROMs", "*.smc *.sfc *.fig *.swc"), ("All files", "*.*")])
+    root.destroy()
+    return path or None
+
+
+def fail(message):
+    """Report a startup problem: a dialog when frozen, stderr otherwise."""
+    if FROZEN:
+        try:
+            import tkinter
+            from tkinter import messagebox
+            root = tkinter.Tk()
+            root.withdraw()
+            messagebox.showerror("pysnes", message)
+            root.destroy()
+            return 1
+        except Exception:
+            pass
+    print(message, file=sys.stderr)
+    return 1
+
+
 def parse_args(argv):
     ap = argparse.ArgumentParser(description="pysnes")
-    ap.add_argument("rom", help="path to a .smc / .sfc image")
+    ap.add_argument("rom", nargs="?", help="path to a .smc / .sfc image")
     ap.add_argument("--scale", type=int, default=3, help="window scale factor")
     ap.add_argument("--no-audio", action="store_true", help="do not open an audio device")
     ap.add_argument("--frames", type=int, default=0,
@@ -54,8 +92,12 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
+    if not args.rom:
+        args.rom = ask_for_rom()
+    if not args.rom:
+        return 1
     if not os.path.exists(args.rom):
-        raise SystemExit("no such ROM: %s" % args.rom)
+        return fail("no such ROM:" + chr(10) + args.rom)
 
     machine = System(args.rom)
     print(machine.cart.describe())
@@ -74,7 +116,7 @@ def main(argv=None):
         audio = open_audio(machine)
 
     held = set()
-    state_path = os.path.splitext(args.rom)[0] + ".state"
+    state_path = machine.state_path
     running = True
     frames = 0
     fps_t0 = time.perf_counter()
@@ -182,4 +224,10 @@ def load_state(machine, path):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception:
+        import traceback
+        sys.exit(fail(traceback.format_exc()))

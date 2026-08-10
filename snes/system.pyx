@@ -18,6 +18,15 @@ from snes.bus import Bus as PyBus
 from snes.cpu import CPU as PyCPU
 
 
+# When frozen by PyInstaller the package lives in a temporary extraction
+# directory that is deleted on exit, so saves must sit next to the executable.
+def _app_dir():
+    import sys
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+
+
 # Controller bit layout as seen at $4218/$4219 and through $4016.
 BUTTONS = {
     "B": 0x8000, "Y": 0x4000, "SELECT": 0x2000, "START": 0x1000,
@@ -47,8 +56,7 @@ cdef class System:
             # Battery saves live in pysnes/saves/, never next to the ROM: an
             # existing .srm there belongs to whatever emulator wrote it and
             # must not be overwritten.  It is still read once, to import it.
-            saves = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "saves")
-            saves = os.path.normpath(saves)
+            saves = os.path.join(_app_dir(), "saves")
             os.makedirs(saves, exist_ok=True)
             name = os.path.splitext(os.path.basename(rom_path))[0]
             self.sram_path = os.path.join(saves, name + ".srm")
@@ -97,6 +105,16 @@ cdef class System:
         for name in names:
             mask |= BUTTONS[name.upper()]
         self.bus.set_pad(index, mask)
+
+    @property
+    def state_path(self):
+        """Where F2/F4 keep their snapshot: alongside the battery save."""
+        if not self.rom_path:
+            return None
+        name = os.path.splitext(os.path.basename(self.rom_path))[0]
+        saves = os.path.join(_app_dir(), "saves")
+        os.makedirs(saves, exist_ok=True)
+        return os.path.join(saves, name + ".state")
 
     # -- persistence ---------------------------------------------------------
 

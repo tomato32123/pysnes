@@ -99,6 +99,23 @@ Options: `--scale N` (window size, default 3), `--no-audio`, and `--frames N`
 | F5 | write SRAM now |
 | Esc | quit (SRAM is written on exit) |
 
+### Building a standalone .exe
+
+```
+pip install pyinstaller
+pyinstaller pysnes.spec --noconfirm
+```
+
+Produces a single `dist/pysnes.exe` (~18 MB) with Python, pygame and the
+compiled cores inside. Drag a ROM onto it, or double-click and pick one
+from the file dialog. Saves and save states go to a `saves/` folder next
+to the executable — not into the temporary unpack directory, which is
+deleted on exit.
+
+The cores are Cython extension modules, so PyInstaller's import scanner
+cannot see through them; every `snes.*` module is listed explicitly in the
+spec. Rebuild the extensions with `build.py` before packaging.
+
 ### Where saves go
 
 Battery saves are written to `saves/<rom name>.srm` inside this project, never
