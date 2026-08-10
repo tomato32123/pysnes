@@ -16,6 +16,9 @@ from snes.apu cimport APU
 
 
 cdef enum:
+    # The automatic controller read starts just after V-blank begins and
+    # holds $4212 bit 0 for this many master cycles -- about three lines.
+    JOYPAD_READ_CYCLES = 4224
     CYCLES_PER_LINE = 1364
     LINES_NTSC = 262
     LINES_PAL = 312
@@ -167,6 +170,7 @@ cdef class Bus:
 
         self.auto_joypad = 0
         self.auto_joypad_busy = 0
+        self.joypad_busy_until = 0
         self.pad_latched = 0
         for i in range(4):
             self.pad_state[i] = 0
@@ -638,6 +642,9 @@ cdef class Bus:
         # H-blank starts around dot 274 (cycle 1096).
         self.in_hblank = 1 if self.hcount >= 1096 else 0
 
+        if self.auto_joypad_busy and self.master_clock >= self.joypad_busy_until:
+            self.auto_joypad_busy = 0
+
         if self.irq_mode and not self.irq_line_done:
             self._check_irq()
 
@@ -688,6 +695,10 @@ cdef class Bus:
                 self.nmi_pending = 1
                 self.nmi_count += 1
             if self.auto_joypad:
+                # Games wait for bit 0 of $4212 to go high and then low again;
+                # leaving it permanently low hangs them at boot.
+                self.auto_joypad_busy = 1
+                self.joypad_busy_until = self.master_clock + JOYPAD_READ_CYCLES
                 self.poll_joypads()
             self.frame_ready = 1
         elif self.vcount == 0:

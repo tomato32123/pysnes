@@ -65,6 +65,7 @@ cdef class Bus:
     # -- joypads -----------------------------------------------------------
     cdef int auto_joypad
     cdef int auto_joypad_busy
+    cdef int64_t joypad_busy_until   # master clock at which $4212 bit 0 clears
     cdef uint16_t pad_state[4]       # live button state, set by the frontend
     cdef uint16_t joy[4]             # latched $4218-$421F
     cdef uint16_t pad_shift[4]
