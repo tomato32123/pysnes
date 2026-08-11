@@ -1070,7 +1070,7 @@ cdef class PPU:
                     self.main_src[x] = layer
 
     cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept:
-        cdef int x, i, mi, si, sub_used, math_here, clip_here, halve, subtract
+        cdef int x, i, mi, si, sub_used, math_here, halve, subtract
         cdef int r, g, b, sr, sg, sb
         cdef uint16_t main, sub, fixed
         cdef uint32_t main_out
@@ -1093,12 +1093,16 @@ cdef class PPU:
                 si = x
             main = self.main_buf[mi]
 
-            clip_here = self._region_black(self.cgwsel >> 6, self.win_mask[5][x])
-            if clip_here:
+            # $2130 bits 7-6 force the main screen to black over a region.
+            # That changes the colour, not who produced it: colour math still
+            # runs, and still asks whether the layer that would have been
+            # showing has math switched on.  Skipping that question would let
+            # the sub screen through in places the game meant to stay black.
+            if self._region_black(self.cgwsel >> 6, self.win_mask[5][x]):
                 main = 0
 
             math_here = self._region(self.cgwsel >> 4, self.win_mask[5][x])
-            if math_here and not clip_here:
+            if math_here:
                 i = self.main_src[mi]
                 if i == 5:
                     math_here = 1 if (self.cgadsub & 0x20) else 0

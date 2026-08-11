@@ -589,6 +589,65 @@ def test_the_latch_flag_stays_clear_without_a_falling_edge():
         FAILURES.append("STAT78 reported a latch with the line held high")
 
 
+
+# --------------------------------------------------------- colour math ----
+#
+# $2130 bits 7-6 force the main screen to black over a region, and bits 5-4
+# say where colour math applies.  The two are separate questions, and the
+# second one still asks whether the layer that would have been showing has
+# math switched on -- forcing black changes the colour, not who produced it.
+
+CMATH = """
+        lda #$5F
+        sta $2132               ; fixed colour: green at full
+        lda #$%(cgwsel)02X
+        sta $2130
+        lda #$%(cgadsub)02X
+        sta $2131
+"""
+
+GREEN_RGB = (0, expand(31), 0)
+
+
+def cmath(cgwsel, cgadsub):
+    return scene(CMATH % {"cgwsel": cgwsel, "cgadsub": cgadsub})
+
+
+def test_colour_math_adds_the_fixed_colour():
+    """No window anywhere, math on BG1: red plus green."""
+    check("BG1 plus fixed", pixel(cmath(0x00, 0x01), 0, 0),
+          (expand(31), expand(31), 0))
+
+
+def test_colour_math_respects_the_per_layer_switch():
+    check("math enabled for BG2 only", pixel(cmath(0x00, 0x02), 0, 0), TILE)
+
+
+def test_forcing_the_main_screen_black_still_asks_about_the_layer():
+    """The discriminating case.  Black is forced everywhere and math is
+    allowed everywhere, but BG1 is not one of the layers math applies to, so
+    the pixel has to stay black rather than let the fixed colour through."""
+    check("forced black, no math on BG1", pixel(cmath(0xC0, 0x00), 0, 0),
+          (0, 0, 0))
+
+
+def test_forcing_black_with_math_on_shows_the_operand():
+    """And with BG1 switched on, black plus green is green -- which is how a
+    game shows the sub screen through a hole in the main one."""
+    check("forced black, math on BG1", pixel(cmath(0xC0, 0x01), 0, 0), GREEN_RGB)
+
+
+def test_half_applies_to_the_sum():
+    check("halved", pixel(cmath(0x00, 0x41), 0, 0),
+          (expand(15), expand(15), 0))
+
+
+def test_subtract_takes_the_operand_away():
+    """Red minus green is red: the green channel was already zero and the
+    result clamps rather than wrapping."""
+    check("subtracted", pixel(cmath(0x00, 0x81), 0, 0), TILE)
+
+
 # Pinned so a change to the renderer shows up here and has to be judged
 # rather than absorbed.  Override with PYSNES_PPU_HASH to re-baseline.
 SCENE_HASH = "6a4600cba64293ced593c0f4a55d80b89b5bb035"
