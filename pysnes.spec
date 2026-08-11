@@ -12,11 +12,18 @@ hidden = [
     "snes.cart",
     "snes.ppu",
     "snes.apu",
+    "snes.space",
     "snes.bus",
     "snes.cpu",
     "snes.system",
     "snes.audioout",
     "snes.gamepad",
+    "snes.board",
+    "snes.boards",
+    # Boards register themselves from inside make_board, so nothing imports
+    # this at module level and the scanner has no way to reach it.  Leaving
+    # it out builds an exe that works until someone puts in an SA-1 game.
+    "snes.sa1",
     # imported lazily inside functions, so the scanner misses it
     "pygame._sdl2",
     "pygame._sdl2.controller",

@@ -17,8 +17,8 @@ The two are kept in step by catching up: whenever the console touches
 anything the SA-1 can also see, the SA-1 is first run forward to that moment.
 That is what makes a message written by one visible to the other in order.
 """
-from libc.stdint cimport (uint8_t, uint16_t, uint32_t, int16_t,
-                          int32_t, int64_t)
+from libc.stdint cimport (uint8_t, uint16_t, uint32_t, uint64_t,
+                          int16_t, int32_t, int64_t)
 from libc.string cimport memset
 
 from snes.board cimport Board, PK_DEVICE
@@ -29,6 +29,11 @@ from snes.space cimport AddressSpace
 # The SA-1 runs at three times the console's fastest rate: the S-CPU's
 # quickest access is six master cycles and the SA-1's is two.
 DEF SA1_CYCLE = 2
+
+# The counters run on the console's timebase: a scanline is 1364 master
+# cycles and a frame 262 of them.
+DEF LINE_CYCLES = 1364
+DEF LINES_PER_FRAME = 262
 
 
 cdef class SA1Space(AddressSpace):
@@ -118,14 +123,20 @@ cdef class SA1(Board):
         self.tmc = 0
         self.timer_h = 0
         self.timer_v = 0
-        self.hcount = 0
-        self.vcount = 0
+        self.timer_base = 0
+        self.timer_seen = 0
         self.dcnt = 0
         self.cdma = 0
         self.dsa = 0
         self.dda = 0
         self.dtc = 0
         self.cc_line = 0
+        self.n_cc1 = 0
+        self.n_cc2 = 0
+        self.n_dma = 0
+        self.n_math = 0
+        self.n_varlen = 0
+        self.n_timer_irq = 0
         for i in range(16):
             self.brf[i] = 0
 
@@ -204,23 +215,36 @@ cdef class SA1(Board):
             if 0x6000 <= off < 0x8000:
                 if self.bwram_mask == 0:
                     return data
+                if not from_sa1 and (self.dcnt & 0xB0) == 0xA0:
+                    return self._cc1_read(self._bwram_window(0, off))
                 return self.bwram[self._bwram_window(from_sa1, off)]
             if off >= 0x8000:
-                # The SA-1 can lend the console its own NMI and IRQ vectors,
-                # which is how it hands work back: the console's handler ends
-                # up somewhere the SA-1 chose rather than where the cartridge
-                # header points.
-                if not from_sa1 and (bank & 0x7F) == 0:
-                    if (self.scnt & 0x10) and 0xFFEA <= off <= 0xFFEB:
-                        return <uint8_t>(self.snv >> ((off & 1) * 8))
-                    if (self.scnt & 0x20) and 0xFFEE <= off <= 0xFFEF:
-                        return <uint8_t>(self.siv >> ((off & 1) * 8))
+                # Neither processor necessarily reads its vectors out of the
+                # cartridge.  The SA-1 always takes its own, from $2205 and
+                # $2207, because the ROM's vectors belong to the console's
+                # handlers and mean nothing to it.  The console takes the
+                # SA-1's, from $220C and $220E, when the SA-1 asks it to --
+                # that is how the SA-1 hands work back, by pointing the
+                # console's interrupt somewhere of its choosing.
+                if (bank & 0x7F) == 0:
+                    if from_sa1:
+                        if 0xFFEA <= off <= 0xFFEB:
+                            return <uint8_t>(self.cnv >> ((off & 1) * 8))
+                        if 0xFFEE <= off <= 0xFFEF:
+                            return <uint8_t>(self.civ >> ((off & 1) * 8))
+                    else:
+                        if (self.scnt & 0x10) and 0xFFEA <= off <= 0xFFEB:
+                            return <uint8_t>(self.snv >> ((off & 1) * 8))
+                        if (self.scnt & 0x20) and 0xFFEE <= off <= 0xFFEF:
+                            return <uint8_t>(self.siv >> ((off & 1) * 8))
                 return self.cart.rom[self._rom_offset(bank, off)]
             return data
 
         if 0x40 <= bank < 0x50:                      # battery RAM, laid flat
             if self.bwram_mask == 0:
                 return data
+            if not from_sa1 and (self.dcnt & 0xB0) == 0xA0:
+                return self._cc1_read((((bank & 0x0F) << 16) | off) & self.bwram_mask)
             return self.bwram[(((bank & 0x0F) << 16) | off) & self.bwram_mask]
 
         if bank >= 0xC0:
@@ -281,13 +305,13 @@ cdef class SA1(Board):
             return v
 
         if a == 0x2302:
-            return <uint8_t>(self.hcount & 0xFF)
+            return <uint8_t>(self._hcount() & 0xFF)
         if a == 0x2303:
-            return <uint8_t>(self.hcount >> 8)
+            return <uint8_t>((self._hcount() >> 8) & 0x07)
         if a == 0x2304:
-            return <uint8_t>(self.vcount & 0xFF)
+            return <uint8_t>(self._vcount() & 0xFF)
         if a == 0x2305:
-            return <uint8_t>(self.vcount >> 8)
+            return <uint8_t>((self._vcount() >> 8) & 0x01)
 
         if 0x2306 <= a <= 0x230A:                    # arithmetic result
             return <uint8_t>((self.math_result >> ((a - 0x2306) * 8)) & 0xFF)
@@ -401,8 +425,8 @@ cdef class SA1(Board):
             self.tmc = value
             return
         if a == 0x2211:                              # CTR: restart the timers
-            self.hcount = 0
-            self.vcount = 0
+            self.timer_base = self.space.master_clock
+            self.timer_seen = self.timer_base
             return
         if a == 0x2212:
             self.timer_h = (self.timer_h & 0xFF00) | value
@@ -447,7 +471,7 @@ cdef class SA1(Board):
             return
         if a == 0x2231:
             self.cdma = value
-            if value & 0x80:                         # character conversion off
+            if value & 0x80:                         # conversion finished
                 self.cc_line = 0
             return
         if a == 0x2232:
@@ -464,14 +488,14 @@ cdef class SA1(Board):
             return
         if a == 0x2236:
             self.dda = (self.dda & 0xFF00FF) | (<uint32_t>value << 8)
-            # A destination in I-RAM starts the transfer here; one in BW-RAM
-            # waits for the high byte.
-            if (self.dcnt & 0x04) == 0:
+            # I-RAM is 2 KB, so two address bytes are the whole of it and the
+            # transfer starts here.  A BW-RAM destination waits for the third.
+            if (self.dcnt & 0x08) == 0:
                 self._run_dma()
             return
         if a == 0x2237:
             self.dda = (self.dda & 0x00FFFF) | (<uint32_t>value << 16)
-            if self.dcnt & 0x04:
+            if self.dcnt & 0x08:
                 self._run_dma()
             return
         if a == 0x2238:
@@ -483,6 +507,9 @@ cdef class SA1(Board):
 
         if 0x2240 <= a <= 0x224F:
             self.brf[a & 0x0F] = value
+            # Half the buffer at a time: filling either half converts it.
+            if (a == 0x2247 or a == 0x224F) and (self.dcnt & 0xB0) == 0xB0:
+                self._convert_buffer()
             return
 
         if a == 0x2250:
@@ -520,6 +547,64 @@ cdef class SA1(Board):
             self.vbit = 0
             return
 
+    # =====================================================================
+    # timers
+    # =====================================================================
+    #
+    # The SA-1 keeps its own H and V counters on the same timebase as the
+    # console's, restarted by a write to $2211.  A game reads them to find
+    # out where the beam is without going through the console, and can ask
+    # for an interrupt when they reach a chosen point.
+    #
+    # $2210 bit 7 picks between that and a linear timer, which is the same
+    # pair of counters read as one number and compared against the same two
+    # registers joined together.
+
+    cdef int _hcount(self) noexcept:
+        return <int>((self.space.master_clock - self.timer_base) % LINE_CYCLES)
+
+    cdef int _vcount(self) noexcept:
+        return <int>(((self.space.master_clock - self.timer_base) // LINE_CYCLES)
+                     % LINES_PER_FRAME)
+
+    cdef void _check_timer(self) noexcept:
+        """Raise the timer interrupt if the compare point has just gone past.
+
+        The check runs at each catch-up rather than each cycle, so it looks
+        at the whole interval since the last one and asks whether the target
+        fell inside it.
+        """
+        cdef int64_t now = self.space.master_clock
+        cdef int64_t period, target, first, span
+        cdef int64_t start = self.timer_seen
+
+        if (self.tmc & 0x03) == 0 or now <= start:
+            self.timer_seen = now
+            return
+
+        if self.tmc & 0x80:                          # H/V timer
+            if self.tmc & 0x02:                      # both counters compare
+                period = <int64_t>LINE_CYCLES * LINES_PER_FRAME
+                target = (<int64_t>self.timer_v * LINE_CYCLES) + self.timer_h
+            else:                                    # H only, once a line
+                period = LINE_CYCLES
+                target = self.timer_h
+        else:                                        # linear timer
+            period = (<int64_t>self.timer_v << 16) | self.timer_h
+            if period <= 0:
+                self.timer_seen = now
+                return
+            target = period - 1
+
+        span = start - self.timer_base
+        first = ((span // period) * period) + target + self.timer_base
+        if first < start:
+            first += period
+        if first < now:
+            self.timer_irq = 1
+            self._refresh_interrupts()
+        self.timer_seen = now
+
     cdef void _refresh_interrupts(self) noexcept:
         """Work out what each processor should be seeing on its IRQ line."""
         cdef int to_sa1 = 0
@@ -549,6 +634,7 @@ cdef class SA1(Board):
         needs; a plain multiply fills the low 32 and a divide puts the
         quotient in the low 16 and the remainder above it.
         """
+        self.n_math += 1
         cdef int32_t a = <int32_t><int16_t>self.math_a
         cdef int32_t b
         cdef int32_t quotient, remainder
@@ -599,6 +685,7 @@ cdef class SA1(Board):
         return <uint16_t>((word >> shift) & 0xFFFF)
 
     cdef void _advance_varlen(self) noexcept:
+        self.n_varlen += 1
         cdef int count = self.vbd & 0x0F
         if count == 0:
             count = 16
@@ -612,20 +699,115 @@ cdef class SA1(Board):
 
     cdef void _run_dma(self) noexcept:
         """The plain transfer: bytes from ROM, BW-RAM or I-RAM to one of the
-        latter two.  Character conversion is a different unit and is not
-        modelled; games that need it get their tiles unconverted."""
+        latter two.  Character conversion is a different unit entirely."""
         cdef uint32_t src = self.dsa
         cdef uint32_t dst = self.dda
         cdef int n = self.dtc
         cdef int i
 
+        if (self.dcnt & 0x80) == 0:
+            return
         if self.dcnt & 0x20:                         # character conversion
             return
+        self.n_dma += 1
         for i in range(n):
             self._write_common(dst + i, self._read_common(src + i, 1, 0), 1)
         self.dma_irq_scpu = 1
         self.dma_irq_sa1 = 1
         self._refresh_interrupts()
+
+    # -------------------------------------------- character conversion ---
+    #
+    # A SNES character is planar: eight bytes carrying bit 0 of each row,
+    # interleaved with eight carrying bit 1, and so on.  That is a miserable
+    # format to draw into, so these games keep a plain linear bitmap --
+    # consecutive bits per pixel, left to right -- and have the SA-1
+    # transpose it on the way past.
+    #
+    # $2231 says how: the low two bits give the depth (0 is eight bits per
+    # pixel, 1 is four, 2 is two) and the next three the width of the virtual
+    # bitmap in characters, 1 to 32.
+    #
+    # There are two ways to drive it.  Type 1 converts as the console reads:
+    # the console runs an ordinary DMA out of BW-RAM towards VRAM and each
+    # read comes back transposed.  Type 2 is the SA-1 handing the bytes over
+    # eight at a time through $2240-$224F.
+
+    cdef int _cc_bpp(self) noexcept:
+        return 2 << (2 - (self.cdma & 3))
+
+    cdef void _convert_row(self, uint32_t bwaddr, uint32_t dst, int y) noexcept:
+        """Transpose one eight-pixel row of the bitmap into I-RAM."""
+        cdef int bpp = self._cc_bpp()
+        cdef uint64_t data = 0
+        cdef uint8_t out[8]
+        cdef int byte, x, index
+
+        for byte in range(bpp):
+            data |= (<uint64_t>self.bwram[(bwaddr + byte) & self.bwram_mask]) << (byte * 8)
+        for byte in range(8):
+            out[byte] = 0
+        for x in range(8):
+            for byte in range(bpp):
+                out[byte] |= <uint8_t>((data & 1) << (7 - x))
+                data >>= 1
+        for byte in range(bpp):
+            # Planes go in pairs: 0 and 1 fill the first sixteen bytes of the
+            # character, 2 and 3 the next sixteen.
+            index = y * 2 + (byte & 1) + (byte >> 1) * 16
+            self.iram[(dst + index) & 0x7FF] = out[byte]
+
+    cdef uint8_t _cc1_read(self, uint32_t offset) noexcept:
+        """A console read of BW-RAM while type 1 conversion is running.
+
+        Crossing into a new character converts that whole character into
+        I-RAM first; the read itself then comes out of I-RAM.
+        """
+        cdef int depth = self.cdma & 3
+        cdef int width = (self.cdma >> 2) & 7
+        cdef int bpp = self._cc_bpp()
+        cdef uint32_t charmask = (<uint32_t>1 << (6 - depth)) - 1
+        cdef uint32_t bpl = (<uint32_t>8 << width) >> depth
+        cdef uint32_t base = self.dsa & self.bwram_mask
+        cdef uint32_t tile, ty, tx, bwaddr
+        cdef int y
+
+        self.n_cc1 += 1
+        if (offset & charmask) == 0:
+            tile = ((offset - base) & self.bwram_mask) >> (6 - depth)
+            ty = tile >> width
+            tx = tile & ((<uint32_t>1 << width) - 1)
+            bwaddr = base + ty * bpl * 8 + tx * <uint32_t>bpp
+            for y in range(8):
+                self._convert_row(bwaddr, self.dda, y)
+                bwaddr += bpl
+        return self.iram[(self.dda + (offset & charmask)) & 0x7FF]
+
+    cdef void _convert_buffer(self) noexcept:
+        """Type 2: the eight bytes just written to $2240-$224F are one row of
+        eight pixels each, and become one row of a character."""
+        cdef int bpp = self._cc_bpp()
+        cdef uint32_t addr = self.dda & 0x7FF
+        cdef int half = (self.cc_line & 1) << 3
+        cdef int byte, bit
+        cdef uint8_t out
+
+        if bpp == 2:
+            addr &= <uint32_t>0x7F0
+        elif bpp == 4:
+            addr &= <uint32_t>0x7E0
+        else:
+            addr &= <uint32_t>0x7C0
+        addr += <uint32_t>((self.cc_line & 6) << 1)
+        self.n_cc2 += 1
+
+        for byte in range(bpp):
+            out = 0
+            for bit in range(8):
+                out |= <uint8_t>(((self.brf[half + bit] >> byte) & 1) << (7 - bit))
+            self.iram[(addr + <uint32_t>((byte & 6) << 3)
+                       + <uint32_t>(byte & 1)) & 0x7FF] = out
+        self.cc_line = (self.cc_line + 1) & 7
 
     # =====================================================================
     # running
@@ -643,7 +825,9 @@ cdef class SA1(Board):
             self.cpu.step()
             if self.stopped:
                 self.space.master_clock = limit
+                self._check_timer()
                 return
+        self._check_timer()
 
     def describe(self):
         return self.name
@@ -662,6 +846,12 @@ cdef class SA1(Board):
             "bmaps": self.bmaps, "bmap": self.bmap,
             "sa1_irq": self.sa1_irq, "sa1_nmi": self.sa1_nmi,
             "scpu_irq": self.scpu_irq,
+            "timer": {"tmc": self.tmc, "h": self.timer_h,
+                      "v": self.timer_v, "irq": self.timer_irq,
+                      "hcount": self._hcount(), "vcount": self._vcount()},
+            "counts": {"cc1": self.n_cc1, "cc2": self.n_cc2,
+                       "dma": self.n_dma, "math": self.n_math,
+                       "varlen": self.n_varlen},
             "dma": {"dcnt": self.dcnt, "cdma": self.cdma,
                     "src": self.dsa, "dst": self.dda, "count": self.dtc},
         }

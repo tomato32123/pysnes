@@ -1,5 +1,6 @@
 # cython: language_level=3
-from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
+from libc.stdint cimport (uint8_t, uint16_t, uint32_t, uint64_t,
+                          int32_t, int64_t)
 
 from snes.board cimport Board
 from snes.cart cimport Cart
@@ -61,7 +62,8 @@ cdef class SA1(Board):
     # -- timers ------------------------------------------------------------
     cdef uint8_t tmc                 # $2210
     cdef uint16_t timer_h, timer_v   # $2212-$2215 compare values
-    cdef int hcount, vcount
+    cdef int64_t timer_base          # master clock the counters started from
+    cdef int64_t timer_seen          # how far the compare has been checked
 
     # -- DMA ---------------------------------------------------------------
     cdef uint8_t dcnt, cdma          # $2230, $2231
@@ -69,6 +71,9 @@ cdef class SA1(Board):
     cdef uint16_t dtc                # transfer count
     cdef uint8_t brf[16]             # $2240-$224F character conversion buffer
     cdef int cc_line
+
+    # -- counters, so a defect can be traced to a path ----------------
+    cdef int64_t n_cc1, n_cc2, n_dma, n_math, n_varlen, n_timer_irq
 
     cdef uint32_t _rom_offset(self, uint32_t bank, uint32_t addr) noexcept
     cdef uint8_t _read_common(self, uint32_t addr, int from_sa1, uint8_t data) noexcept
@@ -81,6 +86,13 @@ cdef class SA1(Board):
     cdef void _advance_varlen(self) noexcept
     cdef void _run_dma(self) noexcept
     cdef uint32_t _bwram_window(self, int from_sa1, uint32_t addr) noexcept
+    cdef int _hcount(self) noexcept
+    cdef int _vcount(self) noexcept
+    cdef void _check_timer(self) noexcept
+    cdef int _cc_bpp(self) noexcept
+    cdef void _convert_row(self, uint32_t bwaddr, uint32_t dst, int y) noexcept
+    cdef uint8_t _cc1_read(self, uint32_t offset) noexcept
+    cdef void _convert_buffer(self) noexcept
     cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept
     cdef uint8_t read(self, uint32_t addr, uint8_t data) noexcept
     cdef void write(self, uint32_t addr, uint8_t value) noexcept
