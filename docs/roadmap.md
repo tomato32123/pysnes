@@ -31,9 +31,14 @@ a suspicion into a located defect.
 - [x] Decimal ADC/SBC, block moves, the idle-cycle rules
 - [~] Interrupt sequence: correct effect, not yet cycle-by-cycle in which
       cycle pushes what
-- [ ] WAI and STP wake behaviour against real interrupt edges
-- [ ] ABORT
-- [ ] Open bus per bus half, rather than a single MDR
+- [x] **WAI and STP**: WAI wakes on an NMI and takes it, wakes on a masked
+      IRQ without taking it, and STP stays halted until reset
+- [x] **Open bus**: three latches, not one -- the CPU's, PPU1's and PPU2's.
+      A write-only PPU register reads back PPU1's last value rather than the
+      CPU's, and the two chips report different versions, which is what makes
+      them distinguishable.  Eight tests in `test_openbus.py`
+- [n/a] ABORT.  The pin is not connected on the SNES, so the vector is
+      unreachable and there is nothing to model
 
 ## 3. S-PPU
 
@@ -51,10 +56,24 @@ The largest single gap. Everything below the first item depends on it.
       with range-over and time-over reported per frame
 - [~] OAM priority rotation moves the first sprite of the scan; the
       address reload's own timing is not modelled
-- [ ] Interlace, pseudo-hires, overscan, EXTBG
-- [ ] Direct colour mode; the remaining colour-math corners
-- [ ] Mosaic exactness, including mode 7
-- [ ] H/V counter latch on the exact cycle
+- [x] **Overscan**: 239 lines instead of 224, sampled per line, moving
+      V-blank and the NMI with it
+- [x] **Hires**: the framebuffer is 512x478 and every dot emits two pixels.
+      Pseudo-hires fills the left one from the sub screen; modes 5 and 6
+      give BG1 and BG2 a value per half-dot, with the main screen taking the
+      odd ones and the sub screen the even ones
+- [x] **Interlace**: each field draws every other row from every other
+      source row, leaving the other field's rows alone
+- [x] **EXTBG**: mode 7's pixel feeds BG1 whole and BG2 as seven bits plus a
+      priority, so BG2 straddles BG1
+- [x] **Direct colour**: an 8bpp pixel becomes a colour rather than an index,
+      with the low bit of each channel from the tilemap's palette field
+- [x] **Mosaic**: a counter rather than a division, so a size written
+      part-way down the screen lets the current block finish
+- [~] H/V counter latch: $2137 and the $4201 latch line both work and
+      $213F reports and clears the flag; the single-cycle read race is open
+- [ ] The remaining colour-math corners
+- [ ] Half-height objects under $2133 bit 1
 
 ## 4. APU
 
@@ -96,17 +115,22 @@ This is the part that decides whether any of the above converges.
       the traces, fix the first divergence. Turns "something looks wrong" into
       a cycle number.
 - [x] DMA and HDMA timing tests; PPU register timing still open
+- [x] Open bus suite, and display-mode tests for overscan, hires,
+      interlace, EXTBG, direct colour and mosaic
 - [ ] SPC700 and DSP test ROMs
-- [ ] CI running the suite on every change
+- [x] **CI**: the suite runs on every push, on Linux and Windows.  The
+      ROM-dependent modules skip themselves rather than fail, since no ROM
+      belongs in the repository and the rest builds its own test images
 
 ## Order of work
 
 1. ~~Dot-based PPU rendering~~ done.
 2. ~~Offset-per-tile~~ done.
 3. ~~DMA and HDMA exactness~~ done.
-4. The cartridge device layer, then SA-1 on top of it.
-5. Differential tracing against a reference, once there is a reference to hand.
-6. The DSP pipeline and SPC700 bus timing.
+4. ~~The display modes: overscan, hires, interlace, EXTBG, direct colour~~ done.
+5. The DSP pipeline and SPC700 bus timing.
+6. The cartridge device layer, then SA-1 on top of it.
+7. Differential tracing against a reference, once there is a reference to hand.
 
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and

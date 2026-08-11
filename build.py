@@ -1,9 +1,10 @@
 """Build driver for the Cython cores.
 
-Locates MSVC via vswhere (or known install paths), captures the vcvars
-environment from a *sanitized* shell -- inheriting a raw MSYS/Git-Bash
-environment makes vcvars64.bat fail silently -- then runs setup.py build_ext
-with that environment applied.
+On Windows this locates MSVC via vswhere (or known install paths) and captures
+the vcvars environment from a *sanitized* shell -- inheriting a raw MSYS or
+Git-Bash environment makes vcvars64.bat fail silently -- then runs setup.py
+build_ext with that environment applied.  On other platforms setup.py already
+finds the system compiler, so it goes straight there.
 
 Usage:  python build.py [--force] [--annotate]
 """
@@ -64,7 +65,10 @@ def msvc_env(vcvars):
 
 def main():
     argv = sys.argv[1:]
-    env = msvc_env(find_vcvars())
+    # Only Windows needs the vcvars dance.  Everywhere else the compiler is
+    # already on PATH and setup.py finds it by itself, which is what lets CI
+    # build this on Linux.
+    env = msvc_env(find_vcvars()) if sys.platform == "win32" else dict(os.environ)
     if "--annotate" in argv:
         env["PYSNES_ANNOTATE"] = "1"
     cmd = [sys.executable, "setup.py", "build_ext", "--inplace"]

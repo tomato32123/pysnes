@@ -8,6 +8,9 @@ import glob
 import os
 import sys
 
+NL = chr(10)
+NO_ROM = 77          # the exit code tools/runtests.py reads as a skip
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -28,9 +31,13 @@ def rom_path(explicit=None):
         raise SystemExit("several ROMs in roms/; pass one explicitly:\n  "
                          + "\n  ".join(sorted(found)))
 
-    raise SystemExit(
-        "no ROM given.  Pass a path as the first argument, set PYSNES_ROM, or\n"
-        "put a single .smc/.sfc into %s" % os.path.join(ROOT, "roms"))
+    # Exit 77 rather than 1: without a ROM these tools cannot run at all,
+    # which is not the same as failing.  The test runner reads it as a skip,
+    # so a machine with no ROM on it still gets a green suite.
+    sys.stderr.write(
+        "no ROM given.  Pass a path as the first argument, set PYSNES_ROM, or"
+        + NL + "put a single .smc/.sfc into %s" % os.path.join(ROOT, "roms") + NL)
+    raise SystemExit(NO_ROM)
 
 
 def from_argv(index=1):
