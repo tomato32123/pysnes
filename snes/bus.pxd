@@ -29,10 +29,10 @@ cdef class Bus:
     cdef uint8_t mdr                 # open-bus latch
 
     # -- timing ------------------------------------------------------------
-    cdef int64_t master_clock
+    cdef readonly int64_t master_clock
     cdef int hcount                  # unused; the H counter is derived now
     cdef int64_t line_start          # master clock at the start of this line
-    cdef int64_t ev_time[5]          # absolute deadline per event kind
+    cdef int64_t ev_time[6]          # absolute deadline per event kind
     cdef int64_t next_event          # cached earliest deadline
     cdef int vcount                  # current scanline
     cdef int field
@@ -119,3 +119,4 @@ cdef class Bus:
     cdef void _arm_irq(self, int64_t line_start) noexcept
     cdef int _hcount(self) noexcept
     cdef int _screen_x(self) noexcept
+    cdef int _line_length(self) noexcept

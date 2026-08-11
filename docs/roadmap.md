@@ -18,11 +18,12 @@ a suspicion into a located defect.
 - [x] **HDMA init and reload**: the init pass at the top of the frame, the
       transfer-then-advance order, repeat and non-repeat counts, indirect
       reloads, and a mid-frame enable waiting for the next frame
-- [ ] **DRAM refresh**: 40 cycles stolen once per scanline, at a fixed dot
-- [ ] **Short and long scanlines**: 1360-cycle line 240 on a non-interlaced
-      odd field, and the PAL equivalents
-- [ ] **$4200/$4210 races**: enabling NMI while the flag is set, reading RDNMI
-      on the cycle it is raised, IRQ held level-triggered against $4211
+- [x] **DRAM refresh**: 40 cycles stolen once per scanline at dot 134
+- [x] **Short scanline**: line 240 of a non-interlaced odd field is 1360
+      cycles; the PAL long line is still open
+- [~] **$4200/$4210**: enabling NMI while the flag is set fires at once, and
+      the flag clears both on read and at the top of the frame; the
+      single-cycle read race is still open
 
 ## 2. S-CPU
 

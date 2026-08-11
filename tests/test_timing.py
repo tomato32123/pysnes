@@ -338,6 +338,127 @@ spin:   bra spin
               % (without - with_hdma, (without - with_hdma) * 100.0 / without))
 
 
+# --------------------------------------------------- DRAM refresh ----
+
+def test_dram_refresh_stalls_the_cpu_once_a_line():
+    """The CPU is halted for 40 master cycles once per scanline while DRAM is
+    refreshed.  In a stream of NOPs it shows up as one oversized gap per line."""
+    image, _ = assemble_image("""
+        sep #$30
+spin:   nop
+        nop
+        nop
+        nop
+        bra spin
+""")
+    machine = System(rom_data=image)
+    machine.cpu.trace_start(capacity=60000, level=1)
+    machine.run_frame()
+    recs = machine.cpu.trace_instructions()
+    import collections
+    gaps = collections.Counter(recs[i + 1][0] - recs[i][0] for i in range(len(recs) - 1))
+    nop = 14                       # fetch at 8 plus one internal cycle at 6
+    branch = 22                    # taken BRA: two fetches and an internal cycle
+    stalls = {g: n for g, n in gaps.items() if g > branch + 4}
+    if not stalls:
+        FAILURES.append("no refresh stall appeared in a frame")
+        return
+    # The stall lands inside whichever instruction was running, so it shows up
+    # as that instruction's cost plus 40.
+    common = max(stalls, key=lambda g: stalls[g])
+    check("refresh stall on a NOP", common, nop + 40)
+    if branch + 40 not in stalls:
+        FAILURES.append("no refresh landed inside a branch: %s" % sorted(stalls))
+    total = sum(stalls.values())
+    # run_frame stops at V-blank, so the count matches the lines drawn so far.
+    if not 200 <= total <= machine.bus.lines_per_frame:
+        FAILURES.append("saw %d stalls, expected about one per line" % total)
+    else:
+        print("      %d refresh stalls, %d of them %d cycles"
+              % (total, stalls[common], common))
+
+
+def test_frame_length_alternates_with_the_short_scanline():
+    """Scanline 240 of a non-interlaced odd field is one dot shorter, so every
+    other frame saves four master cycles.
+
+    A single frame boundary carries up to one instruction of jitter, which is
+    far more than four cycles, so the saving is measured across many frames
+    where it accumulates and the jitter does not.
+    """
+    image, _ = assemble_image("""
+spin:   bra spin
+""")
+    machine = System(rom_data=image)
+    machine.run_frame()
+    start = machine.master_clock
+    frames = 40
+    for _ in range(frames):
+        machine.run_frame()
+    span = machine.master_clock - start
+
+    full = LINE * machine.bus.lines_per_frame
+    expected_no_short = frames * full
+    expected_with_short = frames * full - (frames // 2) * 4
+    check_near("cumulative frame time", span, expected_with_short, JITTER)
+    if abs(span - expected_no_short) <= JITTER:
+        FAILURES.append("no short scanline: %d frames took the full %d cycles"
+                        % (frames, span))
+    else:
+        print("      %d frames took %d cycles, %d short of %d full-length ones"
+              % (frames, span, expected_no_short - span, frames))
+
+
+# ------------------------------------------------------- NMI flag ----
+
+def test_rdnmi_clears_on_read_and_at_the_top_of_the_frame():
+    """$4210 bit 7 is raised at V-blank, cleared by reading it, and cleared
+    again when the next frame starts even if nobody read it."""
+    machine, labels, records = run_traced("""
+        sep #$20
+        stz $4200               ; NMI disabled: only the flag moves
+        ldx #$00
+wait1:  lda $4212
+        bpl wait1               ; wait for V-blank
+        lda $4210
+        sta $7E4100             ; first read: bit 7 should be set
+        lda $4210
+        sta $7E4101             ; second read: cleared by the first
+wait2:  lda $4212
+        bmi wait2               ; wait for the display to resume
+wait3:  lda $4212
+        bpl wait3               ; and for the next V-blank
+        lda $4210
+        sta $7E4102             ; raised again for the new frame
+    """, frames=4)
+    check("flag set at V-blank", machine.bus.read(0x7E4100) & 0x80, 0x80, "$%02X")
+    check("cleared by reading", machine.bus.read(0x7E4101) & 0x80, 0x00, "$%02X")
+    check("raised again next frame", machine.bus.read(0x7E4102) & 0x80, 0x80, "$%02X")
+
+
+def test_enabling_nmi_while_the_flag_is_set_fires_immediately():
+    """A game that enables NMI during V-blank, with the flag already up, gets
+    an interrupt at once rather than waiting a frame."""
+    machine, labels, records = run_traced("""
+        sep #$20
+        stz $4200
+wait:   lda $4212
+        bpl wait                ; inside V-blank, flag already set
+        lda #$80
+        sta $4200               ; enable NMI now
+        nop
+        nop
+        nop
+spin:   bra spin
+nmi:    sep #$20
+        lda #$5A
+        sta $7E4100
+        lda $4210
+        rti
+    """, frames=2)
+    check("NMI taken on enable", machine.bus.read(0x7E4100), 0x5A, "$%02X")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:

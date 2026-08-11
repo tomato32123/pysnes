@@ -34,7 +34,7 @@ SPECS = [
                  "div_b", "rd_div", "rd_mpy", "wram_addr", "auto_joypad",
                  "auto_joypad_busy", "joypad_busy_until", "pad_latched",
                  "hdma_enabled", "dma_enabled"],
-        arrays=[("ev_time", 5),
+        arrays=[("ev_time", 6),
                 ("pad_state", 4), ("joy", 4), ("pad_shift", 4),
                 ("dma_param", 8), ("dma_bbus", 8), ("dma_abus", 8),
                 ("dma_size", 8), ("dma_indirect_bank", 8), ("hdma_table", 8),
