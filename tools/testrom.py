@@ -43,9 +43,19 @@ __entry:
         sep #$30
         phk
         plb                             ; data bank = program bank
-        lda #$00                        ; WRAM powers up filled, so clear the
-        sta $7E4FFF                     ; completion flag before anyone reads it
-                                        ; (STZ has no long addressing mode)
+        ; WRAM powers up filled, so clear the area tests report through.
+        ; Without this an unwritten slot reads as the fill pattern and a test
+        ; cannot tell "nothing happened" from "something wrote that value".
+        rep #$10
+        sep #$20
+        lda #$00
+        ldx #$0100
+__clr:  dex
+        sta $7E4000,x
+        cpx #$0000
+        bne __clr
+        sta $7E4FFF                     ; and the completion flag
+        sep #$30
         jmp __main
 __nmi:  rti
 __irq:  rti

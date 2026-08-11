@@ -335,6 +335,81 @@ done:
     check("RTI resumed after COP", r[1], 0x77)
 
 
+# ------------------------------------------------------- WAI and STP ----
+
+def test_wai_wakes_on_nmi_and_takes_it():
+    r = run("""
+        sep #$20
+        lda #$80
+        sta $4200               ; NMI enabled
+        cli
+        lda #$01
+        sta result+0            ; reached WAI
+        wai
+        lda #$02
+        sta result+1            ; resumed after the handler returned
+        bra done
+nmi:    sep #$20
+        lda #$03
+        sta result+2
+        lda $4210
+        rti
+done:
+    """, max_frames=8)
+    assert r.finished, "the program never finished; WAI may not wake"
+    check("reached WAI", r[0], 0x01)
+    check("resumed after WAI", r[1], 0x02)
+    check("the NMI handler ran", r[2], 0x03)
+
+
+def test_wai_wakes_on_a_masked_irq_without_taking_it():
+    """With the I flag set the interrupt is not taken, but WAI still wakes:
+    the line being asserted is what releases the CPU, not the interrupt being
+    serviced."""
+    r = run("""
+        sep #$20
+        lda #$64
+        sta $4209               ; VTIME = line 100
+        stz $420A
+        lda #$20                ; IRQ on the V counter
+        sta $4200
+        sei                     ; and mask it
+        lda #$01
+        sta result+0
+        wai
+        lda #$02
+        sta result+1            ; execution continued here, not in a handler
+        lda $4211               ; acknowledge so the test can finish
+        bra done
+irq:    sep #$20
+        lda #$FF
+        sta result+2            ; must not run
+        lda $4211
+        rti
+done:
+    """, max_frames=8)
+    assert r.finished, "WAI did not wake on a masked interrupt"
+    check("reached WAI", r[0], 0x01)
+    check("resumed after WAI", r[1], 0x02)
+    check("the masked handler did not run", r[2], 0x00)
+
+
+def test_stp_halts_until_reset():
+    """STP stops the processor for good; nothing after it runs."""
+    r = run("""
+        sep #$20
+        lda #$01
+        sta result+0
+        stp
+        lda #$02
+        sta result+1            ; unreachable
+    """, max_frames=4)
+    check("ran up to STP", r[0], 0x01)
+    check("nothing ran after STP", r[1], 0x00)
+    if r.finished:
+        FAILURES.append("the program signalled completion despite STP")
+
+
 # ------------------------------------------------------------- timing ------
 
 def measure(source, count):
@@ -344,7 +419,7 @@ def measure(source, count):
         nop                 ; marker: the NOP before the sequence under test
 """ + source)
     machine = System(rom_data=image)
-    machine.cpu.trace_start(capacity=400, level=1)
+    machine.cpu.trace_start(capacity=8000, level=1)
     for _ in range(3):
         machine.run_frame()
         if machine.bus.read(0x7E4FFF):
@@ -393,7 +468,7 @@ def test_direct_page_penalty():
         nop
     """)
     machine = System(rom_data=image)
-    machine.cpu.trace_start(capacity=400, level=1)
+    machine.cpu.trace_start(capacity=8000, level=1)
     for _ in range(3):
         machine.run_frame()
         if machine.bus.read(0x7E4FFF):

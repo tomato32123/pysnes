@@ -253,20 +253,42 @@ DMA_SOURCE = """
 """
 
 
+NL = chr(10)
+
+
 def dma_cost(nbytes, mask=0x01):
-    """Master cycles the STA $420B takes, including the transfer."""
-    image, _labels = assemble_image(DMA_SOURCE % {"count": nbytes, "mask": mask})
-    machine = System(rom_data=image)
-    machine.cpu.trace_start(capacity=20000, level=1)
-    for _ in range(2):
-        machine.run_frame()
-        if machine.bus.read(0x7E4FFF):
-            break
-    recs = machine.cpu.trace_instructions()
-    for i in range(2, len(recs) - 1):
-        if recs[i][3] == 0x8D and recs[i - 1][3] == 0xA9 and recs[i - 2][3] == 0xEA:
-            return recs[i + 1][0] - recs[i][0]
-    raise AssertionError("could not find the STA $420B")
+    """Master cycles the STA $420B takes, including the transfer.
+
+    DRAM refresh steals 40 cycles once a scanline and can land inside the
+    transfer, which is correct but makes any single measurement ambiguous.
+    Repeating with the start shifted and taking the smallest result picks a
+    run the refresh missed.  The sweep has to be wide enough to walk a whole
+    transfer past the refresh point -- a NOP is 14 cycles and a forty-byte
+    transfer runs for over 300 -- and it also settles the two-to-six cycle
+    wobble from waiting for the DMA clock edge.
+    """
+    best = None
+    for pad in range(34):
+        marker = "        nop                     ; marker"
+        source = (DMA_SOURCE % {"count": nbytes, "mask": mask}).replace(
+            marker, ("        nop" + NL) * pad + marker)
+        image, _labels = assemble_image(source)
+        machine = System(rom_data=image)
+        machine.cpu.trace_start(capacity=20000, level=1)
+        for _ in range(2):
+            machine.run_frame()
+            if machine.bus.read(0x7E4FFF):
+                break
+        recs = machine.cpu.trace_instructions()
+        for i in range(2, len(recs) - 1):
+            if recs[i][3] == 0x8D and recs[i - 1][3] == 0xA9 and recs[i - 2][3] == 0xEA:
+                delta = recs[i + 1][0] - recs[i][0]
+                if best is None or delta < best:
+                    best = delta
+                break
+    if best is None:
+        raise AssertionError("could not find the STA $420B")
+    return best
 
 
 # STA abs from slow ROM: three fetches at 8 plus a write to $420B at 6.
@@ -356,7 +378,12 @@ spin:   nop
     machine.run_frame()
     recs = machine.cpu.trace_instructions()
     import collections
-    gaps = collections.Counter(recs[i + 1][0] - recs[i][0] for i in range(len(recs) - 1))
+    # Only instructions from the NOP loop count.  A long indexed store costs
+    # exactly 40 cycles by itself, which would otherwise look like a stall.
+    gaps = collections.Counter(
+        recs[i + 1][0] - recs[i][0]
+        for i in range(len(recs) - 1)
+        if recs[i][3] in (0xEA, 0x80))
     nop = 14                       # fetch at 8 plus one internal cycle at 6
     branch = 22                    # taken BRA: two fetches and an internal cycle
     stalls = {g: n for g, n in gaps.items() if g > branch + 4}
