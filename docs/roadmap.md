@@ -90,13 +90,23 @@ The largest single gap. Everything below the first item depends on it.
 ## 5. Cartridge and coprocessors
 
 - [x] LoROM, HiROM, ExHiROM; interleaved dumps; PAL; battery SRAM
-- [ ] **A cartridge device layer**, so a board is ROM + RAM + mapper + devices
-      rather than a map-mode enum
-- [ ] SA-1 — reuses the existing 65816 core; the work is the memory map, the
-      message registers and bus arbitration
+- [x] **A cartridge board layer**: the bus asks the board what is at each
+      page, and asks it again per access for the pages a board keeps for a
+      chip of its own.  Anything in $2000-$5FFF the console does not decode
+      goes out to the cartridge, which is where an SA-1's registers live
+- [x] **A board database** (`snes/boards.py`): the header's chipset byte as
+      a first guess, a CRC-32 keyed override as the last word.  A chip with
+      no board says so rather than passing as an ordinary cartridge
+- [~] **SA-1**: the second 65816 runs, with the Super MMC bank switcher,
+      I-RAM, BW-RAM and both windows, the message registers and interrupts
+      each way, borrowed NMI/IRQ vectors, multiply/divide/accumulate, the
+      variable-length bit reader and plain DMA.  Character-conversion DMA and
+      the timers are not there yet, and neither is bus arbitration -- the
+      SA-1 catches up to the console rather than the two sharing a scheduler
 - [ ] SuperFX
-- [ ] DSP-1/2/3/4, CX4, S-DD1, SPC7110, OBC1, ST010/011, RTC
-- [ ] A per-game board database, since headers do not identify boards reliably
+- [ ] DSP-1/2/3/4, CX4, S-DD1, SPC7110, OBC1, ST010/011, RTC.  All of these
+      need a firmware dump we do not have, so they would have to be written
+      against their documented behaviour rather than emulated
 
 ## 6. Verification
 
@@ -128,9 +138,10 @@ This is the part that decides whether any of the above converges.
 2. ~~Offset-per-tile~~ done.
 3. ~~DMA and HDMA exactness~~ done.
 4. ~~The display modes: overscan, hires, interlace, EXTBG, direct colour~~ done.
-5. The DSP pipeline and SPC700 bus timing.
-6. The cartridge device layer, then SA-1 on top of it.
+5. ~~The cartridge board layer, then SA-1 on top of it~~ done.
+6. The rest of SA-1: character-conversion DMA, the timers, arbitration.
 7. Differential tracing against a reference, once there is a reference to hand.
+8. The DSP pipeline and SPC700 bus timing.
 
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and

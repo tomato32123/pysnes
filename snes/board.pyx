@@ -12,7 +12,7 @@ this address -- plus two the bus asks per access, for the pages a board
 claims for a chip of its own.  Adding a coprocessor then means writing a
 Board rather than threading another special case through the bus.
 """
-from libc.stdint cimport uint8_t, uint32_t
+from libc.stdint cimport uint8_t, uint32_t, int64_t
 
 from snes.cart cimport Cart, MAP_LOROM, MAP_HIROM, MAP_EXHIROM
 
@@ -29,6 +29,8 @@ cdef class Board:
         self.cart = cart
         self.name = u"none"
         self.unsupported = None
+        self.clock = 0
+        self.irq_line = 0
 
     cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept:
         base[0] = 0
@@ -43,6 +45,14 @@ cdef class Board:
         pass
 
     cdef void reset_board(self) noexcept:
+        pass
+
+    cdef void run_until(self, int64_t master_clock) noexcept:
+        """Let whatever is on the board catch up with the console.
+
+        Called once a scanline and before every access the board answers, so
+        a chip that shares memory with the console is never behind when the
+        console looks."""
         pass
 
     def describe(self):
@@ -102,6 +112,17 @@ cdef class HiROM(Board):
 _BOARDS = {}
 
 
+def register(name, cls):
+    """Boards live in their own modules and add themselves here."""
+    _BOARDS[name] = cls
+
+
+def _load_boards():
+    """Import the modules that register boards.  Deferred so board.pyx does
+    not have to know about every chip at compile time."""
+    from snes import sa1                      # noqa: F401  (registers itself)
+
+
 def make_board(Cart cart):
     """Pick the board for a cartridge.
 
@@ -110,6 +131,8 @@ def make_board(Cart cart):
     """
     from snes.boards import coprocessor
     cdef Board board
+    if not _BOARDS:
+        _load_boards()
     chip = coprocessor(cart)
     if chip is not None and chip in _BOARDS:
         return _BOARDS[chip](cart)

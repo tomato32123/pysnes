@@ -14,7 +14,7 @@ from libc.string cimport memcpy
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, int8_t, int16_t, int32_t, int64_t
 from libc.stdlib cimport malloc, free
 
-from snes.bus cimport Bus
+from snes.space cimport AddressSpace
 
 
 cdef enum:
@@ -42,7 +42,7 @@ cdef enum:
 
 cdef class CPU:
 
-    def __init__(self, Bus bus):
+    def __init__(self, AddressSpace bus):
         self.bus = bus
         self.tracing = 0
         self.insn_log = NULL

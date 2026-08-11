@@ -1,7 +1,7 @@
 # cython: language_level=3
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
 
-from snes.bus cimport Bus
+from snes.space cimport AddressSpace
 
 
 cdef struct InsnRec:
@@ -19,7 +19,7 @@ cdef struct BusRec:
 
 
 cdef class CPU:
-    cdef readonly Bus bus
+    cdef readonly AddressSpace bus
 
     cdef uint16_t a, x, y, s, d, pc
     cdef uint8_t db, pb, p

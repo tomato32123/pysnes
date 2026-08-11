@@ -147,6 +147,7 @@ cdef class Bus:
         self.nmi_pending = 0
         self.irq_mode = 0
         self.irq_flag = 0
+        self.timer_irq = 0
         self.irq_pending = 0
         self.irq_line_done = 0
         self.nmi_count = 0
@@ -237,7 +238,9 @@ cdef class Bus:
         elif kind == PK_SRAM:
             self.mdr = self.cart.sram[(self.page_base[page] + off) & self.cart.sram_mask]
         elif kind == PK_DEVICE:
+            self.board.clock = self.master_clock
             self.mdr = self.board.read(addr, self.mdr)
+            self._update_irq()
         return self.mdr
 
     cdef void write8(self, uint32_t addr, uint8_t value) noexcept:
@@ -253,7 +256,9 @@ cdef class Bus:
         elif kind == PK_SRAM:
             self.cart.sram[(self.page_base[page] + off) & self.cart.sram_mask] = value
         elif kind == PK_DEVICE:
+            self.board.clock = self.master_clock
             self.board.write(addr, value)
+            self._update_irq()
         # ROM and open bus swallow writes.
 
     cdef uint8_t read8_fast(self, uint32_t addr) noexcept:
@@ -314,7 +319,8 @@ cdef class Bus:
             if self.irq_flag:
                 v |= 0x80
             self.irq_flag = 0
-            self.irq_pending = 0
+            self.timer_irq = 0
+            self._update_irq()
             return v
         if a == 0x4212:                                   # HVBJOY
             v = self.mdr & 0x3E
@@ -368,7 +374,11 @@ cdef class Bus:
                 return self.hdma_line[ch]
             return self.dma_unused[ch]
 
-        return self.mdr
+        # The console decodes $2100-$21FF and $4000-$44FF.  Everything else in
+        # here is brought out to the cartridge connector, which is where an
+        # SA-1's registers and its internal RAM live.
+        self.board.clock = self.master_clock
+        return self.board.read(addr, self.mdr)
 
     cdef void write_mmio(self, uint32_t addr, uint8_t value) noexcept:
         cdef uint32_t a = addr & 0xFFFF
@@ -418,7 +428,8 @@ cdef class Bus:
             self.irq_mode = (value >> 4) & 3
             if self.irq_mode == 0:
                 self.irq_flag = 0
-                self.irq_pending = 0
+                self.timer_irq = 0
+                self._update_irq()
                 self._cancel(EV_IRQ)
             else:
                 self._arm_irq(self.line_start)
@@ -517,6 +528,9 @@ cdef class Bus:
             else:
                 self.dma_unused[ch] = value
             return
+
+        self.board.clock = self.master_clock
+        self.board.write(addr, value)
 
     # =====================================================================
     # DMA
@@ -755,7 +769,8 @@ cdef class Bus:
                 self.hdma_run()
             elif which == EV_IRQ:
                 self.irq_flag = 1
-                self.irq_pending = 1
+                self.timer_irq = 1
+                self._update_irq()
                 self.irq_count += 1
             elif which == EV_JOYPAD:
                 self.auto_joypad_busy = 0
@@ -817,9 +832,21 @@ cdef class Bus:
         if self.vcount < self.vblank_start and self.hdma_enabled:
             self._schedule(EV_HDMA, when + HDMA_DOT * 4)
 
+        # A chip on the cartridge runs on its own and only meets the console
+        # at an access, so it is also given the end of every line: without
+        # that it would stall whenever the console left it alone.
+        self.board.clock = when
+        self.board.run_until(when)
+        self._update_irq()
+
         self._arm_irq(when)
         self._schedule(EV_REFRESH, when + REFRESH_CYCLE)
         self._schedule(EV_LINE, when + self._line_length())
+
+    cdef inline void _update_irq(self) noexcept:
+        """The CPU sees one IRQ line.  The console's H/V timer drives it, and
+        so can a chip on the cartridge, so the flag is the OR of the two."""
+        self.irq_pending = 1 if (self.timer_irq or self.board.irq_line) else 0
 
     cdef inline int _line_length(self) noexcept:
         """Length of the line just started.  All are 1364 master cycles except

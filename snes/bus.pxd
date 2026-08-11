@@ -4,11 +4,12 @@ from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
 from snes.board cimport (Board, PageKind, PK_OPENBUS, PK_ROM, PK_WRAM,
                          PK_SRAM, PK_MMIO_LO, PK_MMIO_HI, PK_DEVICE)
 from snes.cart cimport Cart
+from snes.space cimport AddressSpace
 from snes.ppu cimport PPU
 from snes.apu cimport APU
 
 
-cdef class Bus:
+cdef class Bus(AddressSpace):
     cdef readonly Cart cart
     cdef readonly Board board
     cdef readonly PPU ppu
@@ -23,7 +24,6 @@ cdef class Bus:
     cdef uint8_t mdr                 # open-bus latch
 
     # -- timing ------------------------------------------------------------
-    cdef readonly int64_t master_clock
     cdef int hcount                  # unused; the H counter is derived now
     cdef int64_t line_start          # master clock at the start of this line
     cdef int64_t ev_time[6]          # absolute deadline per event kind
@@ -40,10 +40,10 @@ cdef class Bus:
     # -- interrupts --------------------------------------------------------
     cdef int nmi_enabled
     cdef int nmi_flag                # $4210 bit 7
-    cdef public int nmi_pending      # edge latched for the CPU
     cdef int irq_mode                # bits 4-5 of $4200
-    cdef int irq_flag                # $4211 bit 7
-    cdef public int irq_pending      # level held for the CPU
+    cdef int irq_flag
+    cdef int timer_irq               # the console's own H/V IRQ, before
+                                     # the cartridge is taken into account
     cdef int irq_line_done
     cdef readonly int64_t nmi_count, irq_count
     cdef int in_vblank
@@ -111,4 +111,5 @@ cdef class Bus:
     cdef void _arm_irq(self, int64_t line_start) noexcept
     cdef int _hcount(self) noexcept
     cdef int _screen_x(self) noexcept
+    cdef void _update_irq(self) noexcept
     cdef int _line_length(self) noexcept
