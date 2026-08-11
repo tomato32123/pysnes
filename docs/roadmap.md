@@ -72,7 +72,9 @@ The largest single gap. Everything below the first item depends on it.
       part-way down the screen lets the current block finish
 - [~] H/V counter latch: $2137 and the $4201 latch line both work and
       $213F reports and clears the flag; the single-cycle read race is open
-- [ ] The remaining colour-math corners
+- [x] **Colour math**: forcing the main screen black no longer skips the
+      per-layer switch in $2131, so a region asked to stay black does.
+      Six tests, one of which discriminates against the old behaviour
 - [ ] Half-height objects under $2133 bit 1
 
 ## 4. APU
