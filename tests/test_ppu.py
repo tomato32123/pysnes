@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.testrom import run
 
 W, H = 256, 239
+NL = chr(10)
 FAILURES = []
 
 
@@ -119,6 +120,23 @@ spin:   bra spin
     check("backdrop at (255,223)", pixel(machine, 255, 223), want)
 
 
+def test_overscan_draws_fifteen_more_rows_and_moves_vblank():
+    """$2133 bit 2 makes the display 239 lines instead of 224, which pushes
+    V-blank -- and the NMI with it -- fifteen lines down the frame."""
+    blue = (0, 0, expand(31))
+    plain = scene()
+    check("row 230 without overscan", pixel(plain, 0, 230), (0, 0, 0))
+    check("visible height without overscan", plain.visible_height, 224)
+
+    wide = scene("""
+        lda #$04
+        sta $2133               ; overscan
+""")
+    check("row 230 with overscan", pixel(wide, 0, 230), blue)
+    check("row 238 with overscan", pixel(wide, 0, 238), blue)
+    check("visible height with overscan", wide.visible_height, 239)
+
+
 def test_bg1_tile_is_drawn_where_the_tilemap_puts_it():
     machine = scene()
     red = (expand(31), 0, 0)
@@ -183,15 +201,223 @@ def test_scroll_moves_the_layer():
     check("past the scrolled tile (4,0)", pixel(machine, 4, 0), blue)
 
 
+
+# ------------------------------------------------------- direct colour ----
+#
+# An 8bpp tile whose every pixel is $BA, in mode 3, with $2130 bit 0 set.
+# Two tilemap entries side by side carry palettes 0 and 7, which change the
+# low bit of each channel and so give two different shades of the same pixel.
+
+DIRECT_SETUP = """
+        sep #$20
+        lda #$8F
+        sta $2100
+        lda #$80
+        sta $2115               ; step 1, increment on the high byte
+
+        rep #$20
+        lda #$0000
+        sta $2116               ; tile 0 of an 8bpp character at word $0000
+        ldx #$0008
+dp01:   lda #$FF00              ; the low byte is plane 0, so bits 1-0 = %%10
+        sta $2118
+        dex
+        bne dp01
+        ldx #$0008
+dp23:   lda #$FF00              ; bits 3-2 = %%10
+        sta $2118
+        dex
+        bne dp23
+        ldx #$0008
+dp45:   lda #$FFFF              ; bits 5-4 = %%11
+        sta $2118
+        dex
+        bne dp45
+        ldx #$0008
+dp67:   lda #$FF00              ; bits 7-6 = %%10, so the pixel is $BA
+        sta $2118
+        dex
+        bne dp67
+
+        lda #$0400
+        sta $2116
+        lda #$0000
+        sta $2118               ; column 0: tile 0, palette 0
+        lda #$1C00
+        sta $2118               ; column 1: tile 0, palette 7
+        sep #$20
+
+        lda #$04
+        sta $2107               ; BG1 map base $0400
+        stz $210B               ; BG1 character base $0000
+        lda #$03
+        sta $2105               ; mode 3: BG1 is 8 bits deep
+        lda #$01
+        sta $2130               ; CGWSEL: direct colour
+"""
+
+# The tile's pixel value, read back out of the planes written above.
+DIRECT_PIXEL = 0xBA
+
+
+def direct_colour(pixel_value, palette):
+    r = ((pixel_value & 0x07) << 2) | ((palette & 1) << 1)
+    g = ((pixel_value & 0x38) >> 1) | (palette & 2)
+    b = ((pixel_value & 0xC0) >> 3) | ((palette & 4) << 1)
+    return expand(r), expand(g), expand(b)
+
+
+def test_direct_colour_turns_the_pixel_into_a_colour():
+    """CGRAM is untouched, so anything but black proves the index was not
+    looked up."""
+    machine = run(DIRECT_SETUP + SHOW, max_frames=4).machine
+    check("palette 0", pixel(machine, 0, 0), direct_colour(DIRECT_PIXEL, 0))
+    check("palette 7", pixel(machine, 8, 0), direct_colour(DIRECT_PIXEL, 7))
+
+
+def test_direct_colour_is_ignored_when_the_bit_is_clear():
+    """Same scene without $2130 bit 0: now it is an index into CGRAM, which
+    is still all zero, so the pixel is black."""
+    plain = DIRECT_SETUP.replace("lda #$01" + NL + "        sta $2130",
+                                 "stz $2130")
+    machine = run(plain + SHOW, max_frames=4).machine
+    check("no direct colour", pixel(machine, 0, 0), (0, 0, 0))
+
+
+def test_direct_colour_does_not_reach_a_four_bit_layer():
+    """Mode 1 has no 8bpp layer, so the bit must do nothing there."""
+    machine = scene("""
+        lda #$01
+        sta $2130
+""")
+    check("mode 1 with the direct bit", pixel(machine, 0, 0), (expand(31), 0, 0))
+
+
+
+# --------------------------------------------------------------- EXTBG ----
+#
+# Mode 7 draws one layer, but $2133 bit 6 splits it in two: BG1 keeps all
+# eight bits of each pixel, while BG2 reads bit 7 as a priority and the low
+# seven as its own palette index.  BG2's high half sits in front of BG1 and
+# its low half behind, so the same pixel can be either.
+
+MODE7_SETUP = """
+        sep #$20
+        lda #$8F
+        sta $2100
+
+        lda #$01
+        sta $2121               ; CGRAM 1 = red: BG2's colour, and BG1's when
+        lda #$1F                ; the pixel has no bit 7
+        sta $2122
+        lda #$00
+        sta $2122
+        lda #$81
+        sta $2121               ; CGRAM $81 = blue: BG1's colour when it has
+        lda #$00                ; the whole eight bits
+        sta $2122
+        lda #$7C
+        sta $2122
+
+        lda #$80
+        sta $2115
+        rep #$20
+        lda #$0000
+        sta $2116
+        ldx #$0040
+m7fill: lda #$%(pixel)02X00      ; low byte: tilemap entry 0; high byte: the pixel
+        sta $2118
+        dex
+        bne m7fill
+        sep #$20
+
+        stz $211B
+        lda #$01
+        sta $211B               ; M7A = $0100
+        stz $211C
+        stz $211C
+        stz $211D
+        stz $211D
+        stz $211E
+        lda #$01
+        sta $211E               ; M7D = $0100, so the matrix is the identity
+        stz $211F
+        stz $211F
+        stz $2120
+        stz $2120
+        stz $210D
+        stz $210D
+        stz $210E
+        stz $210E
+        stz $211A
+        lda #$07
+        sta $2105               ; mode 7
+"""
+
+MODE7_SHOW = """
+        lda #$%(layers)02X
+        sta $212C
+        lda #$%(extbg)02X
+        sta $2133
+        lda #$5F
+        sta $2132               ; fixed colour: green at full
+        lda #$%(math)02X
+        sta $2131               ; which layers add it
+        lda #$0F
+        sta $2100
+spin:   bra spin
+"""
+
+
+def mode7(pixel, layers, extbg, math=0x00):
+    source = (MODE7_SETUP % {"pixel": pixel}
+              + MODE7_SHOW % {"layers": layers, "extbg": 0x40 if extbg else 0,
+                              "math": math})
+    return run(source, max_frames=4).machine
+
+
+RED_RGB = (expand(31), 0, 0)
+BLUE_RGB = (0, 0, expand(31))
+RED_PLUS_GREEN = (expand(31), expand(31), 0)
+MATH_ON_BG2 = 0x02
+
+
+def test_mode7_without_extbg_is_one_layer():
+    check("BG1 alone", pixel(mode7(0x81, 0x01, False), 0, 0), BLUE_RGB)
+    check("BG2 is not there", pixel(mode7(0x81, 0x02, False), 0, 0), (0, 0, 0))
+
+
+def test_extbg_gives_mode7_a_second_layer():
+    """BG2 shows palette entry 1, which is bit 7 stripped off pixel $81."""
+    check("BG2 with EXTBG", pixel(mode7(0x81, 0x02, True), 0, 0), RED_RGB)
+
+
+def test_extbg_bit_seven_puts_bg2_in_front_of_bg1():
+    check("pixel $81, both layers", pixel(mode7(0x81, 0x03, True), 0, 0), RED_RGB)
+
+
+def test_extbg_without_bit_seven_puts_bg2_behind_bg1():
+    """A pixel under $80 gives both layers the same palette index, so which
+    one won is only visible through colour math: it is switched on for BG2 and
+    off for BG1, and the pixel comes out unmodified."""
+    check("BG2 alone, with math",
+          pixel(mode7(0x01, 0x02, True, MATH_ON_BG2), 0, 0), RED_PLUS_GREEN)
+    check("both layers, math on BG2 only",
+          pixel(mode7(0x01, 0x03, True, MATH_ON_BG2), 0, 0), RED_RGB)
+
+
+# Pinned so a change to the renderer shows up here and has to be judged
+# rather than absorbed.  Override with PYSNES_PPU_HASH to re-baseline.
+SCENE_HASH = "d786e8f134871b558d805210983cb2955f057f4e"
+
+
 def test_scene_hash_is_stable():
     """A snapshot, so a change in rendering has to be looked at deliberately."""
     machine = scene()
     digest = hashlib.sha1(bytes(machine.framebuffer)).hexdigest()
-    expected = os.environ.get("PYSNES_PPU_HASH")
-    if expected:
-        check("scene hash", digest, expected)
-    else:
-        print("      scene hash: %s" % digest)
+    expected = os.environ.get("PYSNES_PPU_HASH", SCENE_HASH)
+    print("      scene hash: %s" % digest)
+    check("scene hash", digest, expected)
 
 
 def test_register_write_takes_effect_mid_scanline():

@@ -182,6 +182,13 @@ cdef class System:
         return self.ppu.framebuffer_obj
 
     @property
+    def visible_height(self):
+        """Rows of the framebuffer the PPU actually drew this frame: 224
+        normally, 239 with overscan on.  The buffer is always the taller of
+        the two, so the rest is left black."""
+        return self.bus.vblank_start - 1
+
+    @property
     def frame_count(self):
         return self.bus.frame
 

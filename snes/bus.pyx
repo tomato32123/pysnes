@@ -802,6 +802,12 @@ cdef class Bus:
 
         self.ppu.vcounter = self.vcount
 
+        # $2133 bit 2 lengthens the display from 224 lines to 239, which moves
+        # V-blank -- and so NMI -- fifteen lines later.  The bit is sampled per
+        # line, so a game may turn overscan on part-way down the screen.
+        self.vblank_start = 240 if self.ppu.overscan else 225
+        self.ppu.vdisp = self.vblank_start
+
         if self.vcount == self.vblank_start:
             self.in_vblank = 1
             self.nmi_flag = 1
@@ -819,7 +825,7 @@ cdef class Bus:
             self.in_vblank = 0
 
         self.ppu.end_line()
-        if 1 <= self.vcount <= self.vblank_start:
+        if 1 <= self.vcount < self.vblank_start:
             self.ppu.begin_line(self.vcount - 1)
         else:
             self.ppu.begin_line(-1)

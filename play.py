@@ -180,7 +180,8 @@ def main(argv=None):
         frames += 1
         fps_n += 1
 
-        blit(screen, surface, machine.framebuffer, args.scale)
+        blit(screen, surface, machine.framebuffer, args.scale,
+             machine.visible_height)
         pygame.display.flip()
 
         if audio is not None and not rewinding:
@@ -216,12 +217,23 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def blit(screen, surface, framebuffer, scale):
+def blit(screen, surface, framebuffer, scale, height=HEIGHT):
+    """Draw the frame, keeping its aspect when the PPU drew fewer than 239
+    rows.  Without overscan a game fills 224 of them, and stretching those to
+    the full window would squash the picture."""
     frame = pygame.image.frombuffer(bytes(framebuffer), (WIDTH, HEIGHT), "BGRA")
-    if scale == 1:
+    if height < HEIGHT:
+        frame = frame.subsurface((0, 0, WIDTH, height))
+    if scale == 1 and height == HEIGHT:
         screen.blit(frame, (0, 0))
+        return
+    w, h = screen.get_size()
+    target = h * height // HEIGHT
+    if target == h:
+        pygame.transform.scale(frame, (w, h), screen)
     else:
-        pygame.transform.scale(frame, screen.get_size(), screen)
+        screen.fill((0, 0, 0))
+        screen.blit(pygame.transform.scale(frame, (w, target)), (0, 0))
 
 
 def open_audio(machine):

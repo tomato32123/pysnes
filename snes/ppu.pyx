@@ -578,6 +578,12 @@ cdef class PPU:
 
         self._compute_windows(x0, x1)
 
+        # Direct colour only reaches a layer that is 8 bits deep, which is BG1
+        # in modes 3, 4 and 7 and nothing at all in the others.
+        self.direct_active = (1 if ((self.cgwsel & 0x01)
+                                    and (self.bg_mode == 3 or self.bg_mode == 4
+                                         or self.bg_mode == 7)) else 0)
+
         if self.bg_mode == 0:
             self._render_bg(0, line, 2, 0, x0, x1)
             self._render_bg(1, line, 2, 32, x0, x1)
@@ -610,7 +616,10 @@ cdef class PPU:
             order_len = self._order_mode6(order)
         else:
             self._render_mode7(line, x0, x1)
-            order_len = self._order_mode7(order)
+            if self.extbg:
+                order_len = self._order_mode7_extbg(order)
+            else:
+                order_len = self._order_mode7(order)
 
         for x in range(x0, x1):
             self.main_buf[x] = self.cgram[0]
@@ -751,9 +760,27 @@ cdef class PPU:
             if colour:
                 if bpp == 8:
                     self.bg_idx[bg][x] = colour
+                    if self.direct_active:
+                        self.bg_direct[x] = self._direct(colour, palette)
                 else:
                     self.bg_idx[bg][x] = pal_base + palette * (1 << bpp) + colour
                 self.bg_pri[bg][x] = prio
+
+    # ------------------------------------------------------- direct colour ---
+    #
+    # With $2130 bit 0 set, an 8bpp layer stops being an index into CGRAM and
+    # becomes a colour in its own right.  The eight pixel bits carry three of
+    # blue, three of green and three of red -- the low bit of each is filled
+    # from the tilemap's palette field, which is why the same pixel value can
+    # be three different shades depending on the tile that carried it.
+    #
+    # Mode 7 has no tilemap palette bits, so there the low bits are zero.
+
+    cdef inline uint16_t _direct(self, int pixel, int palette) noexcept:
+        cdef uint16_t r = <uint16_t>(((pixel & 0x07) << 2) | ((palette & 1) << 1))
+        cdef uint16_t g = <uint16_t>(((pixel & 0x38) >> 1) | (palette & 2))
+        cdef uint16_t b = <uint16_t>(((pixel & 0xC0) >> 3) | ((palette & 4) << 1))
+        return r | (g << 5) | (b << 10)
 
     # -------------------------------------------------------------- mode 7 ---
 
@@ -796,6 +823,14 @@ cdef class PPU:
             if colour:
                 self.bg_idx[0][x] = colour
                 self.bg_pri[0][x] = 0
+                if self.direct_active:
+                    self.bg_direct[x] = self._direct(colour, 0)
+            # With EXTBG the same fetch also feeds BG2, which reads bit 7 as a
+            # priority and the rest as its palette index.  BG1 still sees all
+            # eight bits.
+            if self.extbg and (colour & 0x7F):
+                self.bg_idx[1][x] = colour & 0x7F
+                self.bg_pri[1][x] = colour >> 7
 
     # ------------------------------------------------------------- windows ---
 
@@ -836,7 +871,7 @@ cdef class PPU:
 
     cdef void _paint(self, int layer, int prio, int to_sub, int x0, int x1) noexcept:
         cdef int x
-        cdef uint16_t idx
+        cdef uint16_t idx, colour
         cdef int enabled, windowed
 
         if to_sub:
@@ -870,11 +905,15 @@ cdef class PPU:
                     continue
                 if windowed and self.win_mask[layer][x]:
                     continue
+                if self.direct_active and layer == 0:
+                    colour = self.bg_direct[x]
+                else:
+                    colour = self.cgram[idx]
                 if to_sub:
-                    self.sub_buf[x] = self.cgram[idx]
+                    self.sub_buf[x] = colour
                     self.sub_src[x] = layer
                 else:
-                    self.main_buf[x] = self.cgram[idx]
+                    self.main_buf[x] = colour
                     self.main_src[x] = layer
 
     cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept:
@@ -1179,6 +1218,19 @@ cdef class PPU:
         n = self._push(order, n, 0, 0)
         n = self._push(order, n, 4, 1)
         n = self._push(order, n, 4, 2)
+        n = self._push(order, n, 4, 3)
+        return n
+
+    cdef int _order_mode7_extbg(self, int order[16][2]) noexcept:
+        """BG2 straddles BG1: its low-priority half sits behind and its
+        high-priority half in front."""
+        cdef int n = 0
+        n = self._push(order, n, 4, 0)
+        n = self._push(order, n, 1, 0)
+        n = self._push(order, n, 4, 1)
+        n = self._push(order, n, 0, 0)
+        n = self._push(order, n, 4, 2)
+        n = self._push(order, n, 1, 1)
         n = self._push(order, n, 4, 3)
         return n
 

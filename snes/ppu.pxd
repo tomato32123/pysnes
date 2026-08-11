@@ -111,6 +111,8 @@ cdef class PPU:
     cdef int bg_bpp[4]
     cdef int bg_pal_base[4]
     cdef uint8_t light[16][32]       # brightness level -> 5-bit channel
+    cdef uint16_t bg_direct[256]     # direct-colour result for BG1
+    cdef int direct_active           # is direct colour in force this span
     cdef int render_row              # framebuffer row being drawn, -1 if none
     cdef int rendered_x              # how far along that row we have drawn
 
@@ -151,4 +153,6 @@ cdef class PPU:
     cdef int _order_mode23(self, int order[16][2]) noexcept
     cdef int _order_mode6(self, int order[16][2]) noexcept
     cdef int _order_mode7(self, int order[16][2]) noexcept
+    cdef int _order_mode7_extbg(self, int order[16][2]) noexcept
+    cdef uint16_t _direct(self, int pixel, int palette) noexcept
     cdef int _push(self, int order[16][2], int n, int layer, int prio) noexcept
