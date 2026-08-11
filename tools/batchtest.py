@@ -19,18 +19,7 @@ from tools.screenshot import write_png
 
 W, H = 512, 478
 
-# Coprocessors we do not emulate, keyed by the header's chipset byte.
-COPROCESSORS = {
-    0x03: "DSP", 0x04: "DSP", 0x05: "DSP",
-    0x13: "SuperFX", 0x14: "SuperFX", 0x15: "SuperFX", 0x1A: "SuperFX",
-    0x25: "OBC1",
-    0x32: "SA-1", 0x33: "SA-1", 0x34: "SA-1", 0x35: "SA-1",
-    0x43: "S-DD1", 0x45: "S-DD1",
-    0x55: "S-RTC",
-    0xE3: "Super Game Boy",
-    0xF3: "CX4",
-    0xF5: "SPC7110/S-DD1", 0xF6: "SPC7110", 0xF9: "SPC7110+RTC",
-}
+from snes.boards import CHIPSET as COPROCESSORS
 
 
 def find_roms(root):

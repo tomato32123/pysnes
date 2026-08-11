@@ -17,6 +17,7 @@ cdef enum PageKind:
 cdef class Board:
     cdef readonly Cart cart
     cdef readonly unicode name
+    cdef public object unsupported   # chip name we have no board for, or None
 
     cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept
     cdef uint8_t read(self, uint32_t addr, uint8_t data) noexcept

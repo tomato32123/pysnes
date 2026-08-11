@@ -28,6 +28,7 @@ cdef class Board:
     def __cinit__(self, Cart cart):
         self.cart = cart
         self.name = u"none"
+        self.unsupported = None
 
     cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept:
         base[0] = 0
@@ -95,14 +96,25 @@ cdef class HiROM(Board):
         return PK_ROM
 
 
+# Chip name -> the Board that emulates it.  A chip missing from here has no
+# board yet; the plain mapping is closer than nothing, and `describe` says so
+# rather than pretending the cartridge is ordinary.
+_BOARDS = {}
+
+
 def make_board(Cart cart):
     """Pick the board for a cartridge.
 
-    For now this follows the header's map mode, which is right for the plain
-    boards and only the plain boards.  Anything with a chip on it needs to be
-    recognised by what the cartridge actually is, not by what its header
-    claims, which is what the board database is for.
+    snes.boards decides what chip is on it: the header's chipset byte, with a
+    per-game override for the headers that lie.
     """
-    if cart.map_mode == MAP_LOROM:
-        return LoROM(cart)
-    return HiROM(cart)
+    from snes.boards import coprocessor
+    cdef Board board
+    chip = coprocessor(cart)
+    if chip is not None and chip in _BOARDS:
+        return _BOARDS[chip](cart)
+    board = LoROM(cart) if cart.map_mode == MAP_LOROM else HiROM(cart)
+    if chip is not None:
+        board.unsupported = chip
+        board.name = u"%s (%s not emulated)" % (board.name, chip)
+    return board
