@@ -108,9 +108,14 @@ The largest single gap. Everything below the first item depends on it.
       up to the console rather than the two sharing a scheduler, so a game
       that depends on which of them wins a contended cycle would not see it
 - [ ] SuperFX
-- [ ] DSP-1/2/3/4, CX4, S-DD1, SPC7110, OBC1, ST010/011, RTC.  All of these
-      need a firmware dump we do not have, so they would have to be written
-      against their documented behaviour rather than emulated
+- [ ] S-DD1, SPC7110, OBC1, RTC.  These are decompressors and glue logic
+      with documented behaviour and no firmware of their own, so they can be
+      written.  S-DD1 is the one the local library wants, for Street Fighter
+      Zero 2
+- [ ] DSP-1/2/3/4, CX4, ST010/011.  Each is a microcontroller running a
+      program mask-ROMed into it, and that dump is not here.  Without it the
+      only route is reimplementing what the program does from its documented
+      effects, which is a different and much weaker thing than emulating it
 
 ## 6. Verification
 

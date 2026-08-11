@@ -60,9 +60,22 @@ def run_one(path, frames, shots_dir):
 
     pcs = collections.Counter()
     t0 = time.perf_counter()
+    # Judging a title on its last frame judges it on luck.  Games fade between
+    # screens, and a fade sampled at the wrong moment reads as a black screen
+    # from an emulator that is in fact drawing the logo perfectly.  So the run
+    # is sampled periodically and the best frame is what counts, with the last
+    # one kept for the screenshot.
+    best = (0, 0)
+    best_frame = 0
+    every = max(1, frames // 12)
     try:
         for i in range(frames):
             machine.run_frame()
+            if (i + 1) % every == 0 or i == frames - 1:
+                seen = analyse_frame(machine.framebuffer)
+                if seen > best:
+                    best = seen
+                    best_frame = i + 1
             if i >= frames - 240:                 # sample the tail for hangs
                 r = machine.cpu.regs
                 pcs[(r["pb"], r["pc"])] += 1
@@ -73,9 +86,10 @@ def run_one(path, frames, shots_dir):
         return result
     result["seconds"] = time.perf_counter() - t0
 
-    nonblack, colours = analyse_frame(machine.framebuffer)
+    nonblack, colours = best
     result["nonblack"] = nonblack
     result["colours"] = colours
+    result["best_frame"] = best_frame
     result["mode"] = machine.ppu.bg_mode if hasattr(machine.ppu, "bg_mode") else -1
     top = pcs.most_common(1)
     result["hot_pc_share"] = (top[0][1] / float(sum(pcs.values()))) if pcs else 0.0
@@ -117,8 +131,9 @@ def main():
         print("%3d/%-3d %-9s %-46s %-8s $%02X %-8s %s"
               % (i, len(roms), res["status"], res["name"][:46],
                  res.get("map", "-"), res.get("chip", 0), chip,
-                 res.get("detail", "nonblack=%s colours=%s" %
-                         (res.get("nonblack"), res.get("colours")))),
+                 res.get("detail", "nonblack=%s colours=%s @f%s" %
+                         (res.get("nonblack"), res.get("colours"),
+                          res.get("best_frame")))),
               flush=True)
 
     print(flush=True)
