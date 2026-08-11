@@ -10,7 +10,9 @@ from libc.string cimport memset, memcpy
 from cpython.bytes cimport PyBytes_FromStringAndSize
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
 
-from snes.cart cimport Cart, MAP_LOROM, MAP_HIROM, MAP_EXHIROM
+from snes.board cimport Board
+from snes.board import make_board
+from snes.cart cimport Cart
 from snes.ppu cimport PPU
 from snes.apu cimport APU
 
@@ -66,8 +68,9 @@ DEF NEVER = 0x7FFFFFFFFFFFFFFF
 
 cdef class Bus:
 
-    def __init__(self, Cart cart, PPU ppu, APU apu):
+    def __init__(self, Cart cart, PPU ppu, APU apu, Board board=None):
         self.cart = cart
+        self.board = board if board is not None else make_board(cart)
         self.ppu = ppu
         self.apu = apu
         self.build_map()
@@ -78,9 +81,14 @@ cdef class Bus:
     # =====================================================================
 
     def build_map(self):
-        """Fill the 8 KB page table for the cartridge's map mode."""
-        cdef uint32_t page, bank, addr
-        cdef Cart c = self.cart
+        """Fill the 8 KB page table.
+
+        The parts the console itself decodes -- WRAM, the two register
+        blocks -- are fixed and answered here.  Everything else is the
+        cartridge's business, so the board is asked what is at each page.
+        """
+        cdef uint32_t page, bank, addr, base
+        cdef int kind
 
         for page in range(2048):
             bank = page >> 3
@@ -93,56 +101,20 @@ cdef class Bus:
                 self.page_base[page] = ((bank - 0x7E) << 16) | addr
                 continue
 
-            if (bank & 0x7F) < 0x40:                    # $00-$3F / $80-$BF
+            if (bank & 0x7F) < 0x40 and addr < 0x6000:  # $00-$3F / $80-$BF
                 if addr < 0x2000:
                     self.page_kind[page] = PK_WRAM
                     self.page_base[page] = 0
-                    continue
-                if addr < 0x4000:
+                elif addr < 0x4000:
                     self.page_kind[page] = PK_MMIO_LO
-                    continue
-                if addr < 0x6000:
+                else:
                     self.page_kind[page] = PK_MMIO_HI
-                    continue
-                if addr < 0x8000:
-                    self._map_low_sram(page, bank)
-                    continue
+                continue
 
-            self._map_rom(page, bank, addr)
-
-    cdef void _map_low_sram(self, uint32_t page, uint32_t bank) noexcept:
-        """$6000-$7FFF: HiROM puts battery SRAM here."""
-        cdef Cart c = self.cart
-        cdef uint32_t slot
-        if c.sram_size == 0:
-            return
-        if c.map_mode == MAP_HIROM or c.map_mode == MAP_EXHIROM:
-            if 0x20 <= (bank & 0x7F) <= 0x3F:
-                slot = (bank & 0x1F) * 0x2000
-                self.page_kind[page] = PK_SRAM
-                self.page_base[page] = slot & c.sram_mask
-
-    cdef void _map_rom(self, uint32_t page, uint32_t bank, uint32_t addr) noexcept:
-        cdef Cart c = self.cart
-        cdef uint32_t linear
-
-        if c.map_mode == MAP_LOROM:
-            # LoROM: $70-$7D and $F0-$FF low halves hold SRAM.
-            if c.sram_size and 0x70 <= (bank & 0x7F) <= 0x7D and addr < 0x8000:
-                self.page_kind[page] = PK_SRAM
-                self.page_base[page] = (((bank & 0x0F) << 15) | addr) & c.sram_mask
-                return
-            linear = ((bank & 0x7F) << 15) | (addr & 0x7FFF)
-        elif c.map_mode == MAP_EXHIROM:
-            # The second 4 MB half lives in banks $00-$3F / $40-$7D.
-            linear = ((bank & 0x3F) << 16) | addr
-            if (bank & 0x80) == 0:
-                linear += 0x400000
-        else:                                            # HiROM
-            linear = ((bank & 0x3F) << 16) | addr
-
-        self.page_kind[page] = PK_ROM
-        self.page_base[page] = c.rom_offset(linear)
+            base = 0
+            kind = self.board.classify(bank, addr, &base)
+            self.page_kind[page] = <uint8_t>kind
+            self.page_base[page] = base
 
     # =====================================================================
     # reset
@@ -264,6 +236,8 @@ cdef class Bus:
             self.mdr = self.read_mmio(addr)
         elif kind == PK_SRAM:
             self.mdr = self.cart.sram[(self.page_base[page] + off) & self.cart.sram_mask]
+        elif kind == PK_DEVICE:
+            self.mdr = self.board.read(addr, self.mdr)
         return self.mdr
 
     cdef void write8(self, uint32_t addr, uint8_t value) noexcept:
@@ -278,6 +252,8 @@ cdef class Bus:
             self.write_mmio(addr, value)
         elif kind == PK_SRAM:
             self.cart.sram[(self.page_base[page] + off) & self.cart.sram_mask] = value
+        elif kind == PK_DEVICE:
+            self.board.write(addr, value)
         # ROM and open bus swallow writes.
 
     cdef uint8_t read8_fast(self, uint32_t addr) noexcept:

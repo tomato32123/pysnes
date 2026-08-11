@@ -1,0 +1,108 @@
+# cython: language_level=3
+# cython: boundscheck=False, wraparound=False, cdivision=True
+"""What a cartridge is, as far as the bus is concerned.
+
+A SNES cartridge is not a "map mode".  It is a board: some ROM, maybe some
+RAM, address decoding built out of discrete logic, and sometimes a chip of
+its own that answers to part of the bus.  The header's map-mode byte only
+hints at the first two of those, which is why it cannot be the whole story.
+
+Board turns that into one question the bus asks per 8 KB page -- what is at
+this address -- plus two the bus asks per access, for the pages a board
+claims for a chip of its own.  Adding a coprocessor then means writing a
+Board rather than threading another special case through the bus.
+"""
+from libc.stdint cimport uint8_t, uint32_t
+
+from snes.cart cimport Cart, MAP_LOROM, MAP_HIROM, MAP_EXHIROM
+
+
+cdef class Board:
+    """Base board: no devices, everything open bus.
+
+    `classify` answers for the start of an 8 KB page and writes the offset
+    the page begins at into `base`.  It is called once when the machine is
+    built, not per access, so it can be as slow as it likes.
+    """
+
+    def __cinit__(self, Cart cart):
+        self.cart = cart
+        self.name = u"none"
+
+    cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept:
+        base[0] = 0
+        return PK_OPENBUS
+
+    cdef uint8_t read(self, uint32_t addr, uint8_t data) noexcept:
+        """Answer a read on a PK_DEVICE page.  `data` is the bus's open-bus
+        value, which is what an unclaimed address inside the range returns."""
+        return data
+
+    cdef void write(self, uint32_t addr, uint8_t value) noexcept:
+        pass
+
+    cdef void reset_board(self) noexcept:
+        pass
+
+    def describe(self):
+        return self.name
+
+
+cdef class LoROM(Board):
+    """ROM in the top half of every bank, SRAM in $70-$7D.
+
+    The 32 KB halves are laid end to end, so bank n holds linear offset
+    n * $8000.  Some boards also mirror SRAM into $F0-$FF; that falls out of
+    masking the bank to seven bits.
+    """
+
+    def __cinit__(self, Cart cart):
+        self.name = u"LoROM"
+
+    cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept:
+        cdef Cart c = self.cart
+        cdef uint32_t linear
+        if c.sram_size and 0x70 <= (bank & 0x7F) <= 0x7D and addr < 0x8000:
+            base[0] = (((bank & 0x0F) << 15) | addr) & c.sram_mask
+            return PK_SRAM
+        linear = ((bank & 0x7F) << 15) | (addr & 0x7FFF)
+        base[0] = c.rom_offset(linear)
+        return PK_ROM
+
+
+cdef class HiROM(Board):
+    """ROM addressed linearly across whole banks, SRAM at $20-$3F:$6000.
+
+    ExHiROM is the same board with an extra 4 MB reached through banks
+    $00-$3F, which is why it is a flag here rather than a class of its own.
+    """
+
+    def __cinit__(self, Cart cart):
+        self.extended = 1 if cart.map_mode == MAP_EXHIROM else 0
+        self.name = u"ExHiROM" if self.extended else u"HiROM"
+
+    cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept:
+        cdef Cart c = self.cart
+        cdef uint32_t linear
+        if (c.sram_size and 0x20 <= (bank & 0x7F) <= 0x3F
+                and 0x6000 <= addr < 0x8000):
+            base[0] = ((bank & 0x1F) * 0x2000) & c.sram_mask
+            return PK_SRAM
+        linear = ((bank & 0x3F) << 16) | addr
+        if self.extended and (bank & 0x80) == 0:
+            linear += 0x400000
+        base[0] = c.rom_offset(linear)
+        return PK_ROM
+
+
+def make_board(Cart cart):
+    """Pick the board for a cartridge.
+
+    For now this follows the header's map mode, which is right for the plain
+    boards and only the plain boards.  Anything with a chip on it needs to be
+    recognised by what the cartridge actually is, not by what its header
+    claims, which is what the board database is for.
+    """
+    if cart.map_mode == MAP_LOROM:
+        return LoROM(cart)
+    return HiROM(cart)

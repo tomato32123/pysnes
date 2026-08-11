@@ -1,22 +1,16 @@
 # cython: language_level=3
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, int32_t, int64_t
 
+from snes.board cimport (Board, PageKind, PK_OPENBUS, PK_ROM, PK_WRAM,
+                         PK_SRAM, PK_MMIO_LO, PK_MMIO_HI, PK_DEVICE)
 from snes.cart cimport Cart
 from snes.ppu cimport PPU
 from snes.apu cimport APU
 
 
-cdef enum PageKind:
-    PK_OPENBUS = 0
-    PK_ROM     = 1
-    PK_WRAM    = 2
-    PK_SRAM    = 3
-    PK_MMIO_LO = 4      # $2000-$3FFF
-    PK_MMIO_HI = 5      # $4000-$5FFF
-
-
 cdef class Bus:
     cdef readonly Cart cart
+    cdef readonly Board board
     cdef readonly PPU ppu
     cdef readonly APU apu
 
@@ -102,8 +96,6 @@ cdef class Bus:
     cdef void poll_joypads(self) noexcept
 
     # -- internals ---------------------------------------------------------
-    cdef void _map_low_sram(self, uint32_t page, uint32_t bank) noexcept
-    cdef void _map_rom(self, uint32_t page, uint32_t bank, uint32_t addr) noexcept
     cdef uint8_t _dma_read_a(self, uint32_t addr) noexcept
     cdef void _dma_write_b(self, uint8_t bbus, uint8_t value) noexcept
     cdef uint8_t _dma_read_b(self, uint8_t bbus) noexcept
