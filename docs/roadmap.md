@@ -99,10 +99,14 @@ The largest single gap. Everything below the first item depends on it.
       no board says so rather than passing as an ordinary cartridge
 - [~] **SA-1**: the second 65816 runs, with the Super MMC bank switcher,
       I-RAM, BW-RAM and both windows, the message registers and interrupts
-      each way, borrowed NMI/IRQ vectors, multiply/divide/accumulate, the
-      variable-length bit reader and plain DMA.  Character-conversion DMA and
-      the timers are not there yet, and neither is bus arbitration -- the
-      SA-1 catches up to the console rather than the two sharing a scheduler
+      each way, both processors' own and borrowed vectors, multiply, divide
+      and accumulate, the variable-length bit reader, plain DMA, the timers
+      and both kinds of character-conversion DMA.
+      Two caveats.  The timers and character conversion are written from the
+      documented behaviour and nothing in the local library turns them on, so
+      they are unverified.  And there is no bus arbitration: the SA-1 catches
+      up to the console rather than the two sharing a scheduler, so a game
+      that depends on which of them wins a contended cycle would not see it
 - [ ] SuperFX
 - [ ] DSP-1/2/3/4, CX4, S-DD1, SPC7110, OBC1, ST010/011, RTC.  All of these
       need a firmware dump we do not have, so they would have to be written
@@ -139,9 +143,10 @@ This is the part that decides whether any of the above converges.
 3. ~~DMA and HDMA exactness~~ done.
 4. ~~The display modes: overscan, hires, interlace, EXTBG, direct colour~~ done.
 5. ~~The cartridge board layer, then SA-1 on top of it~~ done.
-6. The rest of SA-1: character-conversion DMA, the timers, arbitration.
-7. Differential tracing against a reference, once there is a reference to hand.
-8. The DSP pipeline and SPC700 bus timing.
+6. Differential tracing against a reference, once there is a reference to
+   hand.  It is what would turn the unverified items above into settled ones.
+7. The DSP pipeline and SPC700 bus timing.
+8. SA-1 bus arbitration, and SuperFX.
 
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and
