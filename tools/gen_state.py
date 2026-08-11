@@ -57,7 +57,8 @@ SPECS = [
                  "screen_interlace", "pseudo_hires", "extbg", "hcounter",
                  "vcounter", "field", "latched", "hcounter_latch",
                  "vcounter_latch", "hcounter_flip", "vcounter_flip",
-                 "range_over", "time_over", "ppu1_mdr", "ppu2_mdr"],
+                 "range_over", "time_over", "ppu1_mdr", "ppu2_mdr",
+                 "mosaic_start", "mosaic_left"],
         arrays=[("mosaic_enable", 4), ("bg_map_base", 4), ("bg_map_wide", 4),
                 ("bg_map_tall", 4), ("bg_chr_base", 4), ("bg_tile_size", 4),
                 ("bg_hofs", 4), ("bg_vofs", 4),
@@ -190,12 +191,15 @@ def main():
         path = os.path.join(ROOT, "snes", module + ".pyx")
         text = open(path, encoding="utf-8").read()
         # Drop any previously generated blocks so re-running is idempotent.
-        text = re.sub(re.escape(BANNER) + r".*?" + re.escape(END), "", text, flags=re.S)
+        # Swallow the blank lines after the old block too, or each run leaves
+        # one behind and the file drifts without anything changing.
+        text = re.sub(re.escape(BANNER) + r".*?" + re.escape(END) + NL + "*",
+                      "", text, flags=re.S)
         for spec in specs:
             marker = spec["marker"]
             if marker not in text:
                 raise SystemExit("marker not found in %s for %s" % (module, spec["cls"]))
-            text = text.replace(marker, emit(spec) + NL + marker, 1)
+            text = text.replace(marker, emit(spec) + NL + NL + marker, 1)
         text = ensure_imports(text)
         open(path, "w", encoding="utf-8").write(text)
         print("updated snes/%s.pyx" % module)

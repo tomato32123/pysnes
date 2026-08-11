@@ -504,6 +504,91 @@ def test_without_interlace_the_height_is_not_doubled():
     check("visible height", scene().visible_height, 224)
 
 
+
+# -------------------------------------------------------------- mosaic ----
+#
+# The SETUP scene puts one 8x8 tile at the origin.  With mosaic on, each
+# block takes its colour from its top-left corner, so a block that starts
+# inside the tile is filled with the tile's colour and one that starts
+# outside is filled with the backdrop.
+
+def mosaic_scene(size, layers="$01"):
+    return scene("""
+        lda #$%02X
+        sta $2106               ; mosaic size %d, on BG1
+""" % ((size - 1) << 4 | 0x01, size))
+
+
+def test_mosaic_spreads_the_corner_of_each_block():
+    """Size 4: the tile is eight wide, so blocks at 0 and 4 are inside it
+    and the block at 8 is not."""
+    machine = mosaic_scene(4)
+    check("dot 3 takes dot 0", pixel(machine, 3, 0), TILE)
+    check("dot 7 takes dot 4", pixel(machine, 7, 0), TILE)
+    check("dot 8 is outside", pixel(machine, 8, 0), BACKDROP)
+    check("row 3 takes row 0", pixel(machine, 0, 3), TILE)
+    check("row 8 is outside", pixel(machine, 0, 8), BACKDROP)
+
+
+def test_mosaic_of_one_changes_nothing():
+    machine = mosaic_scene(1)
+    check("dot 7", pixel(machine, 7, 0), TILE)
+    check("dot 8", pixel(machine, 8, 0), BACKDROP)
+
+
+def test_a_sixteen_line_block_reaches_past_the_tile():
+    """Size 16 makes rows 0 to 15 all sample row 0, so the tile's colour
+    runs eight rows further down than the tile does."""
+    machine = mosaic_scene(16)
+    check("row 15 still takes row 0", pixel(machine, 0, 15), TILE)
+    check("row 16 starts a new block", pixel(machine, 0, 16), BACKDROP)
+
+
+# -------------------------------------------------- H/V counter latch ----
+
+LATCH_SOURCE = """
+        sep #$30
+        lda $213F               ; clear any stale latch flag
+        lda #$80
+        sta $4201               ; the latch line idle high
+        lda #$00
+        sta $4201               ; and taken low, which latches
+        lda $213F
+        sta $7E4000             ; bit 6 says the counters are latched
+        lda $213C
+        sta $7E4001             ; H, low byte
+        lda $213D
+        sta $7E4002             ; V, low byte
+        lda $213F
+        sta $7E4003             ; reading $213F cleared the flag
+        lda #$FF
+        sta $7E4FFF
+__end:  bra __end
+"""
+
+
+def test_taking_the_wrio_latch_line_low_freezes_the_counters():
+    from tools.testrom import run as run_rom
+    r = run_rom(LATCH_SOURCE)
+    if not r[0] & 0x40:
+        FAILURES.append("STAT78 did not report a latch: got $%02X" % r[0])
+    if r[3] & 0x40:
+        FAILURES.append("the latch flag survived a read of $213F")
+    # The program runs early in the frame, on a line the PPU is drawing.
+    if not 0 <= r[1] <= 255:
+        FAILURES.append("latched H out of range: %d" % r[1])
+
+
+def test_the_latch_flag_stays_clear_without_a_falling_edge():
+    from tools.testrom import run as run_rom
+    low = "        lda #$00" + NL + "        sta $4201"
+    high = "        lda #$80" + NL + "        sta $4201"
+    source = LATCH_SOURCE.replace(low, high)
+    r = run_rom(source)
+    if r[0] & 0x40:
+        FAILURES.append("STAT78 reported a latch with the line held high")
+
+
 # Pinned so a change to the renderer shows up here and has to be judged
 # rather than absorbed.  Override with PYSNES_PPU_HASH to re-baseline.
 SCENE_HASH = "6a4600cba64293ced593c0f4a55d80b89b5bb035"

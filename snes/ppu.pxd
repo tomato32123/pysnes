@@ -120,6 +120,8 @@ cdef class PPU:
     cdef uint8_t light[16][32]       # brightness level -> 5-bit channel
     cdef uint16_t bg_direct[256]     # direct-colour result for BG1
     cdef int direct_active           # is direct colour in force this span
+    cdef int mosaic_start            # first line of the current block
+    cdef int mosaic_left             # lines the block still has to run
     cdef int hires                   # two pixels per dot this span
     cdef int out_row                 # framebuffer row the span lands on
     cdef int src_line                # PPU line the layers are sampled at

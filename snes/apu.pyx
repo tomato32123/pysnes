@@ -642,6 +642,7 @@ cdef class DSP:
 
     # -- end generated save state ------------------------------------------
 
+
     # -- python side -----------------------------------------------------------
 
     def pending_samples(self):
@@ -1725,6 +1726,7 @@ cdef class APU:
         memcpy(<char *>self.ram, <char *><bytes>blobs[0], 65536)
 
     # -- end generated save state ------------------------------------------
+
 
     # =====================================================================
     # python helpers
