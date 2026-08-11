@@ -124,10 +124,16 @@ This is the part that decides whether any of the above converges.
 - [x] Interrupt timing suite
 - [x] **PPU output tests**: pixel-level assertions on backdrop, tiles, scroll,
       brightness and the mid-scanline split, plus a scene hash
-- [ ] **Differential trace against a reference emulator.** The single highest
-      -value item left: run the same test ROM here and in bsnes or ares, diff
-      the traces, fix the first divergence. Turns "something looks wrong" into
-      a cycle number.
+- [~] **Differential trace.** `tools/difftrace.py` records a trace, compares
+      two, and reports the first divergence with the cycle it happened on and
+      the instructions around it; `--fields` lets a reference log that is
+      missing a column still be compared on the rest.  Four short programs
+      have their traces committed under `tests/golden/` and `test_trace.py`
+      checks them, so a cycle that moves is a diff rather than a game that
+      stops working three weeks later.
+      What is missing is a reference: no bsnes or ares on this machine, so
+      the comparison that would say the emulator is *right* rather than
+      *unchanged* has not been run
 - [x] DMA and HDMA timing tests; PPU register timing still open
 - [x] Open bus suite, and display-mode tests for overscan, hires,
       interlace, EXTBG, direct colour and mosaic
@@ -143,8 +149,8 @@ This is the part that decides whether any of the above converges.
 3. ~~DMA and HDMA exactness~~ done.
 4. ~~The display modes: overscan, hires, interlace, EXTBG, direct colour~~ done.
 5. ~~The cartridge board layer, then SA-1 on top of it~~ done.
-6. Differential tracing against a reference, once there is a reference to
-   hand.  It is what would turn the unverified items above into settled ones.
+6. ~~The tooling for differential tracing~~ done; the comparison itself
+   waits on a reference emulator being available.
 7. The DSP pipeline and SPC700 bus timing.
 8. SA-1 bus arbitration, and SuperFX.
 
