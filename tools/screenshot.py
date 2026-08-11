@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.romarg import from_argv
 from snes.system import System
 
-W, H = 256, 239
+W, H = 512, 478
 def write_png(path, fb):
     """fb is 0xAARRGGBB little-endian -> bytes B,G,R,A."""
     raw = bytearray()

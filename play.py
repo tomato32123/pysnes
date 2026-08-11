@@ -31,7 +31,11 @@ from snes.system import System, BUTTONS
 from snes.gamepad import Pads
 from snes.rewind import Rewind
 
-WIDTH, HEIGHT = 256, 239
+# What the PPU fills, and the shape of the picture it stands for.  A dot
+# becomes two pixels and a frame can be two fields, so the buffer is twice
+# the nominal size in each direction.
+BUF_W, BUF_H = 512, 478
+WIDTH, HEIGHT = 256, 224
 FRAME_SECONDS = 1.0 / 60.098          # NTSC field rate
 
 KEYMAP = {
@@ -114,7 +118,7 @@ def main(argv=None):
     pygame.init()
     pygame.display.set_caption("pysnes - %s" % machine.cart.title)
     screen = pygame.display.set_mode((WIDTH * args.scale, HEIGHT * args.scale))
-    surface = pygame.Surface((WIDTH, HEIGHT))
+    surface = pygame.Surface((BUF_W, BUF_H))
     clock = pygame.time.Clock()
 
     audio = None
@@ -217,23 +221,17 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def blit(screen, surface, framebuffer, scale, height=HEIGHT):
-    """Draw the frame, keeping its aspect when the PPU drew fewer than 239
-    rows.  Without overscan a game fills 224 of them, and stretching those to
-    the full window would squash the picture."""
-    frame = pygame.image.frombuffer(bytes(framebuffer), (WIDTH, HEIGHT), "BGRA")
-    if height < HEIGHT:
-        frame = frame.subsurface((0, 0, WIDTH, height))
-    if scale == 1 and height == HEIGHT:
-        screen.blit(frame, (0, 0))
-        return
-    w, h = screen.get_size()
-    target = h * height // HEIGHT
-    if target == h:
-        pygame.transform.scale(frame, (w, h), screen)
-    else:
-        screen.fill((0, 0, 0))
-        screen.blit(pygame.transform.scale(frame, (w, target)), (0, 0))
+def blit(screen, surface, framebuffer, scale, height=224):
+    """Draw the part of the buffer the PPU filled, scaled to the window.
+
+    The buffer is always 512x478 because the PPU can emit two pixels per dot
+    and two fields per frame.  How much of it is a picture depends on the
+    mode, so only that much is taken and then stretched, which keeps the
+    aspect right whether the game drew 224 rows or 478."""
+    frame = pygame.image.frombuffer(bytes(framebuffer), (BUF_W, BUF_H), "BGRA")
+    if height < BUF_H:
+        frame = frame.subsurface((0, 0, BUF_W, height))
+    pygame.transform.scale(frame, screen.get_size(), screen)
 
 
 def open_audio(machine):

@@ -69,7 +69,7 @@ SPECS = [
         # The framebuffer is derived data, but rewind restores states without
         # rendering, so without it the display freezes while scrubbing back.
         blobs=[("vram", "uint16_t", 0x8000), ("cgram", "uint16_t", 256),
-               ("oam", "uint8_t", 544), ("framebuffer", "uint8_t", 256 * 239 * 4)],
+               ("oam", "uint8_t", 544), ("framebuffer", "uint8_t", 512 * 478 * 4)],
     ),
     dict(
         module="apu", cls="APU",

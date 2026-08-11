@@ -23,7 +23,7 @@ def shot(machine, name):
     os.makedirs(OUT, exist_ok=True)
     path = os.path.join(OUT, name + ".png")
     write_png(path, machine.framebuffer)
-    nb = sum(1 for i in range(0, 256 * 239 * 4, 4)
+    nb = sum(1 for i in range(0, 512 * 478 * 4, 4)
              if machine.framebuffer[i] or machine.framebuffer[i + 1] or machine.framebuffer[i + 2])
     print("%-22s frame=%-5d non-black=%d  mode=%s"
           % (name, machine.frame_count, nb, machine.ppu.dump().splitlines()[1]))

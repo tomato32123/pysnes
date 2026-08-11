@@ -15,6 +15,11 @@ from libc.stdint cimport uint8_t, uint16_t, uint32_t, int16_t, int32_t
 cdef enum:
     SCREEN_W = 256
     SCREEN_H = 239
+    # The PPU can emit two pixels per dot and two fields per frame, so the
+    # buffer is always the largest either can need.  A normal frame fills the
+    # width by writing each pixel twice and uses only the first 224 rows.
+    OUT_W = 512
+    OUT_H = 478
 
 
 cdef inline uint32_t _remap_vram(uint8_t vmain, uint32_t addr) noexcept:
@@ -49,7 +54,7 @@ cdef class PPU:
         for level in range(16):
             for value in range(32):
                 self.light[level][value] = <uint8_t>((value * level + 7) // 15)
-        self.framebuffer_obj = bytearray(SCREEN_W * SCREEN_H * 4)
+        self.framebuffer_obj = bytearray(OUT_W * OUT_H * 4)
         self.framebuffer = <uint32_t *><unsigned char *>self.framebuffer_obj
         self.reset()
 
@@ -127,6 +132,10 @@ cdef class PPU:
         self.hcounter = 0
         self.vcounter = 0
         self.vdisp = 225
+        self.hires = 0
+        self.true_hires = 0
+        self.out_row = 0
+        self.src_line = 0
         self.field = 0
         self.latched = 0
         self.hcounter_latch = 0
@@ -140,7 +149,7 @@ cdef class PPU:
         self.dbg_lines = 0
         self.dbg_lines_enabled = 0
         self.dbg_lines_blank = 0
-        memset(self.framebuffer, 0, SCREEN_W * SCREEN_H * 4)
+        memset(self.framebuffer, 0, OUT_W * OUT_H * 4)
 
     cdef void latch_counters(self) noexcept:
         self.hcounter_latch = <uint16_t>self.hcounter
@@ -521,17 +530,32 @@ cdef class PPU:
         return line - (line % (self.mosaic_size + 1))
 
     cdef void begin_line(self, int row) noexcept:
-        """Start a new output row.  row < 0 means nothing is being displayed."""
+        """Start a new output row.  row < 0 means nothing is being displayed.
+
+        Interlace turns one display row into two: the frame draws every other
+        output row and takes its pixels from every other source row, so the
+        two fields together carry twice the vertical detail.  The field left
+        alone keeps last frame's pixels, which is what a real display does.
+        """
         cdef int i
         self.render_row = row
         self.rendered_x = 0
         if row < 0 or row >= SCREEN_H:
             return
+        if self.screen_interlace:
+            self.out_row = row * 2 + self.field
+            self.src_line = row * 2 + self.field
+        else:
+            self.out_row = row
+            self.src_line = row
         for i in range(SCREEN_W):
             self.obj_idx[i] = 0
             self.obj_pri[i] = 0xFF
             self.obj_pal[i] = 0
         if not self.forced_blank:
+            # Sprites stay in the 224-line space in either field.  That is
+            # what $2133 bit 1 clear asks for; the half-height objects the
+            # bit selects are not modelled.
             self._render_objects(row)
 
     cdef void catch_up(self, int x) noexcept:
@@ -557,20 +581,37 @@ cdef class PPU:
     # ---------------------------------------------------------------- span ---
 
     cdef void _render_span(self, int x0, int x1) noexcept:
-        cdef int line = self.render_row
-        cdef int x, i, b, order_len
+        cdef int line = self.src_line
+        cdef int x, i, b, order_len, hx0, hx1
         cdef uint32_t *row
         cdef int order[16][2]
 
-        if line < 0 or line >= SCREEN_H:
+        if self.render_row < 0 or self.render_row >= SCREEN_H:
             return
-        row = self.framebuffer + line * SCREEN_W
+        row = self.framebuffer + self.out_row * OUT_W
+
+        # Modes 5 and 6 are 512 dots wide, and $2133 bit 3 asks for the same
+        # output from any mode by showing the sub screen between the main
+        # screen's pixels.  Only the first of those changes how the layers are
+        # drawn; pseudo-hires just splits an ordinary picture in two.
+        self.true_hires = 1 if (self.bg_mode == 5 or self.bg_mode == 6) else 0
+        self.hires = 1 if (self.true_hires or self.pseudo_hires) else 0
 
         if self.forced_blank:
-            for x in range(x0, x1):
+            for x in range(x0 * 2, x1 * 2):
                 row[x] = 0xFF000000
             return
 
+        if self.true_hires:
+            hx0 = x0 * 2
+            hx1 = x1 * 2
+            for b in range(2):
+                for x in range(hx0, hx1):
+                    self.bg_idx_hi[b][x] = 0
+                    self.bg_pri_hi[b][x] = 0
+        else:
+            hx0 = x0
+            hx1 = x1
         for b in range(4):
             for x in range(x0, x1):
                 self.bg_idx[b][x] = 0
@@ -608,11 +649,11 @@ cdef class PPU:
             self._render_bg(1, line, 2, 0, x0, x1)
             order_len = self._order_mode23(order)
         elif self.bg_mode == 5:
-            self._render_bg(0, line, 4, 0, x0, x1)
-            self._render_bg(1, line, 2, 0, x0, x1)
+            self._render_bg_hires(0, line, 4, x0, x1)
+            self._render_bg_hires(1, line, 2, x0, x1)
             order_len = self._order_mode23(order)
         elif self.bg_mode == 6:
-            self._render_bg(0, line, 4, 0, x0, x1)
+            self._render_bg_hires(0, line, 4, x0, x1)
             order_len = self._order_mode6(order)
         else:
             self._render_mode7(line, x0, x1)
@@ -621,15 +662,15 @@ cdef class PPU:
             else:
                 order_len = self._order_mode7(order)
 
-        for x in range(x0, x1):
+        for x in range(hx0, hx1):
             self.main_buf[x] = self.cgram[0]
             self.sub_buf[x] = self.cgram[0]
             self.main_src[x] = 5
             self.sub_src[x] = 5
 
         for i in range(order_len):
-            self._paint(order[i][0], order[i][1], 0, x0, x1)
-            self._paint(order[i][0], order[i][1], 1, x0, x1)
+            self._paint(order[i][0], order[i][1], 0, hx0, hx1)
+            self._paint(order[i][0], order[i][1], 1, hx0, hx1)
 
         self._compose(row, x0, x1)
 
@@ -782,6 +823,87 @@ cdef class PPU:
         cdef uint16_t b = <uint16_t>(((pixel & 0xC0) >> 3) | ((palette & 4) << 1))
         return r | (g << 5) | (b << 10)
 
+    # ---------------------------------------------------------- hires BG ---
+    #
+    # Modes 5 and 6 make BG1 and BG2 512 dots wide.  Nothing about the tilemap
+    # changes: a character is still eight pixels across, they are just half as
+    # wide on screen, so the layer is addressed in the 512-space directly and
+    # the scroll registers count in those same half-dots.  A 16-pixel tile is
+    # 16 of them, which is why the setting reads as "16x8" in these modes.
+    #
+    # Only the odd half-dots reach the main screen and only the even ones the
+    # sub screen, so a game that wants all 512 pixels enables the layer on
+    # both.
+
+    cdef void _render_bg_hires(self, int bg, int line, int bpp,
+                               int x0, int x1) noexcept:
+        cdef int tile_shift = 3 + self.bg_tile_size[bg]
+        cdef int base_y = self._mosaic_y(bg, line)
+        cdef int y = base_y + self.bg_vofs[bg]
+        cdef int hofs = self.bg_hofs[bg]
+        cdef int opt = 1 if (bg < 2 and self.bg_mode == 6) else 0
+        cdef int opt_h, opt_v
+        cdef uint32_t map_base = self.bg_map_base[bg]
+        cdef uint32_t chr_base = self.bg_chr_base[bg]
+        cdef int words_per_tile = bpp * 4
+        cdef int x, sx, tile_x, tile_y, screen, sub_x, sub_y
+        cdef uint32_t map_addr, chr_addr
+        cdef uint16_t entry, plane
+        cdef int tile_num, palette, prio, hflip, vflip, row_in, col, colour
+        cdef int px_in_tile, py_in_tile
+
+        for x in range(x0 * 2, x1 * 2):
+            if opt:
+                self._opt_offsets(bg, x >> 1, &opt_h, &opt_v)
+                hofs = opt_h
+                y = base_y + opt_v
+            if self.mosaic_enable[bg] and self.mosaic_size:
+                sx = self._mosaic_x(bg, x >> 1) * 2 + hofs
+            else:
+                sx = x + hofs
+            tile_x = sx >> tile_shift
+            tile_y = y >> tile_shift
+
+            screen = 0
+            if self.bg_map_wide[bg] and (tile_x & 0x20):
+                screen += 0x400
+            if self.bg_map_tall[bg] and (tile_y & 0x20):
+                screen += 0x800 if self.bg_map_wide[bg] else 0x400
+            map_addr = (map_base + screen + ((tile_y & 0x1F) << 5)
+                        + (tile_x & 0x1F)) & 0x7FFF
+
+            entry = self.vram[map_addr]
+            tile_num = entry & 0x03FF
+            palette = (entry >> 10) & 7
+            prio = (entry >> 13) & 1
+            hflip = (entry >> 14) & 1
+            vflip = (entry >> 15) & 1
+
+            px_in_tile = sx & ((1 << tile_shift) - 1)
+            py_in_tile = y & ((1 << tile_shift) - 1)
+            if hflip:
+                px_in_tile = ((1 << tile_shift) - 1) - px_in_tile
+            if vflip:
+                py_in_tile = ((1 << tile_shift) - 1) - py_in_tile
+
+            if self.bg_tile_size[bg]:
+                sub_x = (px_in_tile >> 3) & 1
+                sub_y = (py_in_tile >> 3) & 1
+                tile_num = (tile_num + sub_y * 16 + sub_x) & 0x03FF
+            row_in = py_in_tile & 7
+            col = px_in_tile & 7
+
+            chr_addr = (chr_base + tile_num * words_per_tile + row_in) & 0x7FFF
+            plane = self.vram[chr_addr]
+            colour = ((plane >> (7 - col)) & 1) | (((plane >> (15 - col)) & 1) << 1)
+            if bpp >= 4:
+                plane = self.vram[(chr_addr + 8) & 0x7FFF]
+                colour |= (((plane >> (7 - col)) & 1) << 2) | (((plane >> (15 - col)) & 1) << 3)
+
+            if colour:
+                self.bg_idx_hi[bg][x] = palette * (1 << bpp) + colour
+                self.bg_pri_hi[bg][x] = prio
+
     # -------------------------------------------------------------- mode 7 ---
 
     cdef void _render_mode7(self, int line, int x0, int x1) noexcept:
@@ -870,9 +992,16 @@ cdef class PPU:
     # ------------------------------------------------------------- compose ---
 
     cdef void _paint(self, int layer, int prio, int to_sub, int x0, int x1) noexcept:
-        cdef int x
+        """Lay one layer's pixels of one priority into the main or sub screen.
+
+        In modes 5 and 6 the range is in half-dots and BG1 and BG2 come from
+        their own wide buffers; everything else on the chip still works a dot
+        at a time, so it is read at x >> 1.
+        """
+        cdef int x, d
         cdef uint16_t idx, colour
         cdef int enabled, windowed
+        cdef int wide = self.true_hires
 
         if to_sub:
             enabled = self.sub_enable[layer]
@@ -885,11 +1014,12 @@ cdef class PPU:
 
         if layer == 4:
             for x in range(x0, x1):
-                if self.obj_pri[x] != prio:
+                d = (x >> 1) if wide else x
+                if self.obj_pri[d] != prio:
                     continue
-                if windowed and self.win_mask[4][x]:
+                if windowed and self.win_mask[4][d]:
                     continue
-                idx = self.obj_idx[x]
+                idx = self.obj_idx[d]
                 if idx == 0:
                     continue
                 if to_sub:
@@ -900,13 +1030,19 @@ cdef class PPU:
                     self.main_src[x] = 4
         else:
             for x in range(x0, x1):
-                idx = self.bg_idx[layer][x]
-                if idx == 0 or self.bg_pri[layer][x] != prio:
-                    continue
-                if windowed and self.win_mask[layer][x]:
+                d = (x >> 1) if wide else x
+                if wide and layer < 2:
+                    idx = self.bg_idx_hi[layer][x]
+                    if idx == 0 or self.bg_pri_hi[layer][x] != prio:
+                        continue
+                else:
+                    idx = self.bg_idx[layer][d]
+                    if idx == 0 or self.bg_pri[layer][d] != prio:
+                        continue
+                if windowed and self.win_mask[layer][d]:
                     continue
                 if self.direct_active and layer == 0:
-                    colour = self.bg_direct[x]
+                    colour = self.bg_direct[d]
                 else:
                     colour = self.cgram[idx]
                 if to_sub:
@@ -917,9 +1053,10 @@ cdef class PPU:
                     self.main_src[x] = layer
 
     cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept:
-        cdef int x, i, sub_used, math_here, clip_here, halve, subtract
+        cdef int x, i, mi, si, sub_used, math_here, clip_here, halve, subtract
         cdef int r, g, b, sr, sg, sb
         cdef uint16_t main, sub, fixed
+        cdef uint32_t main_out
         cdef int bright = self.brightness
 
         fixed = <uint16_t>(self.fixed_r | (self.fixed_g << 5) | (self.fixed_b << 10))
@@ -927,7 +1064,17 @@ cdef class PPU:
         sub_used = 1 if (self.cgwsel & 0x02) else 0
 
         for x in range(x0, x1):
-            main = self.main_buf[x]
+            # A dot is two half-dots.  In modes 5 and 6 the layers really do
+            # have a value for each, and the main screen takes the right one
+            # while the sub screen takes the left; elsewhere both come from
+            # the single value the dot produced.
+            if self.true_hires:
+                mi = x * 2 + 1
+                si = x * 2
+            else:
+                mi = x
+                si = x
+            main = self.main_buf[mi]
 
             clip_here = self._region_black(self.cgwsel >> 6, self.win_mask[5][x])
             if clip_here:
@@ -935,7 +1082,7 @@ cdef class PPU:
 
             math_here = self._region(self.cgwsel >> 4, self.win_mask[5][x])
             if math_here and not clip_here:
-                i = self.main_src[x]
+                i = self.main_src[mi]
                 if i == 5:
                     math_here = 1 if (self.cgadsub & 0x20) else 0
                 elif i == 4:
@@ -945,8 +1092,8 @@ cdef class PPU:
 
             if math_here:
                 if sub_used:
-                    sub = self.sub_buf[x]
-                    halve = 1 if ((self.cgadsub & 0x40) and self.sub_src[x] != 5) else 0
+                    sub = self.sub_buf[si]
+                    halve = 1 if ((self.cgadsub & 0x40) and self.sub_src[si] != 5) else 0
                 else:
                     sub = fixed
                     halve = 1 if (self.cgadsub & 0x40) else 0
@@ -985,10 +1132,32 @@ cdef class PPU:
                 g = self.light[bright][g]
                 b = self.light[bright][b]
 
-            row[x] = (0xFF000000
-                      | (<uint32_t>((r << 3) | (r >> 2)) << 16)
-                      | (<uint32_t>((g << 3) | (g >> 2)) << 8)
-                      | <uint32_t>((b << 3) | (b >> 2)))
+            main_out = (0xFF000000
+                        | (<uint32_t>((r << 3) | (r >> 2)) << 16)
+                        | (<uint32_t>((g << 3) | (g >> 2)) << 8)
+                        | <uint32_t>((b << 3) | (b >> 2)))
+
+            # Two pixels leave the PPU for every dot.  Normally they are the
+            # same, which is what makes a 256-wide picture; in hires the left
+            # one comes from the sub screen instead, so the two screens end up
+            # interleaved along the row.  Colour math is a one-way operation
+            # onto the main screen, so the sub pixel is emitted as it is.
+            if self.hires:
+                sub = self.sub_buf[si]
+                r = sub & 0x1F
+                g = (sub >> 5) & 0x1F
+                b = (sub >> 10) & 0x1F
+                if bright != 15:
+                    r = self.light[bright][r]
+                    g = self.light[bright][g]
+                    b = self.light[bright][b]
+                row[x * 2] = (0xFF000000
+                              | (<uint32_t>((r << 3) | (r >> 2)) << 16)
+                              | (<uint32_t>((g << 3) | (g >> 2)) << 8)
+                              | <uint32_t>((b << 3) | (b >> 2)))
+            else:
+                row[x * 2] = main_out
+            row[x * 2 + 1] = main_out
 
     cdef void _render_objects(self, int line) noexcept:
         """Evaluate and draw the sprites for one line.
@@ -1398,7 +1567,7 @@ cdef class PPU:
         k += 5
 
     def state_blobs(self):
-        return [PyBytes_FromStringAndSize(<char *>self.vram, 65536), PyBytes_FromStringAndSize(<char *>self.cgram, 512), PyBytes_FromStringAndSize(<char *>self.oam, 544), PyBytes_FromStringAndSize(<char *>self.framebuffer, 244736)]
+        return [PyBytes_FromStringAndSize(<char *>self.vram, 65536), PyBytes_FromStringAndSize(<char *>self.cgram, 512), PyBytes_FromStringAndSize(<char *>self.oam, 544), PyBytes_FromStringAndSize(<char *>self.framebuffer, OUT_W * OUT_H * 4)]
 
     def load_blobs(self, blobs):
         if len(blobs[0]) != 65536:
@@ -1410,9 +1579,9 @@ cdef class PPU:
         if len(blobs[2]) != 544:
             raise ValueError('bad oam blob')
         memcpy(<char *>self.oam, <char *><bytes>blobs[2], 544)
-        if len(blobs[3]) != 244736:
+        if len(blobs[3]) != OUT_W * OUT_H * 4:
             raise ValueError('bad framebuffer blob')
-        memcpy(<char *>self.framebuffer, <char *><bytes>blobs[3], 244736)
+        memcpy(<char *>self.framebuffer, <char *><bytes>blobs[3], OUT_W * OUT_H * 4)
 
     # -- end generated save state ------------------------------------------
 

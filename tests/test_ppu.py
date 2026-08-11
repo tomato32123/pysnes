@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.testrom import run
 
-W, H = 256, 239
+W, H = 512, 478
 NL = chr(10)
 FAILURES = []
 
@@ -26,11 +26,17 @@ def check(name, got, want, fmt="%s"):
         FAILURES.append("%s: got %s, want %s" % (name, fmt % (got,), fmt % (want,)))
 
 
-def pixel(machine, x, y):
-    """(r, g, b) at a screen position."""
+def hipixel(machine, hx, y):
+    """(r, g, b) at a raw buffer column, of which there are 512."""
     fb = machine.framebuffer
-    i = (y * W + x) * 4
+    i = (y * W + hx) * 4
     return (fb[i + 2], fb[i + 1], fb[i + 0])
+
+
+def pixel(machine, x, y):
+    """(r, g, b) for a dot.  Every dot is two buffer columns; this is the
+    right-hand one, which is the main screen in every mode."""
+    return hipixel(machine, x * 2 + 1, y)
 
 
 def expand(five):
@@ -406,9 +412,101 @@ def test_extbg_without_bit_seven_puts_bg2_behind_bg1():
           pixel(mode7(0x01, 0x03, True, MATH_ON_BG2), 0, 0), RED_RGB)
 
 
+
+# ---------------------------------------------------- hires and interlace ----
+#
+# The PPU emits two pixels for every dot.  Normally they are the same, so a
+# 512-wide buffer holds a 256-wide picture.  $2133 bit 3 makes the left one
+# come from the sub screen instead, and modes 5 and 6 go further and give the
+# layers themselves a value per half-dot.
+
+BACKDROP = (0, 0, expand(31))       # CGRAM 0, the SETUP scene's blue
+TILE = (expand(31), 0, 0)           # CGRAM 1, its red
+
+
+def test_a_dot_is_two_identical_pixels_by_default():
+    machine = scene()
+    check("left of dot 0", hipixel(machine, 0, 0), TILE)
+    check("right of dot 0", hipixel(machine, 1, 0), TILE)
+
+
+def test_pseudo_hires_shows_the_sub_screen_between_the_main_pixels():
+    """Nothing is on the sub screen, so its half of every dot is the
+    backdrop and the picture comes out striped."""
+    machine = scene("""
+        lda #$08
+        sta $2133
+""")
+    check("left of dot 0 is the sub screen", hipixel(machine, 0, 0), BACKDROP)
+    check("right of dot 0 is the main screen", hipixel(machine, 1, 0), TILE)
+    check("left of dot 3", hipixel(machine, 6, 0), BACKDROP)
+    check("right of dot 3", hipixel(machine, 7, 0), TILE)
+
+
+def test_pseudo_hires_with_the_layer_on_both_screens_looks_normal():
+    machine = scene("""
+        lda #$01
+        sta $212D               ; BG1 on the sub screen as well
+        lda #$08
+        sta $2133
+""")
+    check("left of dot 0", hipixel(machine, 0, 0), TILE)
+    check("right of dot 0", hipixel(machine, 1, 0), TILE)
+
+
+# Mode 5 draws BG1 across 512 half-dots, so the eight-pixel tile the SETUP
+# scene puts at the origin covers eight of them -- four dots -- instead of
+# eight dots.
+
+MODE5 = """
+        lda #$05
+        sta $2105               ; mode 5
+        lda #$01
+        sta $212D               ; BG1 on the sub screen too, to see all 512
+"""
+
+
+def test_mode5_makes_a_tile_half_as_wide():
+    machine = scene(MODE5)
+    check("half-dot 0", hipixel(machine, 0, 0), TILE)
+    check("half-dot 7", hipixel(machine, 7, 0), TILE)
+    check("half-dot 8", hipixel(machine, 8, 0), BACKDROP)
+    check("half-dot 9", hipixel(machine, 9, 0), BACKDROP)
+
+
+def test_mode5_without_the_sub_screen_shows_only_the_odd_half_dots():
+    """The main screen owns the right pixel of each dot, so a layer that is
+    only on the main screen appears in half the columns."""
+    machine = scene("""
+        lda #$05
+        sta $2105
+""")
+    check("half-dot 0 is the sub screen", hipixel(machine, 0, 0), BACKDROP)
+    check("half-dot 1 is the main screen", hipixel(machine, 1, 0), TILE)
+    check("half-dot 7", hipixel(machine, 7, 0), TILE)
+    check("half-dot 8", hipixel(machine, 8, 0), BACKDROP)
+
+
+def test_interlace_draws_alternating_rows_and_doubles_the_height():
+    """Each field fills every other row of the buffer and leaves the other
+    field's rows as they were, which is what a real display does."""
+    machine = scene("""
+        lda #$01
+        sta $2133               ; interlace
+""")
+    check("visible height", machine.visible_height, 448)
+    check("row 0", hipixel(machine, 0, 0), TILE)
+    check("row 1", hipixel(machine, 0, 1), TILE)
+    check("row 16 is past the tile", hipixel(machine, 0, 16), BACKDROP)
+
+
+def test_without_interlace_the_height_is_not_doubled():
+    check("visible height", scene().visible_height, 224)
+
+
 # Pinned so a change to the renderer shows up here and has to be judged
 # rather than absorbed.  Override with PYSNES_PPU_HASH to re-baseline.
-SCENE_HASH = "d786e8f134871b558d805210983cb2955f057f4e"
+SCENE_HASH = "6a4600cba64293ced593c0f4a55d80b89b5bb035"
 
 
 def test_scene_hash_is_stable():

@@ -27,7 +27,7 @@ for f in range(total):
 
     if f % 2000 == 0:
         pc = s.cpu.regs["pc"]
-        nb = sum(1 for i in range(0, 256 * 239 * 4, 4)
+        nb = sum(1 for i in range(0, 512 * 478 * 4, 4)
                  if s.framebuffer[i] or s.framebuffer[i + 1] or s.framebuffer[i + 2])
         print("f=%-6d %s  non-black=%-6d apu_clock=%d"
               % (f, s.state(), nb, s.apu.regs["clock"]), flush=True)

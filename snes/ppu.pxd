@@ -104,15 +104,25 @@ cdef class PPU:
     cdef uint8_t obj_pri[256]        # 0-3, 0xFF = no sprite
     cdef uint8_t obj_pal[256]        # sprite palette group, for colour math
     cdef uint8_t win_mask[6][256]    # BG1-4, OBJ, COLOR
-    cdef uint16_t main_buf[256]
-    cdef uint16_t sub_buf[256]
-    cdef uint8_t main_src[256]       # 0-3 BG, 4 OBJ, 5 backdrop
-    cdef uint8_t sub_src[256]
+    # Modes 5 and 6 draw BG1 and BG2 at 512 across.  Everything else on the
+    # chip -- sprites, windows, the other layers -- still works in the 256
+    # dots the rest of the PPU counts in, so only these two get a wide copy
+    # and the composed result is what has to be 512 long.
+    cdef uint16_t bg_idx_hi[2][512]
+    cdef uint8_t bg_pri_hi[2][512]
+    cdef int true_hires              # mode 5 or 6: the wide BG path
+    cdef uint16_t main_buf[512]
+    cdef uint16_t sub_buf[512]
+    cdef uint8_t main_src[512]       # 0-3 BG, 4 OBJ, 5 backdrop
+    cdef uint8_t sub_src[512]
     cdef int bg_bpp[4]
     cdef int bg_pal_base[4]
     cdef uint8_t light[16][32]       # brightness level -> 5-bit channel
     cdef uint16_t bg_direct[256]     # direct-colour result for BG1
     cdef int direct_active           # is direct colour in force this span
+    cdef int hires                   # two pixels per dot this span
+    cdef int out_row                 # framebuffer row the span lands on
+    cdef int src_line                # PPU line the layers are sampled at
     cdef int render_row              # framebuffer row being drawn, -1 if none
     cdef int rendered_x              # how far along that row we have drawn
 
@@ -136,6 +146,7 @@ cdef class PPU:
     cdef void end_line(self) noexcept
     cdef void _render_span(self, int x0, int x1) noexcept
     cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept
+    cdef void _render_bg_hires(self, int bg, int line, int bpp, int x0, int x1) noexcept
     cdef void _render_bg(self, int bg, int line, int bpp, int pal_base,
                          int x0, int x1) noexcept
     cdef void _render_mode7(self, int line, int x0, int x1) noexcept

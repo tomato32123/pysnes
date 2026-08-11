@@ -127,7 +127,7 @@ cdef class System:
 
     def _state_dict(self):
         return {
-            "version": 1,
+            "version": 2,
             "title": self.cart.title,
             "checksum": self.cart.computed_checksum,
             "rom_size": self.cart.rom_size,
@@ -140,7 +140,7 @@ cdef class System:
         }
 
     def _apply_state(self, data):
-        if data.get("version") != 1:
+        if data.get("version") != 2:
             raise ValueError("unsupported save-state version")
         if (data.get("checksum") != self.cart.computed_checksum
                 or data.get("rom_size") != self.cart.rom_size):
@@ -182,11 +182,18 @@ cdef class System:
         return self.ppu.framebuffer_obj
 
     @property
+    def visible_width(self):
+        """The framebuffer is always 512 across.  A normal picture is 256
+        pixels written twice; hires and mode 5/6 fill all 512."""
+        return 512
+
+    @property
     def visible_height(self):
-        """Rows of the framebuffer the PPU actually drew this frame: 224
-        normally, 239 with overscan on.  The buffer is always the taller of
-        the two, so the rest is left black."""
-        return self.bus.vblank_start - 1
+        """Rows the PPU actually drew: 224, or 239 with overscan, and twice
+        that under interlace.  The buffer is the largest of those, so the
+        rest is left black."""
+        cdef int lines = self.bus.vblank_start - 1
+        return lines * 2 if self.ppu.screen_interlace else lines
 
     @property
     def frame_count(self):

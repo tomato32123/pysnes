@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from snes.system import System
 from tools.screenshot import write_png
 
-W, H = 256, 239
+W, H = 512, 478
 
 # Coprocessors we do not emulate, keyed by the header's chipset byte.
 COPROCESSORS = {

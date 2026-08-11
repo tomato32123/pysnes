@@ -14,7 +14,7 @@ from snes.rewind import Rewind
 ROM = from_argv()
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 900
 SCALE = 3
-W, H = 256, 239
+W, H = 512, 478
 
 s = System(ROM)
 for _ in range(1700):
