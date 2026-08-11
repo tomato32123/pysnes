@@ -109,6 +109,9 @@ def main(argv=None):
 
     machine = System(args.rom)
     print(machine.cart.describe())
+    # The header names a chipset; the board is what was actually built
+    # for it, which is not always the same thing.
+    print("board      : %s" % machine.bus.board.describe())
 
     if args.frames:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
