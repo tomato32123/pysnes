@@ -233,10 +233,22 @@ This is the part that decides whether any of the above converges.
 3. ~~DMA and HDMA exactness~~ done.
 4. ~~The display modes: overscan, hires, interlace, EXTBG, direct colour~~ done.
 5. ~~The cartridge board layer, then SA-1 on top of it~~ done.
-6. ~~The tooling for differential tracing~~ done; the comparison itself
-   waits on a reference emulator being available.
-7. The DSP pipeline and SPC700 bus timing.
-8. SA-1 bus arbitration, and SuperFX.
+6. ~~The tooling for differential tracing~~ done.
+7. ~~The DSP pipeline and SPC700 bus timing~~ done, and every hardware test
+   ROM on this machine passes as a result.
+8. **Find the CPU and PPU an external authority.**  Everything left in
+   sections 1, 2 and 3 is waiting on one, and nothing else here is worth as
+   much.  The argument is no longer a hunch: one arrived for the APU and, in a
+   day, found nine defects in code this checklist called done -- a cycle table
+   two cycles out, a read-modify-write in the wrong order, registers handing
+   back what was written to them, a timer in the wrong phase, key-on a sample
+   late, six decibels of missing volume, and an interpolation table a unit
+   wide of the chip's.  The CPU and the PPU are today where the APU was that
+   morning.  Two ways in, cheapest first: the wider public test-ROM sets, run
+   the same way `tools/testroms.py` runs the SPC ones; and a reference
+   emulator for `tools/difftrace.py`, which has waited for one since it was
+   written.
+9. SA-1 bus arbitration, and SuperFX.
 
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and
