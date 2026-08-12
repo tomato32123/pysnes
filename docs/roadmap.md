@@ -97,7 +97,15 @@ The largest single gap. Everything below the first item depends on it.
 - [x] SPC700: all 256 opcodes, three timers, the IPL boot ROM
 - [x] S-DSP: BRR, ADSR/GAIN, gaussian interpolation, noise, pitch modulation,
       the FIR echo unit
-- [ ] **SPC700 bus-access timing** rather than a flat per-opcode cycle table.
+- [~] **SPC700 bus-access timing** rather than a flat per-opcode cycle table.
+      Every access -- fetch, read, write -- now moves the SPC700's clock as it
+      happens, so a read of a timer or a port sees the machine as of the cycle
+      it lands on rather than as of the instruction before.  What is left is
+      the idle cycles: they are paid at the end of the instruction rather than
+      wherever the opcode really spends them, which needs a per-opcode
+      cycle-by-cycle account of all 256.  The totals are unchanged and a test
+      asserts that for every opcode, so the remaining work can be done a few
+      opcodes at a time without the risk of drift.
       Three of the four APU test ROMs fail on this one thing, which makes it
       the next piece of work rather than the least appealing of three
 - [x] The timers' first stage is a scaler that free-runs whether or not the

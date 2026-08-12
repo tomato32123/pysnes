@@ -5,7 +5,7 @@ thing still open, what it actually is, where in the code it goes, how you
 would know you got it right, and what — if anything — makes it impossible
 today. Written so it can be picked up cold.
 
-As of this writing: **38 done, 6 partial, 7 untouched** of 52 items. The
+As of this writing: **38 done, 7 partial, 6 untouched** of 52 items. The
 66-ROM local library boots 63 titles; the three that do not are listed at the
 end. One wants a coprocessor whose firmware is not here, and two are
 defective ROM images — proved defective, not assumed so. No title in the
@@ -98,13 +98,30 @@ behind them either**, which puts them in the same class as the nine in bold.
 
 ## The nine untouched items
 
-### 1. SPC700 bus-access timing — the one to do next
+### 1. SPC700 bus-access timing — half done, and the half that is left is
+### bounded
 
 *Where*: `snes/apu.pyx`, the opcode dispatch.
 
-Today each opcode charges a flat cycle count from a table when it finishes.
-The totals are right; what is missing is *when within the opcode* each access
-happens.
+**Done**: every access moves the clock as it happens. The SPC700 spends a
+cycle per bus access, and `fetch`, `read` and `write` now charge it, so a read
+of a timer or of `$2140` sees the machine as of the cycle it lands on. It used
+to see the machine as of *before the instruction started*, whatever cycle the
+read was really on, because the whole opcode was charged from a table after
+it had finished.
+
+**Left**: the idle cycles. What the accesses do not spend is paid at the end
+of the instruction, which is not always where the opcode really spends it.
+Getting that right means a cycle-by-cycle account of each of the 256 opcodes
+— real work, but bounded work, and it can be done a few opcodes at a time:
+`tests/test_apu_timing.py` asserts that every opcode still costs exactly what
+the cycle table says, so moving an idle cycle around inside an instruction
+cannot silently change its length.
+
+The change is visible in the tests already: `spc_timer` gets one case further
+than it did, and `spc_mem_access_times` reports far fewer wrong entries. Both
+still fail. Speed is unaffected in any way that matters — 92 fps on Super
+Mario World, against 60 for real time.
 
 This was written down as one of three open APU items and as the least
 appealing of them, on the grounds that it is only observable through

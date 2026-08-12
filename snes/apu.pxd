@@ -93,6 +93,7 @@ cdef class APU:
     cdef void step(self) noexcept                    # one SPC700 instruction
     cdef void execute(self, uint8_t op) noexcept
     cdef void tick(self, int cycles) noexcept        # advance timers/DSP
+    cdef void cycle(self, int n) noexcept            # ... and the SPC clock
     cdef uint8_t read(self, uint16_t addr) noexcept
     cdef void write(self, uint16_t addr, uint8_t value) noexcept
     cdef uint8_t cpu_read_port(self, int index) noexcept

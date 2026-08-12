@@ -5,7 +5,8 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODULES = ["test_cpu", "test_timing", "test_openbus", "test_ppu", "test_dsp",
-           "test_trace", "test_cart", "test_sdd1", "test_state", "test_rewind"]
+           "test_trace", "test_cart", "test_sdd1", "test_apu_timing", "test_state",
+           "test_rewind"]
 
 
 NO_ROM = 77          # tools/romarg.py's "there is no ROM here" exit code
