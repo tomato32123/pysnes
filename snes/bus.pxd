@@ -29,7 +29,7 @@ cdef class Bus(AddressSpace):
     cdef int64_t ev_time[6]          # absolute deadline per event kind
     cdef int64_t next_event          # cached earliest deadline
     cdef int vcount                  # current scanline
-    cdef int field
+    cdef readonly int field          # what $213F bit 7 reports
     cdef readonly int64_t frame
     cdef int frame_ready
     cdef int ticking          # guards tick() against re-entry from HDMA/DMA
@@ -113,3 +113,4 @@ cdef class Bus(AddressSpace):
     cdef int _screen_x(self) noexcept
     cdef void _update_irq(self) noexcept
     cdef int _line_length(self) noexcept
+    cdef int _frame_lines(self) noexcept

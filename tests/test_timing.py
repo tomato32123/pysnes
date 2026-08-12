@@ -436,6 +436,137 @@ spin:   bra spin
               % (frames, span, expected_no_short - span, frames))
 
 
+# --------------------------------------------- region and interlace ----
+
+SPIN = """
+spin:   bra spin
+"""
+
+INTERLACE_THEN_SPIN = """
+        sep #$20
+        lda #$01
+        sta $2133                       ; SETINI: interlace on
+spin:   bra spin
+"""
+
+
+def _machine(source, country):
+    image, _ = assemble_image(source, country=country)
+    machine = System(rom_data=image)
+    for _ in range(3):                  # let the program reach its spin loop
+        machine.run_frame()
+    return machine
+
+
+def _fields(machine, count=4):
+    """(field, scanlines) for the next `count` frames, walked a line at a time.
+
+    Measured rather than computed: the point of these tests is that the frame
+    is as long as the hardware makes it, and a length derived from the same
+    expression the emulator uses would prove nothing.
+    """
+    bus = machine.bus
+    while bus.vcounter != 0:
+        machine.step(1)
+    out = []
+    for _ in range(count):
+        field = bus.field
+        highest = 0
+        while True:
+            v = bus.vcounter
+            if v > highest:
+                highest = v
+            machine.step(1)
+            if bus.vcounter == 0 and highest:
+                break
+        out.append((field, highest + 1))
+    return out
+
+
+def test_frame_is_262_lines_on_ntsc_and_312_on_pal():
+    for country, lines, name in ((0x01, 262, "NTSC"), (0x02, 312, "PAL")):
+        seen = _fields(_machine(SPIN, country))
+        if any(n != lines for _f, n in seen):
+            FAILURES.append("%s non-interlaced frames: %s, want all %d"
+                            % (name, [n for _f, n in seen], lines))
+        else:
+            print("      %s: %d lines every frame" % (name, lines))
+
+
+def test_interlace_adds_a_line_to_the_field_whose_flag_is_clear():
+    """$213F bit 7 clear is the longer field.  That half-line difference is
+    what combs the two fields into one picture."""
+    for country, lines, name in ((0x01, 262, "NTSC"), (0x02, 312, "PAL")):
+        seen = _fields(_machine(INTERLACE_THEN_SPIN, country))
+        for field, n in seen:
+            want = lines + 1 if field == 0 else lines
+            if n != want:
+                FAILURES.append("%s interlaced field %d: %d lines, want %d"
+                                % (name, field, n, want))
+        if not any(n == lines + 1 for _f, n in seen):
+            FAILURES.append("%s interlace: no frame was %d lines"
+                            % (name, lines + 1))
+        else:
+            print("      %s interlaced: %s" % (name, [n for _f, n in seen]))
+
+
+def test_the_short_scanline_is_ntsc_only():
+    """PAL has no short scanline.  It used to get one anyway, which cost every
+    PAL game four master cycles every other frame."""
+    machine = _machine(SPIN, 0x02)
+    machine.run_frame()
+    start = machine.master_clock
+    frames = 40
+    for _ in range(frames):
+        machine.run_frame()
+    span = machine.master_clock - start
+
+    full = frames * LINE * machine.bus.lines_per_frame
+    check_near("PAL frame time", span, full, JITTER)
+    if abs(span - (full - (frames // 2) * 4)) <= JITTER:
+        FAILURES.append("PAL is still shortening a scanline")
+    else:
+        print("      PAL: %d frames took %d cycles, the full %d" % (frames, span, full))
+
+
+def test_pal_lengthens_one_interlaced_scanline():
+    """Scanline 311 of an interlaced odd PAL field is one dot long.  Four
+    cycles is below the jitter of a single frame boundary, so it is measured
+    where it accumulates: over 80 frames, 40 of them odd fields."""
+    machine = _machine(INTERLACE_THEN_SPIN, 0x02)
+    machine.run_frame()
+    start = machine.master_clock
+    frames = 80
+    for _ in range(frames):
+        machine.run_frame()
+    span = machine.master_clock - start
+
+    base = machine.bus.lines_per_frame
+    # Half the frames carry the interlace line, half carry the long one.
+    without_long = frames * LINE * base + (frames // 2) * LINE
+    with_long = without_long + (frames // 2) * 4
+    check_near("PAL interlaced frame time", span, with_long, JITTER)
+    if abs(span - without_long) <= JITTER:
+        FAILURES.append("no long scanline: %d frames took %d" % (frames, span))
+    else:
+        print("      PAL interlaced: %d frames took %d cycles, %d over %d"
+              % (frames, span, span - without_long, without_long))
+
+
+def test_ntsc_has_no_long_scanline():
+    machine = _machine(INTERLACE_THEN_SPIN, 0x01)
+    machine.run_frame()
+    start = machine.master_clock
+    frames = 80
+    for _ in range(frames):
+        machine.run_frame()
+    span = machine.master_clock - start
+    base = machine.bus.lines_per_frame
+    expected = frames * LINE * base + (frames // 2) * LINE
+    check_near("NTSC interlaced frame time", span, expected, JITTER)
+    print("      NTSC interlaced: %d frames took %d cycles" % (frames, span))
+
+
 # ------------------------------------------------------- NMI flag ----
 
 def test_rdnmi_clears_on_read_and_at_the_top_of_the_frame():

@@ -28,8 +28,10 @@ cdef enum:
     # optional and not skippable, so it shortens every line's usable time.
     REFRESH_CYCLE = 538
     REFRESH_COST = 40
-    # Scanline 240 of a non-interlaced odd field is one dot short.
+    # Scanline 240 of a non-interlaced odd NTSC field is one dot short, and
+    # scanline 311 of an interlaced odd PAL field one dot long.
     SHORT_LINE = 1360
+    LONG_LINE = 1368
     LINES_NTSC = 262
     LINES_PAL = 312
 
@@ -792,7 +794,7 @@ cdef class Bus:
         self.vcount += 1
         self.in_hblank = 0
 
-        if self.vcount >= self.lines_per_frame:
+        if self.vcount >= self._frame_lines():
             self.vcount = 0
             self.field ^= 1
             self.frame += 1
@@ -855,11 +857,32 @@ cdef class Bus:
         self.irq_pending = 1 if (self.timer_irq or self.board.irq_line) else 0
 
     cdef inline int _line_length(self) noexcept:
-        """Length of the line just started.  All are 1364 master cycles except
-        scanline 240 of a non-interlaced odd field, which is one dot shorter."""
-        if (not self.ppu.screen_interlace) and self.field and self.vcount == 240:
-            return SHORT_LINE
+        """Length of the line just started.
+
+        Almost every line is 1364 master cycles.  Two are not, and each
+        belongs to one region only: an NTSC machine drops a dot from scanline
+        240 of a non-interlaced odd field, and a PAL machine adds one to
+        scanline 311 of an interlaced odd field.  Both fall inside V-blank,
+        so neither moves the picture; they exist to keep the line count in
+        step with the colour subcarrier, which is why the two regions need
+        opposite corrections.
+        """
+        if self.field:
+            if (not self.pal) and (not self.ppu.screen_interlace) and self.vcount == 240:
+                return SHORT_LINE
+            if self.pal and self.ppu.screen_interlace and self.vcount == 311:
+                return LONG_LINE
         return CYCLES_PER_LINE
+
+    cdef inline int _frame_lines(self) noexcept:
+        """How many scanlines this frame has.
+
+        Interlace adds one to the field whose flag in $213F is clear, which is
+        what makes the two fields differ by half a line and so comb together
+        into one picture."""
+        if self.ppu.screen_interlace and not self.field:
+            return self.lines_per_frame + 1
+        return self.lines_per_frame
 
     cdef void _arm_irq(self, int64_t line_start) noexcept:
         """Place this line's IRQ at the exact cycle its condition is met."""
