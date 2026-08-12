@@ -133,14 +133,20 @@ The largest single gap. Everything below the first item depends on it.
       and both this and the independent decoder in `test_dsp.py` kept the
       undoubled value, so they agreed with each other and neither was right.
       Faster as well, at 99 fps against 81.
-      One section left.  `tools/dspdiff.py` now runs this DSP and blargg's own
-      through the same script of register writes and reports the first sample
-      they disagree on -- the differential comparison section 6 has wanted all
-      along, for the one chip whose reference builds in seconds.  It found that
-      the DSP comes out of reset half way through a KON pair, so every key-on
-      was acted on a sample late; with that fixed the envelopes agree exactly.
-      What differs now is one sample of a voice's output after a key-on
-- [ ] The real gaussian table from the chip, replacing the generated one
+      `tools/dspdiff.py` runs this DSP and blargg's own through the same script
+      of register writes and reports the first sample they disagree on -- the
+      differential comparison section 6 has wanted all along, for the one chip
+      whose reference builds in seconds.  **All ten of its scripts now agree,
+      sample for sample.**  It found two things on the way: the DSP comes out
+      of reset half way through a KON pair, so every key-on was acted on a
+      sample late; and the generated gaussian table was a unit out
+- [x] **The real gaussian table from the chip**, replacing the generated one.
+      The generated one had its width solved to put the peak on the real
+      table's 1305 and each group of four taps normalised to sum to exactly
+      2048.  The real table's groups sum to 2047, 2048 or 2049, and that one
+      unit was the whole of the last difference against the reference: a voice
+      whose samples are small came out a couple of units off.  Inaudible, and
+      exactly what a chip comparing itself against hardware notices
 - [ ] $2140-$2143 access timing against the SPC700's own clock
 
 ## 5. Cartridge and coprocessors

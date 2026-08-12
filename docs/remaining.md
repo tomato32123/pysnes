@@ -257,17 +257,21 @@ first decoded sample becomes visible to the interpolator. That is a much
 smaller question than the one this item started with, and the tool to answer
 it is now in the tree.
 
-### 3. The real gaussian table
+### 3. The real gaussian table — done
 
-*Where*: `snes/apu.pyx`, built at startup with σ = 0.628073 and normalised in
-groups of four to 2048.
+*Where*: `snes/apu.pyx`, `GAUSS`.
 
-The chip has 512 specific values in a mask ROM. The generated table is close
-but not identical, and the difference is a fraction of a bit of interpolation
-noise. **This one cannot be done from reasoning** — the table has to be
-copied from a dump or from another emulator's source. Do not attempt to
-reconstruct it by ear or by curve fitting; a table that is nearly right is
-indistinguishable from one that is right, right up until it is not.
+It used to be generated: a gaussian with its width solved to put the peak on
+the real table's 1305, and each group of four taps normalised to sum to
+exactly 2048. That was close enough to sound right and not close enough to be
+right. The real table's groups sum to 2047, 2048 or 2049, and that one unit
+was the whole of the last difference against blargg's DSP — a voice playing
+small samples came out a couple of units off, which is inaudible and is
+precisely what a differential comparison sees.
+
+This file used to say the table could not be done from reasoning and had to be
+copied from a dump or another emulator's source. That was right, and that is
+what happened. It is transcribed from blargg's S-DSP.
 
 ### 4. `$2140-$2143` access timing
 

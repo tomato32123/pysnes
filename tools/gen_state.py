@@ -79,7 +79,7 @@ SPECS = [
         scalars=["pc", "a", "x", "y", "sp", "psw", "ipl_enabled", "clock",
                  "cycle_target",
                  "master_prev", "frac", "dsp_counter", "extra_cycles", "stopped",
-                 "dsp_addr"],
+                 "dsp_addr", "aux4", "aux5"],
         arrays=[("port_in", 4), ("port_out", 4), ("timer_target", 3),
                 ("timer_div", 3), ("timer_counter", 3), ("timer_stage", 3),
                 ("timer_enabled", 3)],

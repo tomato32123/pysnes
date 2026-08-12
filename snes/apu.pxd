@@ -134,6 +134,7 @@ cdef class APU:
     cdef int stopped                # STOP/SLEEP executed
 
     cdef uint8_t dsp_addr
+    cdef uint8_t aux4, aux5        # $F8 and $F9: registers, not the RAM under them
     cdef readonly DSP dsp
 
     cdef void reset(self) noexcept

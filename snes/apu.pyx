@@ -126,6 +126,60 @@ cdef enum:
     ECHO_HIST = 8               # taps the echo filter looks back over
 
 
+# The interpolation kernel, as it is in the chip's mask ROM.
+#
+# The DSP reads the four coefficients for fractional position p as
+# gauss[255-p], gauss[511-p], gauss[256+p] and gauss[p], applying them to the
+# oldest through newest of four samples.  It is a gaussian rather than a
+# windowed sinc -- hence the chip's name for it, and why the SNES sounds soft
+# on high-pitched samples.
+#
+# This used to be generated: a gaussian with its width solved to put the peak
+# on the real table's 1305, with each group of four taps normalised to sum to
+# exactly 2048.  It was close, and being close was enough to sound right and
+# not enough to be right.  The real table's groups sum to 2047, 2048 or 2049,
+# and that one unit is the whole of the difference -- a voice whose samples are
+# small comes out a couple of units off, which is inaudible and is exactly what
+# a chip comparing its output against hardware notices.
+#
+# Transcribed from blargg's S-DSP.  There is no deriving it.
+cdef int16_t GAUSS[512]
+GAUSS[:] = [
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       1,    1,    1,    1,    1,    1,    1,    1,    1,    1,    1,    2,    2,    2,    2,    2,
+       2,    2,    3,    3,    3,    3,    3,    4,    4,    4,    4,    4,    5,    5,    5,    5,
+       6,    6,    6,    6,    7,    7,    7,    8,    8,    8,    9,    9,    9,   10,   10,   10,
+      11,   11,   11,   12,   12,   13,   13,   14,   14,   15,   15,   15,   16,   16,   17,   17,
+      18,   19,   19,   20,   20,   21,   21,   22,   23,   23,   24,   24,   25,   26,   27,   27,
+      28,   29,   29,   30,   31,   32,   32,   33,   34,   35,   36,   36,   37,   38,   39,   40,
+      41,   42,   43,   44,   45,   46,   47,   48,   49,   50,   51,   52,   53,   54,   55,   56,
+      58,   59,   60,   61,   62,   64,   65,   66,   67,   69,   70,   71,   73,   74,   76,   77,
+      78,   80,   81,   83,   84,   86,   87,   89,   90,   92,   94,   95,   97,   99,  100,  102,
+     104,  106,  107,  109,  111,  113,  115,  117,  118,  120,  122,  124,  126,  128,  130,  132,
+     134,  137,  139,  141,  143,  145,  147,  150,  152,  154,  156,  159,  161,  163,  166,  168,
+     171,  173,  175,  178,  180,  183,  186,  188,  191,  193,  196,  199,  201,  204,  207,  210,
+     212,  215,  218,  221,  224,  227,  230,  233,  236,  239,  242,  245,  248,  251,  254,  257,
+     260,  263,  267,  270,  273,  276,  280,  283,  286,  290,  293,  297,  300,  304,  307,  311,
+     314,  318,  321,  325,  328,  332,  336,  339,  343,  347,  351,  354,  358,  362,  366,  370,
+     374,  378,  381,  385,  389,  393,  397,  401,  405,  410,  414,  418,  422,  426,  430,  434,
+     439,  443,  447,  451,  456,  460,  464,  469,  473,  477,  482,  486,  491,  495,  499,  504,
+     508,  513,  517,  522,  527,  531,  536,  540,  545,  550,  554,  559,  563,  568,  573,  577,
+     582,  587,  592,  596,  601,  606,  611,  615,  620,  625,  630,  635,  640,  644,  649,  654,
+     659,  664,  669,  674,  678,  683,  688,  693,  698,  703,  708,  713,  718,  723,  728,  732,
+     737,  742,  747,  752,  757,  762,  767,  772,  777,  782,  787,  792,  797,  802,  806,  811,
+     816,  821,  826,  831,  836,  841,  846,  851,  855,  860,  865,  870,  875,  880,  884,  889,
+     894,  899,  904,  908,  913,  918,  923,  927,  932,  937,  941,  946,  951,  955,  960,  965,
+     969,  974,  978,  983,  988,  992,  997, 1001, 1005, 1010, 1014, 1019, 1023, 1027, 1032, 1036,
+    1040, 1045, 1049, 1053, 1057, 1061, 1066, 1070, 1074, 1078, 1082, 1086, 1090, 1094, 1098, 1102,
+    1106, 1109, 1113, 1117, 1121, 1125, 1128, 1132, 1136, 1139, 1143, 1146, 1150, 1153, 1157, 1160,
+    1164, 1167, 1170, 1174, 1177, 1180, 1183, 1186, 1190, 1193, 1196, 1199, 1202, 1205, 1207, 1210,
+    1213, 1216, 1219, 1221, 1224, 1227, 1229, 1232, 1234, 1237, 1239, 1241, 1244, 1246, 1248, 1251,
+    1253, 1255, 1257, 1259, 1261, 1263, 1265, 1267, 1269, 1270, 1272, 1274, 1275, 1277, 1279, 1280,
+    1282, 1283, 1284, 1286, 1287, 1288, 1290, 1291, 1292, 1293, 1294, 1295, 1296, 1297, 1297, 1298,
+    1299, 1300, 1300, 1301, 1302, 1302, 1303, 1303, 1303, 1304, 1304, 1304, 1304, 1304, 1305, 1305
+]
+
+
 cdef inline int32_t _clamp16(int32_t v) noexcept:
     if v > 32767:
         return 32767
@@ -154,57 +208,9 @@ cdef class DSP:
         self.reset()
 
     def _build_gauss(self):
-        """Build the 4-tap interpolation table.
-
-        The DSP reads the four coefficients for fractional position p as
-        gauss[255-p], gauss[511-p], gauss[256+p] and gauss[p], applying them
-        to the oldest through newest of four samples.  With the output point
-        sitting between the second and third of those, at fraction f = p/256,
-        the weights must be k(1+f), k(f), k(1-f) and k(2-f) for a kernel k
-        symmetric about zero.  Inverting that indexing gives
-
-            j <  256 :  k(2 - j/256)        the outer lobe, |x| in [1, 2]
-            j >= 256 :  k((512 - j)/256)    the inner lobe, |x| in (0, 1]
-
-        so the table increases monotonically from j = 0 to j = 511 -- which is
-        exactly the shape of the real chip's table, running from 0 up to 1305.
-        Getting this mapping wrong scatters the taps across unrelated lobes and
-        turns music into a buzz.
-
-        The kernel is a gaussian rather than a dump of the chip ROM, with its
-        width solved to match the real table's peak, and each group of four
-        taps normalised to sum to 2048.
-        """
-        import math
-
-        # A pure gaussian, not a windowed sinc -- hence the chip's name for the
-        # table, and why the SNES sounds soft on high-pitched samples.  Sigma is
-        # solved so the peak tap lands on the real table's 1305.
-        sigma = 0.628073
-
-        def kernel(x):
-            return math.exp(-(x * x) / (2.0 * sigma * sigma))
-
-        raw = [0.0] * 512
+        cdef int j
         for j in range(512):
-            if j < 256:
-                raw[j] = kernel(2.0 - j / 256.0)
-            else:
-                raw[j] = kernel((512 - j) / 256.0)
-
-        table = [0] * 512
-        for p in range(256):
-            idx = (255 - p, 511 - p, 256 + p, p)
-            total = sum(raw[j] for j in idx) or 1.0
-            scaled = [raw[j] * 2048.0 / total for j in idx]
-            ints = [int(round(v)) for v in scaled]
-            # Put any rounding error on the largest tap.
-            biggest = max(range(4), key=lambda k: ints[k])
-            ints[biggest] += 2048 - sum(ints)
-            for j, v in zip(idx, ints):
-                table[j] = v
-        for j in range(512):
-            self.gauss[j] = <int16_t>table[j]
+            self.gauss[j] = GAUSS[j]
 
     cdef void reset(self) noexcept:
         cdef int i, v
@@ -936,7 +942,12 @@ cdef class DSP:
     @property
     def voice_state(self):
         return [dict(env=self.env[v], mode=self.env_mode[v], out=self.voice_out[v],
-                     addr=self.brr_addr[v]) for v in range(8)]
+                     addr=self.brr_addr[v], offset=self.brr_offset[v],
+                     kon_delay=self.kon_delay[v], interp=self.interp_pos[v],
+                     buf_pos=self.buf_pos[v],
+                     buf=[self.buf[v][i] for i in range(4)],
+                     t_output=self.t_output, outx_buf=self.outx_buf,
+                     phase=self.phase) for v in range(8)]
 
 
 cdef class APU:
@@ -980,6 +991,8 @@ cdef class APU:
         self.log_n = 0
         self.stopped = 0
         self.dsp_addr = 0
+        self.aux4 = 0
+        self.aux5 = 0
         self.dsp.reset()
 
     # =====================================================================
@@ -1134,9 +1147,15 @@ cdef class APU:
             # they read back zero rather than what was written.  The value is
             # kept in RAM underneath, which is what a write to any of these
             # addresses also updates, but nothing can see it through here.
-            if i == 0 or i == 1 or (10 <= i <= 12):
-                return 0
-            return self.ram[addr]
+            if i == 8:
+                return self.aux4
+            if i == 9:
+                return self.aux5
+            # $F0, $F1 and the three timer targets are write-only: they read
+            # back zero rather than what was written.  Every address in this
+            # page is a register -- none of it reads the RAM underneath, which
+            # is what makes it possible to tell the page from memory.
+            return 0
         if addr >= 0xFFC0 and self.ipl_enabled:
             return self.ipl[addr - 0xFFC0]
         return self.ram[addr]
@@ -1147,6 +1166,10 @@ cdef class APU:
         self.cycle(1)
         if 0x00F0 <= addr <= 0x00FF:
             i = addr - 0x00F0
+            # The write reaches the RAM under the register page as well as the
+            # register.  Nothing can read it back through here, but the DSP
+            # fetches its samples straight out of that RAM and would see it.
+            self.ram[addr] = value
             if i == 1:                            # $F1 CONTROL
                 for t in range(3):
                     if (value >> t) & 1:
@@ -1170,7 +1193,6 @@ cdef class APU:
                     self.port_in[2] = 0
                     self.port_in[3] = 0
                 self.ipl_enabled = 1 if (value & 0x80) else 0
-                self.ram[addr] = value
                 return
             if i == 2:
                 self.dsp_addr = value
@@ -1183,9 +1205,11 @@ cdef class APU:
                 return
             if 10 <= i <= 12:                     # $FA-$FC timer targets
                 self.timer_target[i - 10] = value
-                self.ram[addr] = value
                 return
-            self.ram[addr] = value
+            if i == 8:
+                self.aux4 = value
+            elif i == 9:
+                self.aux5 = value
             return
         self.ram[addr] = value
 
@@ -2144,6 +2168,12 @@ cdef class APU:
     def dsp_write(self, int addr, int value):
         self.dsp.write_reg(<uint8_t>addr, <uint8_t>value)
 
+    def dsp_step(self, int n):
+        """Advance the DSP by n of its steps, for looking inside a sample."""
+        cdef int i
+        for i in range(n):
+            self.dsp.tick()
+
     def dsp_tick(self, int n):
         """Advance the DSP by n samples -- 32 of its steps each."""
         cdef int i
@@ -2162,7 +2192,7 @@ cdef class APU:
 
     def state_ints(self):
         cdef int i, j
-        v = [self.pc, self.a, self.x, self.y, self.sp, self.psw, self.ipl_enabled, self.clock, self.cycle_target, self.master_prev, self.frac, self.dsp_counter, self.extra_cycles, self.stopped, self.dsp_addr]
+        v = [self.pc, self.a, self.x, self.y, self.sp, self.psw, self.ipl_enabled, self.clock, self.cycle_target, self.master_prev, self.frac, self.dsp_counter, self.extra_cycles, self.stopped, self.dsp_addr, self.aux4, self.aux5]
         for i in range(4):
             v.append(self.port_in[i])
         for i in range(4):
@@ -2180,7 +2210,7 @@ cdef class APU:
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 15
+        cdef int i, j, k = 17
         self.pc = v[0]
         self.a = v[1]
         self.x = v[2]
@@ -2196,6 +2226,8 @@ cdef class APU:
         self.extra_cycles = v[12]
         self.stopped = v[13]
         self.dsp_addr = v[14]
+        self.aux4 = v[15]
+        self.aux5 = v[16]
         for i in range(4):
             self.port_in[i] = v[k + i]
         k += 4
