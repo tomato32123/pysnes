@@ -1,5 +1,9 @@
 # Road to bsnes-level accuracy
 
+This is the checklist.  `remaining.md` is the working brief behind it:
+for everything still open, what it is, where in the code it goes, how you
+would know you got it right, and what makes it impossible today.
+
 What separates "the games I tried work" from "the hardware is modelled and a
 test proves it". Ordered by dependency, not by appeal. `[x]` is done, `[~]` is
 partial, `[ ]` is untouched.
@@ -46,9 +50,8 @@ The largest single gap. Everything below the first item depends on it.
 
 - [x] **Dot-based rendering**: a row is drawn in spans, caught up before every
       write to $2100-$213F, so a mid-scanline change takes effect from its dot
-- [x] **Offset-per-tile** (modes 2, 4 and 6), covered by unit tests; no title
-      in the local library reaches those modes during boot, so it has not
-      been seen against real software yet
+- [x] **Offset-per-tile** (modes 2, 4 and 6), covered by unit tests.  Three
+      titles reach mode 2 and Kirby reaches mode 4; nothing reaches mode 6
 - [x] VRAM, CGRAM and OAM access restrictions during active display
       (OAM approximated: the write is dropped rather than redirected to
       the address sprite evaluation holds, which needs a per-dot evaluator)

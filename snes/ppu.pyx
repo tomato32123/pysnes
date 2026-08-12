@@ -1612,6 +1612,31 @@ cdef class PPU:
 
     # -- python helpers ----------------------------------------------------
 
+    def features(self):
+        """The display settings currently in force.
+
+        For tools that want to know which parts of the chip a game actually
+        uses -- a feature nothing has ever switched on is one whose
+        correctness rests on having read the documentation right, and that
+        is worth being able to find out.
+        """
+        return {
+            "bg_mode": self.bg_mode,
+            "interlace": self.screen_interlace,
+            "obj_interlace": self.obj_interlace,
+            "overscan": self.overscan,
+            "pseudo_hires": self.pseudo_hires,
+            "extbg": self.extbg,
+            "cgwsel": self.cgwsel,
+            "cgadsub": self.cgadsub,
+            "mosaic_size": self.mosaic_size,
+            "mosaic_enable": [self.mosaic_enable[i] for i in range(4)],
+            "range_over": self.range_over,
+            "time_over": self.time_over,
+            "latched": self.latched,
+            "bg3_priority": self.bg3_priority,
+        }
+
     def dump(self):
         lines = [
             "INIDISP  forced_blank=%d brightness=%d" % (self.forced_blank, self.brightness),
