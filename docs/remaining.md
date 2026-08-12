@@ -22,11 +22,18 @@ was written and now draws its Capcom logo and its title screen.
 Mesen. That single absence is why six items are "partial" rather than done,
 and it is worth understanding what it costs before reading the rest.
 
-There is now one thing that partly substitutes for it, and it is worth
-knowing which parts. blargg's SPC test ROMs are here (see item 10), and they
-are a real external authority — but only over the APU. Everything to do with
-the CPU's and the PPU's timing is still checked against nothing but this
-project's own reading of the documentation.
+There are now two things that partly substitute for it, and it is worth
+knowing which parts. blargg's SPC test ROMs are here (see item 10), and
+`tools/dspdiff.py` runs the DSP against blargg's own implementation sample by
+sample. Both are real external authority — but only over the APU. Everything
+to do with the CPU's and the PPU's timing is still checked against nothing but
+this project's own reading of the documentation.
+
+That asymmetry is now measurable rather than theoretical. An external
+authority arrived for one subsystem and, within a day, found seven defects in
+it — in code the checklist called done. The parts of this emulator with no
+such authority have exactly the epistemic standing the APU had the morning
+before, which is the strongest argument in this file for what to do next.
 
 A test says a feature behaves the way the test author believed it should. A
 reference says it behaves the way the hardware does. Everything below that
@@ -226,12 +233,29 @@ was right, and it caught the scale the moment its own reference was corrected.
 Faster, too, at 99 fps on Super Mario World against 81 before: the steps do
 less work between them than the lump did in one go.
 
-**Left**: one section. `spc_dsp6` stops at "Envelope/gain SL=8 threshold", and
-what it is unhappy about is no longer visible from outside — the envelope
-matches the reference expression for expression, including the quirk where a
-voice under GAIN compares its top three bits against the GAIN *mode* number
-and can fall into sustain that way. The next move is to read that section's
-source rather than guess at it from a screenshot.
+**Left**: one section, and it is now localised rather than guessed at.
+
+`tools/dspdiff.py` drives this DSP and blargg's own through the same script of
+register writes and reports the first sample where they disagree, reading both
+through ENVX, OUTX and ENDX — the registers a program can see. It is the
+differential comparison the top of this file has been asking for since it was
+written, and it exists for the DSP because the reference builds in a few
+seconds and needs nothing but a C++ compiler. `tools/dspprobe.cpp` is the
+reference half; the reference itself is not in this repository.
+
+It found one thing immediately: the chip comes out of reset **half way through
+a KON pair**, and this started at the other half, so every key-on was acted on
+one sample late. With that fixed the envelope agrees exactly across all ten
+scripts.
+
+What is left is one sample of a voice's *output*: after a key-on this emits
+its first non-silent sample one earlier than the reference, and they agree
+from the next one on. Two of the ten scripts agree throughout; the other eight
+differ only in that. Both sides fill their decode buffers on the same steps
+and their envelopes agree to the sample, so the difference is in when the
+first decoded sample becomes visible to the interpolator. That is a much
+smaller question than the one this item started with, and the tool to answer
+it is now in the tree.
 
 ### 3. The real gaussian table
 
@@ -579,6 +603,7 @@ python tools/playtest.py <rom>        # scripted buttons, screenshot per step
 python tools/testroms.py <dir>        # hardware test ROMs, verdict per ROM
 python tools/featureprobe.py <dir>    # which features anything actually uses
 python tools/difftrace.py check       # committed traces, cycle for cycle
+python tools/dspdiff.py <probe>       # this DSP against blargg's, sample by sample
 ```
 
 Two habits worth keeping. `batchtest` judges on the best frame of a run, not

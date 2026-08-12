@@ -57,9 +57,18 @@ def main():
     for _ in range(180):
         s.run_frame()
     plain = (time.perf_counter() - t0) / 180 * 1000
+    overhead = with_rewind - plain
     print("frame cost: %.2f ms plain, %.2f ms while recording (+%.2f ms)"
-          % (plain, with_rewind, with_rewind - plain))
-    assert with_rewind < 16.67, "recording pushes the frame over the 60 Hz budget"
+          % (plain, with_rewind, overhead))
+    # What this can honestly measure is the cost of recording, not whether the
+    # frame fits in 60 Hz.  It used to assert the latter, and on a machine
+    # with a browser open the same build measures anywhere from 11 to 24 ms
+    # with no code change at all -- so the assertion was reporting on the
+    # desktop rather than on the emulator.  The overhead is the stable number
+    # and the one this test is for: it has to stay a small fraction of a
+    # frame, whatever else the machine is doing.
+    assert overhead < 5.0, ("recording costs %.2f ms a frame, which is too "
+                            "much of the 16.67 available" % overhead)
 
     print("all rewind tests passed")
 

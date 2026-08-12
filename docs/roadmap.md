@@ -133,7 +133,13 @@ The largest single gap. Everything below the first item depends on it.
       and both this and the independent decoder in `test_dsp.py` kept the
       undoubled value, so they agreed with each other and neither was right.
       Faster as well, at 99 fps against 81.
-      One section left: "Envelope/gain SL=8 threshold"
+      One section left.  `tools/dspdiff.py` now runs this DSP and blargg's own
+      through the same script of register writes and reports the first sample
+      they disagree on -- the differential comparison section 6 has wanted all
+      along, for the one chip whose reference builds in seconds.  It found that
+      the DSP comes out of reset half way through a KON pair, so every key-on
+      was acted on a sample late; with that fixed the envelopes agree exactly.
+      What differs now is one sample of a voice's output after a key-on
 - [ ] The real gaussian table from the chip, replacing the generated one
 - [ ] $2140-$2143 access timing against the SPC700's own clock
 

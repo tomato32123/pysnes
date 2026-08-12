@@ -234,7 +234,7 @@ cdef class DSP:
             self.echo_hist_r[i] = 0
         self.echo_hist_pos = 0
         self.phase = 0
-        self.every_other = 0
+        self.every_other = 1     # the chip comes out of reset mid-pair
         self.kon = 0
         self.new_kon = 0
         self.t_koff = 0
@@ -697,43 +697,43 @@ cdef class DSP:
         elif p == 1:
             self._v6(0); self._v3(1)
         elif p == 2:
-            self._v7(0); self._v4(1); self._v1(3)
+            self._v7(0); self._v1(3); self._v4(1)
         elif p == 3:
             self._v8(0); self._v5(1); self._v2(2)
         elif p == 4:
             self._v9(0); self._v6(1); self._v3(2)
         elif p == 5:
-            self._v7(1); self._v4(2); self._v1(4)
+            self._v7(1); self._v1(4); self._v4(2)
         elif p == 6:
             self._v8(1); self._v5(2); self._v2(3)
         elif p == 7:
             self._v9(1); self._v6(2); self._v3(3)
         elif p == 8:
-            self._v7(2); self._v4(3); self._v1(5)
+            self._v7(2); self._v1(5); self._v4(3)
         elif p == 9:
             self._v8(2); self._v5(3); self._v2(4)
         elif p == 10:
             self._v9(2); self._v6(3); self._v3(4)
         elif p == 11:
-            self._v7(3); self._v4(4); self._v1(6)
+            self._v7(3); self._v1(6); self._v4(4)
         elif p == 12:
             self._v8(3); self._v5(4); self._v2(5)
         elif p == 13:
             self._v9(3); self._v6(4); self._v3(5)
         elif p == 14:
-            self._v7(4); self._v4(5); self._v1(7)
+            self._v7(4); self._v1(7); self._v4(5)
         elif p == 15:
             self._v8(4); self._v5(5); self._v2(6)
         elif p == 16:
             self._v9(4); self._v6(5); self._v3(6)
         elif p == 17:
-            self._v1(0); self._v7(5); self._v4(6)
+            self._v7(5); self._v1(0); self._v4(6)
         elif p == 18:
             self._v8(5); self._v5(6); self._v2(7)
         elif p == 19:
             self._v9(5); self._v6(6); self._v3(7)
         elif p == 20:
-            self._v1(1); self._v7(6); self._v4(7)
+            self._v7(6); self._v1(1); self._v4(7)
         elif p == 21:
             self._v8(6); self._v5(7); self._v2(0)
         elif p == 22:
