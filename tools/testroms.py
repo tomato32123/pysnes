@@ -11,9 +11,11 @@ your own and point this at it.
 
     python tools/testroms.py <dir> [--frames 1500] [--shots out-dir]
 
-The verdict is a picture, so this writes one per ROM and leaves the reading
-to a human.  A test that scrolls needs more frames, not fewer: the summary
-line comes last.
+These ROMs say pass or fail in the backdrop colour before they say it in
+words -- blue for passed, red for failed -- so the verdict is read from a
+pixel and the screenshot is kept for the detail.  A test that scrolls needs
+more frames, not fewer: the summary comes last, and a run that has not
+finished shows neither colour.
 """
 import argparse
 import os
@@ -24,6 +26,25 @@ from snes.system import System
 from tools.screenshot import write_png
 
 EXTENSIONS = (".sfc", ".smc")
+
+PASSED = (0, 0, 115)
+FAILED = (123, 0, 0)
+
+
+def verdict(framebuffer):
+    """What the backdrop says: 'passed', 'failed', or 'unfinished'."""
+    counts = {}
+    for y in range(20, 60):                     # above the first line of text
+        for x in range(0, 512, 8):
+            i = (y * 512 + x) * 4
+            rgb = (framebuffer[i + 2], framebuffer[i + 1], framebuffer[i])
+            counts[rgb] = counts.get(rgb, 0) + 1
+    backdrop = max(counts, key=counts.get)
+    if backdrop == PASSED:
+        return "passed"
+    if backdrop == FAILED:
+        return "failed"
+    return "unfinished"
 
 
 def main():
@@ -38,6 +59,7 @@ def main():
     if not roms:
         raise SystemExit("no test ROMs in %s" % args.romdir)
     os.makedirs(args.shots, exist_ok=True)
+    results = {}
 
     for path in roms:
         name = os.path.splitext(os.path.basename(path))[0]
@@ -50,8 +72,13 @@ def main():
             machine.run_frame()
         shot = os.path.join(args.shots, name + ".png")
         write_png(shot, machine.framebuffer)
-        print("%-28s %d frames -> %s" % (name, args.frames, shot))
+        said = verdict(machine.framebuffer)
+        results[said] = results.get(said, 0) + 1
+        print("%-28s %-10s %d frames -> %s" % (name, said, args.frames, shot))
+    print()
+    print("summary:", dict(sorted(results.items())))
+    return 1 if results.get("passed", 0) != len(roms) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

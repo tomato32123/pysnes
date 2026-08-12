@@ -123,9 +123,17 @@ The largest single gap. Everything below the first item depends on it.
       timer is enabled; an enable resets the divisor and the output counter
       but not it.  All three used to be reset together, which put every timer
       in phase with whenever it was switched on
-- [ ] **DSP as a 32-step pipeline** rather than one lump per sample: KON/KOF
-      latch on a 2-sample boundary, ENDX and ENVX read at the right moment,
-      echo latency exact
+- [~] **DSP as a 32-step pipeline** rather than one lump per sample.  The echo
+      half is done and `spc_dsp6` passes all eight of its echo sections against
+      three before: ESA is latched so a sample's read and write use the same
+      pointer, EDL is read only at the start of a pass, and the FIR halves on
+      the way in and divides by 64 rather than 128.  Levels measured unchanged
+      on four titles.  The envelope's shape is corrected too -- the mode
+      changes happen outside the branch that computes the value, so a voice
+      climbing under GAIN still leaves attack for decay.
+      What is left needs the steps to exist: ADSR0 is latched at one step and
+      the envelope runs at a later one, and KON/KOFF are acted on every other
+      sample
 - [ ] The real gaussian table from the chip, replacing the generated one
 - [ ] $2140-$2143 access timing against the SPC700's own clock
 
@@ -205,7 +213,8 @@ This is the part that decides whether any of the above converges.
       interlace, EXTBG, direct colour and mosaic
 - [~] **SPC700 and DSP test ROMs**: fetched and running.  `tools/testroms.py`
       boots a directory of them and captures each verdict.  `spc_smp`,
-      `spc_mem_access_times` and `spc_timer` all pass; `spc_dsp6` does not.
+      `spc_mem_access_times` and `spc_timer` all pass.  `spc_dsp6` clears its
+      eight echo sections and stops in the envelope.
       The tests are the apparatus, not the fix; the remaining fix is the DSP
       pipeline above
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The

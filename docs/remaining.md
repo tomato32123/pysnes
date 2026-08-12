@@ -192,7 +192,49 @@ charges per access (`snes/cpu.pyx`), so the shape to copy is in the tree.
 change here can break that silently. Do it with the DSP output hashed before
 and after.
 
-### 2. DSP as a 32-step pipeline
+### 2. DSP as a 32-step pipeline — the echo half is done
+
+**Done, and confirmed by `spc_dsp6`:** the echo unit. All eight of its echo
+sections pass, against three before.
+
+What was wrong was not the filter arithmetic but *when the registers that
+place the buffer are read*. ESA is latched: the pointer built from it at the
+start of a sample is the one both the read and the write use, so a program
+that moves the buffer sees the move on the next sample rather than half way
+through this one. EDL is looked at only when the offset is back at zero, so a
+length written part-way through a pass takes effect at the end of the pass —
+which is what stops a shortened buffer from leaving the pointer outside it.
+Both were being read fresh every sample. The FIR also halves each sample on
+the way into its history and divides by 64 rather than 128, which is the same
+gain and one bit less precision, and truncates to sixteen bits between the
+seventh and eighth taps rather than clamping once at the end.
+
+Measured before and after on four titles: peak and RMS unchanged to within a
+unit, nothing clipped. It is a precision change, not a level change — worth
+checking, because the previous code carried a comment about having tried a
+64-divisor once and got a resonant filter. It did, because it had no halving
+on the read to go with it.
+
+**Left:** the pipeline proper, and it is now precisely characterised.
+`spc_dsp6` gets to "Envelope/attack=>decay during gain" and stops. The
+envelope's own shape has been corrected — the mode changes now happen outside
+the branch that computes the value, so a voice climbing under GAIN leaves
+attack for decay when it tops out, and the rate counter gates only the
+storing of the value — but the test still fails, and the reason is structural:
+
+- The chip latches `ADSR0` at a particular step of the sample and the envelope
+  runs at a later one, so a write that lands between them is not seen until
+  the next sample. Here there are no steps to land between.
+- KON and KOFF are acted on every *other* sample, not every sample.
+
+Both need the 32 steps to exist before they can be expressed, which is what
+this item has always said. The difference now is that there is a test that
+says so rather than a document.
+
+*Also known to differ, and deliberately not changed*: the reference masks a
+voice's output to an even value (`& ~1`) as it does the echo's. Nothing that
+passes today would notice, so it is written down rather than copied — the
+same rule the rest of this file is written to.
 
 *Where*: `snes/apu.pyx`, `DSP.tick`, which does a whole sample in one lump.
 

@@ -215,6 +215,7 @@ cdef class DSP:
             self.block_pos[v] = 16
             self.interp_pos[v] = 0
             self.env[v] = 0
+            self.hidden_env[v] = 0
             self.env_mode[v] = ENV_RELEASE
             self.kon_delay[v] = 0
             self.prev1[v] = 0
@@ -228,6 +229,8 @@ cdef class DSP:
         self.noise = 0x4000
         self.echo_offset = 0
         self.echo_length = 0
+        self.echo_esa = 0
+        self.echo_flg = 0xE0
         for i in range(8):
             self.fir_l[i] = 0
             self.fir_r[i] = 0
@@ -271,6 +274,7 @@ cdef class DSP:
         self.prev2[v] = 0
         self.brr_header[v] = 0
         self.env[v] = 0
+        self.hidden_env[v] = 0
         self.env_mode[v] = ENV_ATTACK
         self.kon_delay[v] = 5             # hardware delays the first output
         for i in range(4):
@@ -353,11 +357,22 @@ cdef class DSP:
         return 1 if ((self.counter + COUNTER_OFFSET[rate]) % COUNTER_RATE[rate]) == 0 else 0
 
     cdef void _run_envelope(self, int v) noexcept:
+        """One step of a voice's envelope.
+
+        The shape matters as much as the arithmetic.  The next value and its
+        rate are worked out first, then the two mode changes are decided, and
+        only the *storing* of the value is gated on the rate counter.  Putting
+        the mode changes inside the branch that computes the value -- which is
+        the obvious way to write it -- means they can only happen while that
+        branch is running, and one of them is not supposed to be that way: a
+        voice climbing under GAIN still leaves attack for decay when it tops
+        out, even though nothing about GAIN is attacking.
+        """
         cdef uint8_t adsr1 = self.reg[v * 16 + 5]
         cdef uint8_t adsr2 = self.reg[v * 16 + 6]
-        cdef uint8_t gain = self.reg[v * 16 + 7]
         cdef int32_t e = self.env[v]
-        cdef int rate, mode, sustain_level
+        cdef int rate = 0, mode
+        cdef int env_data
 
         if self.env_mode[v] == ENV_RELEASE:
             e -= 8
@@ -366,48 +381,50 @@ cdef class DSP:
             self.env[v] = e
             return
 
+        env_data = adsr2
         if adsr1 & 0x80:                                   # ADSR
-            if self.env_mode[v] == ENV_ATTACK:
+            if self.env_mode[v] >= ENV_DECAY:
+                e = (e - 1) - ((e - 1) >> 8)
+                rate = env_data & 0x1F
+                if self.env_mode[v] == ENV_DECAY:
+                    rate = ((adsr1 >> 3) & 0x0E) + 0x10
+            else:                                          # attack
                 rate = ((adsr1 & 0x0F) << 1) + 1
-                if rate == 31:
-                    e += 1024
-                elif self._counter_poll(rate):
-                    e += 32
-                if e >= 0x7FF:
-                    e = 0x7FF
-                    self.env_mode[v] = ENV_DECAY
-            elif self.env_mode[v] == ENV_DECAY:
-                rate = (((adsr1 >> 4) & 7) << 1) + 16
-                if self._counter_poll(rate):
-                    e -= ((e - 1) >> 8) + 1
-                sustain_level = ((adsr2 >> 5) + 1) << 8
-                if e <= sustain_level:
-                    self.env_mode[v] = ENV_SUSTAIN
-            else:                                          # sustain
-                rate = adsr2 & 0x1F
-                if self._counter_poll(rate):
-                    e -= ((e - 1) >> 8) + 1
+                e += 0x20 if rate < 31 else 0x400
         else:                                              # GAIN
-            if not (gain & 0x80):
-                e = (gain & 0x7F) << 4
+            env_data = self.reg[v * 16 + 7]
+            mode = env_data >> 5
+            if mode < 4:                                   # direct
+                e = env_data * 0x10
+                rate = 31
             else:
-                rate = gain & 0x1F
-                mode = (gain >> 5) & 3
-                if self._counter_poll(rate):
-                    if mode == 0:
-                        e -= 32
-                    elif mode == 1:
-                        e -= ((e - 1) >> 8) + 1
-                    elif mode == 2:
-                        e += 32
-                    else:
-                        e += 32 if e < 0x600 else 8
+                rate = env_data & 0x1F
+                if mode == 4:                              # linear decrease
+                    e -= 0x20
+                elif mode < 6:                             # exponential
+                    e = (e - 1) - ((e - 1) >> 8)
+                else:                                      # linear increase
+                    e += 0x20
+                    # The two-slope form changes gradient on the value before
+                    # it was clamped, not after, so it needs the one kept aside.
+                    if mode > 6 and <uint32_t>self.hidden_env[v] >= 0x600:
+                        e += 8 - 0x20
 
-        if e < 0:
-            e = 0
-        elif e > 0x7FF:
-            e = 0x7FF
-        self.env[v] = e
+        # Sustain is reached when the top three bits of the envelope match the
+        # level asked for, not when it falls below a threshold.
+        if (e >> 8) == (env_data >> 5) and self.env_mode[v] == ENV_DECAY:
+            self.env_mode[v] = ENV_SUSTAIN
+
+        self.hidden_env[v] = e
+
+        # Unsigned, so a linear decrease going below zero lands here too.
+        if <uint32_t>e > 0x7FF:
+            e = 0 if e < 0 else 0x7FF
+            if self.env_mode[v] == ENV_ATTACK:
+                self.env_mode[v] = ENV_DECAY
+
+        if self._counter_poll(rate):
+            self.env[v] = e
 
     # -- one 32 kHz sample -----------------------------------------------------
 
@@ -487,41 +504,63 @@ cdef class DSP:
                 echo_in_r += r
 
         # -- echo ------------------------------------------------------------
-        self.echo_length = (<int>(self.reg[0x7D] & 0x0F)) * 2048
-        if self.echo_length == 0:
-            self.echo_length = 4
-        echo_addr = <uint16_t>((<int>self.reg[0x6D] << 8) + self.echo_offset)
+        #
+        # The registers that say *where* the echo buffer is are not read fresh
+        # every sample.  ESA is latched, and the pointer built from it at the
+        # start of a sample is the one both the read and the write use, so a
+        # program that moves the buffer sees the move take effect on the next
+        # sample rather than half way through this one.  EDL is looked at only
+        # when the offset is back at zero, so a length written part-way through
+        # a pass does not take effect until the pass ends -- which is what
+        # stops a shortened buffer from leaving the pointer outside it.
+        echo_addr = <uint16_t>((<int>self.echo_esa << 8) + self.echo_offset)
 
+        # A sample coming out of the buffer is halved on the way into the
+        # filter's history, and the coefficients then divide by 64 rather than
+        # 128.  The product is the same but the bit lost in the halving is
+        # not, and the filter is where that shows.
         fl = <int32_t><int16_t>(<uint16_t>(self.apu.ram[echo_addr]
-                                           | (<uint16_t>self.apu.ram[<uint16_t>(echo_addr + 1)] << 8)))
+                                           | (<uint16_t>self.apu.ram[<uint16_t>(echo_addr + 1)] << 8))) >> 1
         fr = <int32_t><int16_t>(<uint16_t>(self.apu.ram[<uint16_t>(echo_addr + 2)]
-                                           | (<uint16_t>self.apu.ram[<uint16_t>(echo_addr + 3)] << 8)))
+                                           | (<uint16_t>self.apu.ram[<uint16_t>(echo_addr + 3)] << 8))) >> 1
         self.fir_l[self.fir_pos] = fl
         self.fir_r[self.fir_pos] = fr
 
-        for tap in range(8):
+        # Seven taps accumulate without limit; the eighth is added to a total
+        # that has already been truncated to sixteen bits, and only then is the
+        # result clamped.  Summing all eight and clamping once is not the same
+        # arithmetic and does not overflow the same way.
+        for tap in range(7):
             i = (self.fir_pos - 7 + tap) & 7
-            # Coefficients are signed 8-bit with 128 meaning unity, so each tap
-            # is divided by 128.  Dividing by 64 instead gave the filter 2x gain
-            # -- with EFB it then resonated, burying the music under a loud
-            # high-frequency ring.
-            echo_l += (self.fir_l[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 7
-            echo_r += (self.fir_r[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 7
-        echo_l = _clamp16(echo_l)
-        echo_r = _clamp16(echo_r)
+            echo_l += (self.fir_l[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 6
+            echo_r += (self.fir_r[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 6
+        echo_l = <int32_t><int16_t>echo_l
+        echo_r = <int32_t><int16_t>echo_r
+        i = self.fir_pos
+        echo_l += <int32_t><int16_t>((self.fir_l[i] * <int32_t><signed char>self.reg[0x7F]) >> 6)
+        echo_r += <int32_t><int16_t>((self.fir_r[i] * <int32_t><signed char>self.reg[0x7F]) >> 6)
+        # The filter's output carries an even number of units into everything
+        # downstream: the low bit is dropped, not rounded.
+        echo_l = _clamp16(echo_l) & ~1
+        echo_r = _clamp16(echo_r) & ~1
         self.fir_pos = (self.fir_pos + 1) & 7
 
-        if not (flg & 0x20):                       # echo writes enabled
-            l = _clamp16(echo_in_l + ((echo_l * <int32_t><signed char>self.reg[0x0D]) >> 7))
-            r = _clamp16(echo_in_r + ((echo_r * <int32_t><signed char>self.reg[0x0D]) >> 7))
+        if not (self.echo_flg & 0x20):             # echo writes enabled
+            l = _clamp16(echo_in_l + ((echo_l * <int32_t><signed char>self.reg[0x0D]) >> 7)) & ~1
+            r = _clamp16(echo_in_r + ((echo_r * <int32_t><signed char>self.reg[0x0D]) >> 7)) & ~1
             self.apu.ram[echo_addr] = <uint8_t>(l & 0xFF)
             self.apu.ram[<uint16_t>(echo_addr + 1)] = <uint8_t>((l >> 8) & 0xFF)
             self.apu.ram[<uint16_t>(echo_addr + 2)] = <uint8_t>(r & 0xFF)
             self.apu.ram[<uint16_t>(echo_addr + 3)] = <uint8_t>((r >> 8) & 0xFF)
 
+        # Only now are the two placement registers looked at, for next time.
+        self.echo_esa = self.reg[0x6D]
+        if self.echo_offset == 0:
+            self.echo_length = (<int>(self.reg[0x7D] & 0x0F)) * 2048
         self.echo_offset += 4
         if self.echo_offset >= self.echo_length:
             self.echo_offset = 0
+        self.echo_flg = flg
 
         # -- master mix ---------------------------------------------------------
         l = (main_l * <int32_t><signed char>self.reg[0x0C]) >> 7

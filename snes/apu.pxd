@@ -16,6 +16,7 @@ cdef class DSP:
     cdef int32_t hist[8][4]
     cdef int32_t interp_pos[8]
     cdef int32_t env[8]
+    cdef int32_t hidden_env[8]     # before clamping; the two-slope gain reads it
     cdef int env_mode[8]
     cdef int kon_delay[8]
     cdef int32_t prev1[8]
@@ -27,6 +28,8 @@ cdef class DSP:
     cdef int16_t noise
     cdef int echo_offset
     cdef int echo_length
+    cdef uint8_t echo_esa           # ESA, latched: where the buffer is now
+    cdef uint8_t echo_flg           # FLG, latched: whether writes are allowed
     cdef int32_t fir_l[8]
     cdef int32_t fir_r[8]
     cdef int fir_pos
