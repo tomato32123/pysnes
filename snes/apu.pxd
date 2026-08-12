@@ -84,6 +84,12 @@ cdef class APU:
     cdef int32_t dsp_counter        # APU cycles until the next 32 kHz sample
     cdef int extra_cycles           # added by taken branches
     cdef int idle_tail              # cycles of the last opcode not yet placed
+
+    # -- access log, for comparing an opcode's bus cycles against hardware --
+    cdef int log_on
+    cdef int log_n
+    cdef uint8_t log_kind[32]       # 0 idle, 1 read, 2 write
+    cdef uint16_t log_addr[32]
     cdef int stopped                # STOP/SLEEP executed
 
     cdef uint8_t dsp_addr
@@ -96,6 +102,8 @@ cdef class APU:
     cdef void tick(self, int cycles) noexcept        # advance timers/DSP
     cdef void cycle(self, int n) noexcept            # ... and the SPC clock
     cdef void idle(self) noexcept                    # a cycle touching nothing
+    cdef void idles(self, int n) noexcept
+    cdef void _log(self, int kind, uint16_t addr) noexcept
     cdef void store_abs(self, uint16_t addr, uint8_t value) noexcept
     cdef void store_dp(self, uint8_t offset, uint8_t value) noexcept
     cdef uint8_t read(self, uint16_t addr) noexcept

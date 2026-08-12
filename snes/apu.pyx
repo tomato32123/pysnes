@@ -740,6 +740,9 @@ cdef class APU:
         self.master_hz = MASTER_HZ
         self.dsp_counter = DSP_DIV
         self.extra_cycles = 0
+        self.idle_tail = 0
+        self.log_on = 0
+        self.log_n = 0
         self.stopped = 0
         self.dsp_addr = 0
         self.dsp.reset()
@@ -806,9 +809,21 @@ cdef class APU:
         self.clock += n
         self.tick(n)
 
+    cdef inline void _log(self, int kind, uint16_t addr) noexcept:
+        if self.log_on and self.log_n < 32:
+            self.log_kind[self.log_n] = <uint8_t>kind
+            self.log_addr[self.log_n] = addr
+            self.log_n += 1
+
     cdef inline void idle(self) noexcept:
         """A cycle the processor spends on itself, touching no memory."""
+        self._log(0, 0)
         self.cycle(1)
+
+    cdef inline void idles(self, int n) noexcept:
+        cdef int i
+        for i in range(n):
+            self.idle()
 
     cdef inline void store_abs(self, uint16_t addr, uint8_t value) noexcept:
         """A store: the destination is read first, and the byte discarded."""
@@ -837,7 +852,8 @@ cdef class APU:
         """
         cdef int64_t start = self.clock
         cdef uint8_t op
-        cdef int total, spent
+        cdef int total, spent, _pad
+        self.log_n = 0
         self.extra_cycles = 0
         op = self.fetch()
         if DUMMY_PC[op]:
@@ -851,7 +867,8 @@ cdef class APU:
         # it belongs, and one with a tail still has that many to place.
         self.idle_tail = total - spent
         if spent < total:
-            self.cycle(total - spent)
+            for _pad in range(total - spent):
+                self.idle()
 
     # =====================================================================
     # SPC700 address space
@@ -863,6 +880,7 @@ cdef class APU:
         # An access takes a cycle, and it happens at the end of it, so the
         # clock moves first: a read of a timer or a port must see the state
         # as of the cycle it lands on, not as of the start of the instruction.
+        self._log(1, addr)
         self.cycle(1)
         if 0x00F0 <= addr <= 0x00FF:
             i = addr - 0x00F0
@@ -883,6 +901,7 @@ cdef class APU:
 
     cdef void write(self, uint16_t addr, uint8_t value) noexcept:
         cdef int i, t
+        self._log(2, addr)
         self.cycle(1)
         if 0x00F0 <= addr <= 0x00FF:
             i = addr - 0x00F0
@@ -1557,7 +1576,7 @@ cdef class APU:
         elif op == 0x6C:
             addr = self.fetch16(); self.write(addr, self.alu_ror(self.read(addr)))
         elif op == 0x9F:                                    # XCN A
-            self.cycle(3)
+            self.idles(3)
             self.a = <uint8_t>((self.a >> 4) | (self.a << 4))
             self.nz8(self.a)
 
@@ -1573,18 +1592,16 @@ cdef class APU:
             self.read(self.dp(v))
             self.write(self.dp(v), self.a)
             self.write(self.dp(<uint8_t>(v + 1)), self.y)
-        elif op == 0x3A:                                    # INCW d
+        # INCW and DECW work a byte at a time: the low byte is read, adjusted
+        # and written back before the high byte is read at all, so the bus
+        # sees read, write, read, write -- not both reads and then both
+        # writes.  A program watching the address bus can tell the difference,
+        # and so can hardware that is being written to through it.
+        elif op == 0x3A or op == 0x1A:                      # INCW / DECW d
             v = self.fetch()
-            w = <uint16_t>((self.read(self.dp(v))
-                            | (<uint16_t>self.read(self.dp(<uint8_t>(v + 1))) << 8)) + 1)
+            w = <uint16_t>(self.read(self.dp(v)) + (1 if op == 0x3A else -1))
             self.write(self.dp(v), <uint8_t>(w & 0xFF))
-            self.write(self.dp(<uint8_t>(v + 1)), <uint8_t>(w >> 8))
-            self.nz16(w)
-        elif op == 0x1A:                                    # DECW d
-            v = self.fetch()
-            w = <uint16_t>((self.read(self.dp(v))
-                            | (<uint16_t>self.read(self.dp(<uint8_t>(v + 1))) << 8)) - 1)
-            self.write(self.dp(v), <uint8_t>(w & 0xFF))
+            w = <uint16_t>(w + (<uint16_t>self.read(self.dp(<uint8_t>(v + 1))) << 8))
             self.write(self.dp(<uint8_t>(v + 1)), <uint8_t>(w >> 8))
             self.nz16(w)
         elif op == 0x7A:                                    # ADDW YA, d
@@ -1612,13 +1629,13 @@ cdef class APU:
             self.setf(P_C, z >= 0)
             self.nz16(<uint16_t>(z & 0xFFFF))
         elif op == 0xCF:                                    # MUL YA
-            self.cycle(7)
+            self.idles(7)
             big = <uint32_t>self.y * <uint32_t>self.a
             self.a = <uint8_t>(big & 0xFF)
             self.y = <uint8_t>((big >> 8) & 0xFF)
             self.nz8(self.y)
         elif op == 0x9E:                                    # DIV YA, X
-            self.cycle(10)
+            self.idles(10)
             ya = <uint16_t>((self.y << 8) | self.a)
             self.setf(P_H, (self.x & 15) <= (self.y & 15))
             self.setf(P_V, self.y >= self.x)
@@ -1750,7 +1767,7 @@ cdef class APU:
             self.idle()
             self.push(<uint8_t>(self.pc >> 8))
             self.push(<uint8_t>(self.pc & 0xFF))
-            self.cycle(2)
+            self.idles(2)
             self.pc = addr
         elif op == 0x4F:                                    # PCALL u
             v = self.fetch()
@@ -1987,6 +2004,16 @@ cdef class APU:
                     sp=self.sp, psw=self.psw, clock=self.clock,
                     stopped=self.stopped, ipl=self.ipl_enabled,
                     extra_cycles=self.extra_cycles, idle_tail=self.idle_tail)
+
+    def access_log(self, int on=-1):
+        """The bus cycles of the last instruction, as (kind, address) with
+        kind 'i', 'r' or 'w'.  Pass 1 or 0 to turn recording on or off."""
+        cdef int i
+        if on >= 0:
+            self.log_on = on
+            return None
+        return [('irw'[self.log_kind[i]], self.log_addr[i])
+                for i in range(self.log_n)]
 
     def set_pc(self, int addr):
         """Point the SPC700 at an address, so a test can run one opcode."""

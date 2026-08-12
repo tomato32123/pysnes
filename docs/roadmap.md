@@ -107,11 +107,15 @@ The largest single gap. Everything below the first item depends on it.
       the clock first started moving per access.  Two tests hold the line --
       every opcode still costs what the cycle table says, and the count of
       placed opcodes is a ratchet at 256.
+      The order is pinned as well: `test_apu_cycles.py` holds the expected run
+      of reads, writes and idles for all 256 and compares it against what
+      reaches the bus.
       This is what `spc_timer.sfc` was failing on, and it now **passes**: the
-      first hardware test ROM this emulator has passed.  It also turned up a
-      plain bug -- `DBNZ Y` ran eight cycles when taken, against hardware's
+      first hardware test ROM this emulator has passed.  It also turned up two
+      plain bugs -- `DBNZ Y` ran eight cycles when taken against hardware's
       six, because the table already held the taken cost and the branch added
-      it again
+      it again; and `INCW`/`DECW` read both bytes before writing either, where
+      the chip writes the low byte back before it reads the high one
 - [x] The timers' first stage is a scaler that free-runs whether or not the
       timer is enabled; an enable resets the divisor and the output counter
       but not it.  All three used to be reset together, which put every timer

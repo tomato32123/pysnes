@@ -153,14 +153,27 @@ it by reasoning was not on: the dummy read before a store, and the two
 instructions that skip it and idle instead, are not the sort of thing that
 can be worked out from a cycle count.
 
-*What is still wrong*: `spc_mem_access_times` still fails. The counts are
-right everywhere now, so what it is reporting is order — a handful of
-opcodes, visibly in the $D8-$FB range, make the right number of accesses in
-the wrong sequence or at the wrong address. That is the next thing to read
-off its table. Speed is unaffected in any way that matters — 92 fps on Super
-Mario World, against 60 for real time -- the extra bus accesses cost about a
-tenth of the frame rate, which is a price worth paying for a test that now
-passes.
+**The order is right too, and that is now pinned.** `tests/test_apu_cycles.py`
+holds the expected run of reads, writes and idles for every one of the 256
+opcodes, transcribed from the same reference, and compares it against what the
+emulator actually puts on the bus. Writing it found the last ordering bug:
+`INCW` and `DECW` were reading both bytes and then writing both, where the
+chip reads the low byte, writes it back, and only then reads the high one.
+A program watching the address bus can tell those apart.
+
+*What is still wrong*: `spc_mem_access_times` still fails, and it is no
+longer clear from the outside what it is unhappy about. Counts match, order
+matches, and its own on-screen table is a description of the access pattern
+rather than a list of complaints — the verdict is a CRC over everything, so
+one wrong detail anywhere shows up as one wrong number. The remaining
+candidates are the *addresses* of accesses rather than their order, and the
+cycle on which a register access takes effect — reading `$FD` clears the
+counter, writing `$F3` reaches the DSP — neither of which the order test
+looks at. That is where to go next.
+
+Speed: 81 fps on Super Mario World against 92 before and 60 for real time.
+The extra bus accesses cost about a tenth of the frame rate, which is a fair
+price for a hardware test that now passes.
 
 This was written down as one of three open APU items and as the least
 appealing of them, on the grounds that it is only observable through
