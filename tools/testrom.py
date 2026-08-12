@@ -71,8 +71,13 @@ __hang: bra __hang
 """
 
 
-def assemble_image(source, title="PYSNES TEST"):
-    """Assemble `source` inside the prelude and wrap it in a LoROM image."""
+def assemble_image(source, title="PYSNES TEST", chipset=0x00, country=0x01):
+    """Assemble `source` inside the prelude and wrap it in a LoROM image.
+
+    `chipset` is the header byte that says what else is on the board, so a
+    test can be run against a cartridge with a coprocessor on it rather than
+    only against a plain one.  `country` picks the region, and with it the
+    scanline count and the master clock: $01 is NTSC, $02 PAL."""
     asm = Assembler()
     # `result` is where tests leave their answers; predefining it lets the
     # assembly refer to it by name.
@@ -90,10 +95,10 @@ def assemble_image(source, title="PYSNES TEST"):
     head = 0x7FC0
     rom[head:head + 21] = title.ljust(21)[:21].encode("ascii")
     rom[head + 0x15] = 0x20             # LoROM, SlowROM
-    rom[head + 0x16] = 0x00             # ROM only
+    rom[head + 0x16] = chipset          # $00 is ROM only
     rom[head + 0x17] = 0x08
     rom[head + 0x18] = 0x00             # no SRAM
-    rom[head + 0x19] = 0x01             # NTSC
+    rom[head + 0x19] = country          # $01 NTSC, $02 PAL
     rom[head + 0x1A] = 0x33
     rom[head + 0x1B] = 0x00
 
@@ -146,11 +151,11 @@ class Results:
         return self.machine.bus.read(addr)
 
 
-def run(source, max_frames=60, title="PYSNES TEST"):
+def run(source, max_frames=60, title="PYSNES TEST", chipset=0x00, country=0x01):
     """Assemble, boot and run until the program signals completion."""
     from snes.system import System
 
-    image, labels = assemble_image(source, title)
+    image, labels = assemble_image(source, title, chipset, country)
     machine = System(rom_data=image)
 
     executed = 0

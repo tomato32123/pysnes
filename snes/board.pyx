@@ -55,6 +55,19 @@ cdef class Board:
         console looks."""
         pass
 
+    cdef void dma_begin(self, int channel, uint32_t addr, uint32_t count) noexcept:
+        """A DMA channel is about to read `count` bytes starting at `addr`.
+
+        A cartridge chip cannot see $420B, but it can see the reads that
+        follow it, and the S-DD1 decides from the channel number whether the
+        bytes it hands back are the ROM's or its decompressor's.  So the bus
+        says which channel is running rather than the board having to guess
+        from an address."""
+        pass
+
+    cdef void dma_end(self, int channel) noexcept:
+        pass
+
     def describe(self):
         return self.name
 
@@ -121,6 +134,7 @@ def _load_boards():
     """Import the modules that register boards.  Deferred so board.pyx does
     not have to know about every chip at compile time."""
     from snes import sa1                      # noqa: F401  (registers itself)
+    from snes import sdd1                     # noqa: F401
 
 
 def make_board(Cart cart):

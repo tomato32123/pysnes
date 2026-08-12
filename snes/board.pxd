@@ -27,6 +27,8 @@ cdef class Board:
     cdef void write(self, uint32_t addr, uint8_t value) noexcept
     cdef void reset_board(self) noexcept
     cdef void run_until(self, int64_t master_clock) noexcept
+    cdef void dma_begin(self, int channel, uint32_t addr, uint32_t count) noexcept
+    cdef void dma_end(self, int channel) noexcept
 
 
 cdef class LoROM(Board):

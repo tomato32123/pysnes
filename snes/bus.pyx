@@ -578,6 +578,11 @@ cdef class Bus:
             count = self.dma_size[ch]
             if count == 0:
                 count = 0x10000
+            # A chip on the cartridge may want to answer this channel's reads
+            # itself.  It is told before the first one, because a decompressor
+            # has to start from the address the channel was pointed at.
+            self.board.clock = self.master_clock
+            self.board.dma_begin(ch, a_addr, count)
             i = 0
             while count:
                 self.tick(8)
@@ -592,6 +597,7 @@ cdef class Bus:
                     i = 0
                 count -= 1
 
+            self.board.dma_end(ch)
             self.dma_abus[ch] = a_addr
             self.dma_size[ch] = 0
         self.dma_enabled = 0
