@@ -97,20 +97,21 @@ The largest single gap. Everything below the first item depends on it.
 - [x] SPC700: all 256 opcodes, three timers, the IPL boot ROM
 - [x] S-DSP: BRR, ADSR/GAIN, gaussian interpolation, noise, pitch modulation,
       the FIR echo unit
-- [~] **SPC700 bus-access timing** rather than a flat per-opcode cycle table.
-      Every access -- fetch, read, write -- now moves the SPC700's clock as it
+- [x] **SPC700 bus-access timing** rather than a flat per-opcode cycle table.
+      Every access -- fetch, read, write -- moves the SPC700's clock as it
       happens, so a read of a timer or a port sees the machine as of the cycle
       it lands on rather than as of the instruction before.  On top of that,
       the accesses that are not obvious: the byte every one-byte instruction
-      reads and discards, and the read a store makes of its destination
-      first.  **184 of 256 opcodes now have every cycle where it belongs**,
-      against 84 when the clock first started moving per access; the other 72
-      carry 90 cycles paid at the end of the instruction.  Two tests hold the
-      line -- every opcode still costs what the cycle table says, and the
-      count of placed opcodes is a ratchet -- so the rest can be done a few
-      opcodes at a time.
-      Three of the four APU test ROMs fail on this one thing, which makes it
-      the next piece of work rather than the least appealing of three
+      reads and discards, and the read a store makes of its destination first.
+      **All 256 opcodes have every cycle where it belongs**, against 84 when
+      the clock first started moving per access.  Two tests hold the line --
+      every opcode still costs what the cycle table says, and the count of
+      placed opcodes is a ratchet at 256.
+      This is what `spc_timer.sfc` was failing on, and it now **passes**: the
+      first hardware test ROM this emulator has passed.  It also turned up a
+      plain bug -- `DBNZ Y` ran eight cycles when taken, against hardware's
+      six, because the table already held the taken cost and the branch added
+      it again
 - [x] The timers' first stage is a scaler that free-runs whether or not the
       timer is enabled; an enable resets the divisor and the output counter
       but not it.  All three used to be reset together, which put every timer
@@ -196,10 +197,9 @@ This is the part that decides whether any of the above converges.
 - [x] Open bus suite, and display-mode tests for overscan, hires,
       interlace, EXTBG, direct colour and mosaic
 - [~] **SPC700 and DSP test ROMs**: fetched and running.  `tools/testroms.py`
-      boots a directory of them and captures each verdict.  All four fail
-      today -- `spc_smp`, `spc_mem_access_times`, `spc_timer` and `spc_dsp6`
-      -- which is what the three open APU items predict.  The tests are the
-      apparatus, not the fix; the fixes are section 4
+      boots a directory of them and captures each verdict.  `spc_timer`
+      passes; `spc_smp`, `spc_mem_access_times` and `spc_dsp6` do not.  The
+      tests are the apparatus, not the fix; the fixes are section 4
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images

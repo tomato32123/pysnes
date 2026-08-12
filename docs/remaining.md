@@ -5,7 +5,7 @@ thing still open, what it actually is, where in the code it goes, how you
 would know you got it right, and what — if anything — makes it impossible
 today. Written so it can be picked up cold.
 
-As of this writing: **38 done, 7 partial, 6 untouched** of 52 items. The
+As of this writing: **39 done, 6 partial, 6 untouched** of 52 items. The
 66-ROM local library boots 63 titles; the three that do not are listed at the
 end. One wants a coprocessor whose firmware is not here, and two are
 defective ROM images — proved defective, not assumed so. No title in the
@@ -96,10 +96,10 @@ behind them either**, which puts them in the same class as the nine in bold.
 
 ---
 
-## The nine untouched items
+## The untouched items
 
-### 1. SPC700 bus-access timing — half done, and the half that is left is
-### bounded
+### 1. SPC700 bus-access timing — done, and it earned the project its first
+### passing hardware test
 
 *Where*: `snes/apu.pyx`, the opcode dispatch.
 
@@ -127,27 +127,40 @@ of it, and most of the idle placement.
   Calls, returns, `MUL`, `DIV` and `XCN` spend theirs where the reference
   says.
 
-**184 of the 256 opcodes now have every cycle where it belongs**, against 84
-when the accesses first started moving the clock. The other 72 carry 90
-cycles between them, still paid at the end of the instruction — a
-placeholder, not a model.
+**All 256 opcodes now have every cycle where it belongs**, against 84 when
+the accesses first started moving the clock. Nothing is paid at the end of an
+instruction any more.
 
-Two tests keep this honest. Every opcode must still cost exactly what the
-cycle table says, so moving an idle around cannot silently change an
-instruction's length; and the count of fully placed opcodes is a ratchet, so
-it cannot quietly go back down. The remaining work can be done a few opcodes
-at a time against those two.
+**`spc_timer.sfc` passes.** That is the first hardware test ROM this
+emulator has ever passed, and what it was failing on was exactly this: a read
+of a timer against a write to it, which cannot come out right while the
+instruction's cycles are charged after it has finished.
+
+The work also turned up a plain bug in the cycle table. `DBNZ Y` was listed
+as six cycles and then had the two cycles for a taken branch added on top, so
+it ran eight when hardware takes six. Four and six are its real costs. That
+had been there since the table was written and nothing had noticed, because
+nothing was in a position to.
+
+Two tests keep this honest. Every opcode must cost exactly what the cycle
+table says, so moving an idle around cannot silently change an instruction's
+length; and the count of fully placed opcodes is a ratchet at 256, so it
+cannot go back down while someone works on something else.
 
 The cycle-by-cycle account came from bsnes's SPC700 core, which writes each
 addressing mode as an explicit sequence of reads, writes and idles. Deriving
-it by reasoning was not on: the dummy read before a store and the two
-instructions that skip it are not the sort of thing that can be worked out
-from a cycle count.
+it by reasoning was not on: the dummy read before a store, and the two
+instructions that skip it and idle instead, are not the sort of thing that
+can be worked out from a cycle count.
 
-`spc_timer` gets a case further than it did and `spc_mem_access_times`
-reports fewer wrong entries, but all three still fail; the last 90 cycles are
-between here and passing. Speed is unaffected in any way that matters — 92
-fps on Super Mario World, against 60 for real time.
+*What is still wrong*: `spc_mem_access_times` still fails. The counts are
+right everywhere now, so what it is reporting is order — a handful of
+opcodes, visibly in the $D8-$FB range, make the right number of accesses in
+the wrong sequence or at the wrong address. That is the next thing to read
+off its table. Speed is unaffected in any way that matters — 92 fps on Super
+Mario World, against 60 for real time -- the extra bus accesses cost about a
+tenth of the frame rate, which is a price worth paying for a test that now
+passes.
 
 This was written down as one of three open APU items and as the least
 appealing of them, on the grounds that it is only observable through
@@ -328,10 +341,11 @@ The verdict, as of now:
 |---|---|---|
 | `spc_smp.sfc` | instructions, then instruction timing | edge arith, full BRK, full CMP and full DAA/DAS **pass**; **fails** on "CPU timing/mem access times" |
 | `spc_mem_access_times.sfc` | when within an opcode each access happens | **Failed 02** |
-| `spc_timer.sfc` | timer read against write | **Failed 02** on the first test |
+| `spc_timer.sfc` | timer read against write | **PASSED** |
 | `spc_dsp6.sfc` | the echo unit: basics, ESA and EDL changes | **Failed 02** |
 
-Four failures, but not four problems. Three of them are the same problem.
+Four failures, but not four problems: three of them were the same problem,
+and one of those three is now fixed. `spc_timer` passes.
 
 `spc_smp` is the useful one to read closely, because it is the only test here
 that separates behaviour from timing, and it says the behaviour is right: the
@@ -343,11 +357,11 @@ which is the same question wearing different clothes: what a read sees
 depends on which cycle of the instruction it happens on, and here the whole
 instruction's cycles are charged in one lump when it finishes.
 
-So item 1 — SPC700 bus-access timing — is not one of three open APU items.
-It is the one that three of the four tests are waiting on, which makes it a
+So item 1 — SPC700 bus-access timing — was not one of three open APU items.
+It was the one that three of the four tests were waiting on, which made it a
 much better-defined piece of work than it looked when it was written down
-from the documentation alone. `spc_dsp6` is the one genuinely separate
-failure, and it belongs to item 2.
+from the documentation alone. It is now largely done and `spc_timer` passes.
+`spc_dsp6` is the one genuinely separate failure, and it belongs to item 2.
 
 One thing was fixed on the way, and it is worth noting that it did *not* fix
 the test. The timers' first stage is a scaler off the SPC700's clock, and it

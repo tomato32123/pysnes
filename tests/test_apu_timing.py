@@ -54,7 +54,7 @@ def test_every_opcode_still_takes_what_the_table_says():
 # belongs.  The rest still pay their leftover at the end of the instruction,
 # which is a placeholder, not a model.  Raise this as opcodes are done; it is
 # here so the number cannot quietly go down again.
-PLACED = 184
+PLACED = 256
 
 
 def test_most_opcodes_have_every_cycle_where_it_belongs():
