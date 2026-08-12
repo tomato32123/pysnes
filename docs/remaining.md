@@ -169,8 +169,8 @@ and they read back zero. This emulator handed back whatever had been written
 to them. A read is an access, and that one returned the wrong byte.
 
 With that, **three of the four test ROMs pass** — `spc_smp` in all sixteen
-of its sections, `spc_mem_access_times`, and `spc_timer`. Only the DSP echo
-test is left, and it belongs to item 2 rather than here.
+of its sections, `spc_mem_access_times`, and `spc_timer`. The fourth clears
+twelve of its thirteen sections; what is left of it belongs to item 2.
 
 Speed: 81 fps on Super Mario World against 92 before and 60 for real time.
 The extra bus accesses cost about a tenth of the frame rate, which is a fair
@@ -192,65 +192,46 @@ charges per access (`snes/cpu.pyx`), so the shape to copy is in the tree.
 change here can break that silently. Do it with the DSP output hashed before
 and after.
 
-### 2. DSP as a 32-step pipeline — the echo half is done
+### 2. DSP as a 32-step pipeline — done, bar one section
 
-**Done, and confirmed by `spc_dsp6`:** the echo unit. All eight of its echo
-sections pass, against three before.
+The chip does not compute a sample and then move on. It walks 32 steps, and at
+any moment eight voices are each at a different one: while voice 0 is being
+written out, voice 2 is reading its BRR header and voice 5 is having its
+envelope run. That is now what this does, step for step, and `spc_dsp6` goes
+from three passing sections to twelve.
 
-What was wrong was not the filter arithmetic but *when the registers that
-place the buffer are read*. ESA is latched: the pointer built from it at the
-start of a sample is the one both the read and the write use, so a program
-that moves the buffer sees the move on the next sample rather than half way
-through this one. EDL is looked at only when the offset is back at zero, so a
-length written part-way through a pass takes effect at the end of the pass —
-which is what stops a shortened buffer from leaving the pointer outside it.
-Both were being read fresh every sample. The FIR also halves each sample on
-the way into its history and divides by 64 rather than 128, which is the same
-gain and one bit less precision, and truncates to sixteen bits between the
-seventh and eighth taps rather than clamping once at the end.
+Almost everything a per-sample lump gets wrong follows from the steps not
+existing. A register read at step 21 and used at step 30 does not see a write
+that landed at step 25. KON is acted on every *other* sample, so a program can
+write and clear it between two samples and have it seen once or not at all.
+ENDX, OUTX and ENVX are written back from buffers, so a write one or two steps
+before the pipeline gets there is overwritten and a write after it is not.
+None of that can be said at all without the steps.
 
-Measured before and after on four titles: peak and RMS unchanged to within a
-unit, nothing clipped. It is a precision change, not a level change — worth
-checking, because the previous code carried a comment about having tried a
-64-divisor once and got a resonant filter. It did, because it had no halving
-on the read to go with it.
+**It also turned out the audio was 6 dB quiet, and had been all along.** The
+decoder's output is a 15-bit sample carried in the top fifteen bits of
+sixteen — doubled, in other words — and both this emulator and the
+independent decoder in `test_dsp.py` kept the 15-bit value instead. They
+agreed with each other, so nothing complained. They are the same arithmetic:
+the filter coefficients in the two differ by exactly that factor of two, one
+shift at a time. Doubling it is what lets a full-scale sample reach full
+scale at the DAC rather than stopping half way, and the test now checks
+against that convention rather than against the emulator's old habit.
 
-**Left:** the pipeline proper, and it is now precisely characterised.
-`spc_dsp6` gets to "Envelope/attack=>decay during gain" and stops. The
-envelope's own shape has been corrected — the mode changes now happen outside
-the branch that computes the value, so a voice climbing under GAIN leaves
-attack for decay when it tops out, and the rate counter gates only the
-storing of the value — but the test still fails, and the reason is structural:
+`test_dsp.py` is worth keeping in mind here: it decodes BRR independently, in
+plain Python, and compares by correlation rather than by value. That is why it
+survived the rewrite and still says 0.9896 — it was measuring the shape, which
+was right, and it caught the scale the moment its own reference was corrected.
 
-- The chip latches `ADSR0` at a particular step of the sample and the envelope
-  runs at a later one, so a write that lands between them is not seen until
-  the next sample. Here there are no steps to land between.
-- KON and KOFF are acted on every *other* sample, not every sample.
+Faster, too, at 99 fps on Super Mario World against 81 before: the steps do
+less work between them than the lump did in one go.
 
-Both need the 32 steps to exist before they can be expressed, which is what
-this item has always said. The difference now is that there is a test that
-says so rather than a document.
-
-*Also known to differ, and deliberately not changed*: the reference masks a
-voice's output to an even value (`& ~1`) as it does the echo's. Nothing that
-passes today would notice, so it is written down rather than copied — the
-same rule the rest of this file is written to.
-
-*Where*: `snes/apu.pyx`, `DSP.tick`, which does a whole sample in one lump.
-
-The real chip walks 32 steps per sample, and several things are only correct
-in terms of those steps: KON and KOF latch on a two-sample boundary, ENDX is
-set and cleared at particular steps, ENVX and OUTX read mid-sample give the
-old or the new value depending on where you are, and the echo has a fixed
-latency that falls out of the step order rather than being applied to it.
-
-*How you would know*: `tests/test_dsp.py` already checks output against an
-independent Python decoder — extend that to the register reads. Properly,
-this wants the SPC700 test ROMs (below).
-
-*Why it is last*: the audible difference is close to nil, the observable
-difference is in register reads few games make, and the risk to working
-audio is real. Highest effort, lowest confirmed payoff, of anything here.
+**Left**: one section. `spc_dsp6` stops at "Envelope/gain SL=8 threshold", and
+what it is unhappy about is no longer visible from outside — the envelope
+matches the reference expression for expression, including the quirk where a
+voice under GAIN compares its top three bits against the GAIN *mode* number
+and can fall into sustain that way. The next move is to read that section's
+source rather than guess at it from a screenshot.
 
 ### 3. The real gaussian table
 
@@ -398,7 +379,7 @@ The verdict, as of now:
 | `spc_smp.sfc` | instructions, instruction timing, register behaviour, timers — sixteen sections | **PASSED** |
 | `spc_mem_access_times.sfc` | when within an opcode each access happens | **PASSED** |
 | `spc_timer.sfc` | timer read against write | **PASSED** |
-| `spc_dsp6.sfc` | the echo unit: basics, ESA and EDL changes | **Failed 02** |
+| `spc_dsp6.sfc` | the echo unit and the envelope — thirteen sections | twelve pass; stops at "Envelope/gain SL=8 threshold" |
 
 Four failures, but not four problems: three of them were the same problem,
 and one of those three is now fixed. `spc_timer` passes.

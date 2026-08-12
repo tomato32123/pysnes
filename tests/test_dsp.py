@@ -52,7 +52,17 @@ def encode_brr(samples, loop=False):
 
 
 def reference_decode(brr):
-    """Decode BRR exactly the way the hardware does, in plain Python."""
+    """Decode BRR exactly the way the hardware does, in plain Python.
+
+    The filter runs on 15-bit samples, and what leaves the decoder is that
+    value doubled -- the chip carries it in the top fifteen bits of sixteen,
+    which is what lets a full-scale sample reach full scale at the DAC instead
+    of stopping 6 dB short of it.  This decoder used to return the 15-bit
+    value, and the emulator did the same, so the two agreed with each other
+    and both were half as loud as the hardware.  They are the same arithmetic
+    either way: the filter coefficients here and in the chip's own
+    documentation differ by exactly the factor of two, one shift at a time.
+    """
     out, p1, p2, a = [], 0, 0, 0
     while a < len(brr):
         header = brr[a]
@@ -71,7 +81,7 @@ def reference_decode(brr):
                 v += (p1 << 1) + ((-(p1 * 13)) >> 6) - p2 + ((p2 * 3) >> 4)
             v = clip15(clamp16(v))
             p2, p1 = p1, v
-            out.append(v)
+            out.append(v * 2)
         if header & 1:
             break
         a += 9

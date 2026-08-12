@@ -122,6 +122,8 @@ cdef enum:
 
 cdef enum:
     OUT_SAMPLES = 8192          # stereo frames in the output ring buffer
+    BRR_BUF = 12                # decoded samples a voice keeps, ring
+    ECHO_HIST = 8               # taps the echo filter looks back over
 
 
 cdef inline int32_t _clamp16(int32_t v) noexcept:
@@ -210,31 +212,53 @@ cdef class DSP:
         self.reg[0x6C] = 0xE0            # FLG: reset + mute + echo writes off
         for v in range(8):
             self.brr_addr[v] = 0
-            self.brr_offset[v] = 0
-            self.brr_header[v] = 0
-            self.block_pos[v] = 16
+            self.brr_offset[v] = 1
+            self.buf_pos[v] = 0
             self.interp_pos[v] = 0
             self.env[v] = 0
             self.hidden_env[v] = 0
             self.env_mode[v] = ENV_RELEASE
             self.kon_delay[v] = 0
-            self.prev1[v] = 0
-            self.prev2[v] = 0
+            self.envx_out[v] = 0
             self.voice_out[v] = 0
-            for i in range(4):
-                self.hist[v][i] = 0
-            for i in range(16):
-                self.block[v][i] = 0
+            for i in range(BRR_BUF * 2):
+                self.buf[v][i] = 0
         self.counter = 0
         self.noise = 0x4000
         self.echo_offset = 0
         self.echo_length = 0
         self.echo_esa = 0
         self.echo_flg = 0xE0
-        for i in range(8):
-            self.fir_l[i] = 0
-            self.fir_r[i] = 0
-        self.fir_pos = 0
+        for i in range(ECHO_HIST * 2):
+            self.echo_hist_l[i] = 0
+            self.echo_hist_r[i] = 0
+        self.echo_hist_pos = 0
+        self.phase = 0
+        self.every_other = 0
+        self.kon = 0
+        self.new_kon = 0
+        self.t_koff = 0
+        self.t_pmon = 0
+        self.t_non = 0
+        self.t_eon = 0
+        self.t_dir = 0
+        self.t_dir_addr = 0
+        self.t_srcn = 0
+        self.t_brr_next_addr = 0
+        self.t_adsr0 = 0
+        self.t_brr_byte = 0
+        self.t_brr_header = 0
+        self.t_pitch = 0
+        self.t_output = 0
+        self.t_looped = 0
+        self.t_echo_ptr = 0
+        self.endx_buf = 0
+        self.outx_buf = 0
+        self.envx_buf = 0
+        for i in range(2):
+            self.t_main_out[i] = 0
+            self.t_echo_out[i] = 0
+            self.t_echo_in[i] = 0
         self.out_write = 0
         self.out_read = 0
         self.out_count = 0
@@ -249,112 +273,97 @@ cdef class DSP:
         return self.reg[addr & 0x7F]
 
     cdef void write_reg(self, uint8_t addr, uint8_t value) noexcept:
-        cdef int v
+        cdef int low
         if addr >= 0x80:
             return                        # $80-$FF only mirror the read side
         self.reg[addr] = value
-        if addr == 0x4C:                  # KON is edge triggered
-            for v in range(8):
-                if value & (1 << v):
-                    self._key_on(v)
-        elif addr == 0x5C:                # KOF is level triggered
-            for v in range(8):
-                if value & (1 << v):
-                    self.env_mode[v] = ENV_RELEASE
+        low = addr & 0x0F
+        # Three registers are not simply stored.  ENVX and OUTX go into the
+        # buffers the pipeline writes back from, so a write lands only if the
+        # pipeline is not about to overwrite it; KON is held aside until the
+        # sample boundary that reads it; and ENDX clears whatever is written.
+        if low == 8:
+            self.envx_buf = value
+        elif low == 9:
+            self.outx_buf = value
+        elif low == 0x0C:
+            if addr == 0x4C:
+                self.new_kon = value
+            elif addr == 0x7C:
+                self.endx_buf = 0
+                self.reg[0x7C] = 0
 
-    cdef void _key_on(self, int v) noexcept:
-        cdef int i
-        self.kon_count[v] += 1
-        cdef uint16_t dir_addr = (<uint16_t>self.reg[0x5D] << 8) + <uint16_t>(self.reg[v * 16 + 4]) * 4
-        self.brr_addr[v] = (<uint16_t>self.apu.ram[dir_addr]
-                            | (<uint16_t>self.apu.ram[<uint16_t>(dir_addr + 1)] << 8))
-        self.brr_offset[v] = 0
-        self.interp_pos[v] = 0
-        self.prev1[v] = 0
-        self.prev2[v] = 0
-        self.brr_header[v] = 0
-        self.env[v] = 0
-        self.hidden_env[v] = 0
-        self.env_mode[v] = ENV_ATTACK
-        self.kon_delay[v] = 5             # hardware delays the first output
-        for i in range(4):
-            self.hist[v][i] = 0
-        self.reg[0x7C] &= <uint8_t>~(1 << v)      # clear ENDX
-        # Decode the first block here.  Leaving block_pos at 16 instead made
-        # _advance_sample treat the not-yet-read block as finished: it would
-        # skip past the sample start, or follow a stale loop pointer left by
-        # whatever this voice played last, and render arbitrary APU RAM as
-        # waveform data.
-        self._decode_block(v)
-
-    # -- BRR ---------------------------------------------------------------
-
-    cdef void _decode_block(self, int v) noexcept:
-        cdef uint16_t addr = self.brr_addr[v]
-        cdef uint8_t header = self.apu.ram[addr]
-        cdef int shift = header >> 4
-        cdef int filt = (header >> 2) & 3
-        cdef int i, nibble
-        cdef int32_t s, p1 = self.prev1[v], p2 = self.prev2[v]
-        cdef uint8_t byte
-
-        self.brr_header[v] = header
-        for i in range(16):
-            byte = self.apu.ram[<uint16_t>(addr + 1 + (i >> 1))]
-            nibble = (byte >> 4) if (i & 1) == 0 else (byte & 0x0F)
-            if nibble > 7:
-                nibble -= 16
-            if shift <= 12:
-                s = (<int32_t>nibble << shift) >> 1
-            else:
-                s = -2048 if nibble < 0 else 0     # invalid shift saturates
-
-            if filt == 1:
-                s += p1 + ((-p1) >> 4)
-            elif filt == 2:
-                s += (p1 << 1) + ((-(p1 * 3)) >> 5) - p2 + (p2 >> 4)
-            elif filt == 3:
-                s += (p1 << 1) + ((-(p1 * 13)) >> 6) - p2 + ((p2 * 3) >> 4)
-
-            s = _clip15(_clamp16(s))
-            p2 = p1
-            p1 = s
-            self.block[v][i] = <int16_t>s
-
-        self.prev1[v] = p1
-        self.prev2[v] = p2
-        self.block_pos[v] = 0
-
-    cdef void _advance_sample(self, int v) noexcept:
-        """Push the next decoded sample into the interpolation history."""
-        cdef int i
-        if self.block_pos[v] >= 16:
-            if self.brr_header[v] & 0x01:          # previous block ended
-                if self.brr_header[v] & 0x02:      # ...and loops
-                    self.brr_addr[v] = self._loop_addr(v)
-                else:
-                    self.env[v] = 0
-                    self.env_mode[v] = ENV_RELEASE
-                self.reg[0x7C] |= <uint8_t>(1 << v)
-            else:
-                self.brr_addr[v] = <uint16_t>(self.brr_addr[v] + 9)
-            self._decode_block(v)
-        for i in range(3):
-            self.hist[v][i] = self.hist[v][i + 1]
-        self.hist[v][3] = self.block[v][self.block_pos[v]]
-        self.block_pos[v] += 1
-
-    cdef uint16_t _loop_addr(self, int v) noexcept:
-        cdef uint16_t dir_addr = (<uint16_t>self.reg[0x5D] << 8) + <uint16_t>(self.reg[v * 16 + 4]) * 4
-        return (<uint16_t>self.apu.ram[<uint16_t>(dir_addr + 2)]
-                | (<uint16_t>self.apu.ram[<uint16_t>(dir_addr + 3)] << 8))
-
-    # -- envelope ------------------------------------------------------------
+    # =====================================================================
+    # the pipeline
+    # =====================================================================
+    #
+    # The chip does not compute a sample and then move on.  It walks 32 steps
+    # per sample, and at any moment eight voices are each at a different one:
+    # while voice 0 is being written out, voice 2 is reading its BRR header and
+    # voice 5 is having its envelope run.  Almost everything here that a lump
+    # of per-sample code gets wrong is a consequence of that -- a register read
+    # at step 2 and used at step 25 does not see a write that landed at step 10.
+    #
+    # The step numbering, and which voice is where on each one, is the chip's.
 
     cdef inline int _counter_poll(self, int rate) noexcept:
         if rate == 0:
             return 0
         return 1 if ((self.counter + COUNTER_OFFSET[rate]) % COUNTER_RATE[rate]) == 0 else 0
+
+    cdef inline int32_t _interpolate(self, int v) noexcept:
+        """Four taps of a gaussian kernel across the voice's ring of decoded
+        samples.  The third tap is truncated to sixteen bits before the fourth
+        is added, and the result loses its low bit."""
+        cdef int base = ((self.interp_pos[v] >> 12) + self.buf_pos[v])
+        cdef int offset = (self.interp_pos[v] >> 4) & 0xFF
+        cdef int32_t out
+        out = (<int32_t>self.gauss[255 - offset] * self.buf[v][base + 0]) >> 11
+        out += (<int32_t>self.gauss[511 - offset] * self.buf[v][base + 1]) >> 11
+        out += (<int32_t>self.gauss[256 + offset] * self.buf[v][base + 2]) >> 11
+        out = <int32_t><int16_t>out
+        out += (<int32_t>self.gauss[offset] * self.buf[v][base + 3]) >> 11
+        return _clamp16(out) & ~1
+
+    cdef void _decode_brr(self, int v) noexcept:
+        """Four samples out of one BRR byte pair, into the voice's ring."""
+        cdef int nybbles = (<int>self.t_brr_byte << 8) | self.apu.ram[
+            <uint16_t>(self.brr_addr[v] + self.brr_offset[v] + 1)]
+        cdef int header = self.t_brr_header
+        cdef int shift = header >> 4
+        cdef int filt = header & 0x0C
+        cdef int pos = self.buf_pos[v]
+        cdef int i, p1, p2
+        cdef int32_t sm
+
+        self.buf_pos[v] += 4
+        if self.buf_pos[v] >= BRR_BUF:
+            self.buf_pos[v] = 0
+
+        for i in range(4):
+            sm = <int32_t><int16_t>nybbles >> 12
+            nybbles = (nybbles << 4) & 0xFFFFFFF
+            sm = (sm << shift) >> 1
+            if shift >= 0x0D:             # an invalid shift keeps only the sign
+                sm = (sm >> 25) << 11
+            p1 = self.buf[v][pos + BRR_BUF - 1]
+            p2 = self.buf[v][pos + BRR_BUF - 2] >> 1
+            if filt >= 8:
+                sm += p1
+                sm -= p2
+                if filt == 8:
+                    sm += p2 >> 4
+                    sm += (p1 * -3) >> 6
+                else:
+                    sm += (p1 * -13) >> 7
+                    sm += (p2 * 3) >> 4
+            elif filt:
+                sm += p1 >> 1
+                sm += (-p1) >> 5
+            sm = <int32_t><int16_t>(_clamp16(sm) * 2)
+            self.buf[v][pos] = sm
+            self.buf[v][pos + BRR_BUF] = sm
+            pos += 1
 
     cdef void _run_envelope(self, int v) noexcept:
         """One step of a voice's envelope.
@@ -368,8 +377,6 @@ cdef class DSP:
         voice climbing under GAIN still leaves attack for decay when it tops
         out, even though nothing about GAIN is attacking.
         """
-        cdef uint8_t adsr1 = self.reg[v * 16 + 5]
-        cdef uint8_t adsr2 = self.reg[v * 16 + 6]
         cdef int32_t e = self.env[v]
         cdef int rate = 0, mode
         cdef int env_data
@@ -381,15 +388,15 @@ cdef class DSP:
             self.env[v] = e
             return
 
-        env_data = adsr2
-        if adsr1 & 0x80:                                   # ADSR
+        env_data = self.reg[v * 16 + 6]
+        if self.t_adsr0 & 0x80:                            # ADSR
             if self.env_mode[v] >= ENV_DECAY:
                 e = (e - 1) - ((e - 1) >> 8)
                 rate = env_data & 0x1F
                 if self.env_mode[v] == ENV_DECAY:
-                    rate = ((adsr1 >> 3) & 0x0E) + 0x10
+                    rate = ((self.t_adsr0 >> 3) & 0x0E) + 0x10
             else:                                          # attack
-                rate = ((adsr1 & 0x0F) << 1) + 1
+                rate = ((self.t_adsr0 & 0x0F) << 1) + 1
                 e += 0x20 if rate < 31 else 0x400
         else:                                              # GAIN
             env_data = self.reg[v * 16 + 7]
@@ -406,7 +413,7 @@ cdef class DSP:
                 else:                                      # linear increase
                     e += 0x20
                     # The two-slope form changes gradient on the value before
-                    # it was clamped, not after, so it needs the one kept aside.
+                    # it was clamped, not after, so it reads the one kept aside.
                     if mode > 6 and <uint32_t>self.hidden_env[v] >= 0x600:
                         e += 8 - 0x20
 
@@ -426,167 +433,329 @@ cdef class DSP:
         if self._counter_poll(rate):
             self.env[v] = e
 
-    # -- one 32 kHz sample -----------------------------------------------------
+    # -- the voice steps ----------------------------------------------------
 
-    cdef void tick(self) noexcept:
-        cdef uint8_t flg = self.reg[0x6C]
-        cdef uint8_t pmon = self.reg[0x2D]
-        cdef uint8_t non = self.reg[0x3D]
-        cdef uint8_t eon = self.reg[0x4D]
-        cdef int v, offset, rate
-        cdef int32_t pitch, sample, out, envval
-        cdef int32_t main_l = 0, main_r = 0, echo_in_l = 0, echo_in_r = 0
-        cdef int32_t echo_l = 0, echo_r = 0
-        cdef int32_t fl, fr, l, r
-        cdef uint16_t echo_addr
-        cdef int i, tap
+    cdef inline void _v1(self, int v) noexcept:
+        self.t_dir_addr = <uint16_t>((<int>self.t_dir << 8) + (<int>self.t_srcn << 2))
+        self.t_srcn = self.reg[v * 16 + 4]
 
-        self.counter -= 1
-        if self.counter < 0:
-            self.counter = 0x77FF
+    cdef inline void _v2(self, int v) noexcept:
+        cdef uint16_t entry = self.t_dir_addr
+        if not self.kon_delay[v]:
+            entry = <uint16_t>(entry + 2)
+        self.t_brr_next_addr = <uint16_t>(self.apu.ram[entry]
+                                          | (<uint16_t>self.apu.ram[<uint16_t>(entry + 1)] << 8))
+        self.t_adsr0 = self.reg[v * 16 + 5]
+        self.t_pitch = self.reg[v * 16 + 2]
 
-        if flg & 0x80:                                     # soft reset
-            for v in range(8):
+    cdef inline void _v3a(self, int v) noexcept:
+        self.t_pitch += (<int>(self.reg[v * 16 + 3] & 0x3F)) << 8
+
+    cdef inline void _v3b(self, int v) noexcept:
+        self.t_brr_byte = self.apu.ram[<uint16_t>(self.brr_addr[v] + self.brr_offset[v])]
+        self.t_brr_header = self.apu.ram[self.brr_addr[v]]
+
+    cdef void _v3c(self, int v) noexcept:
+        cdef int32_t output
+        cdef int vbit = 1 << v
+
+        if self.t_pmon & vbit:
+            self.t_pitch += ((self.t_output >> 5) * self.t_pitch) >> 10
+
+        if self.kon_delay[v]:
+            if self.kon_delay[v] == 5:
+                self.brr_addr[v] = self.t_brr_next_addr
+                self.brr_offset[v] = 1
+                self.buf_pos[v] = 0
+                self.t_brr_header = 0     # the header is ignored on this sample
+            self.env[v] = 0
+            self.hidden_env[v] = 0
+            # Decoding is held off until the last three samples of the delay.
+            self.kon_delay[v] -= 1
+            self.interp_pos[v] = 0x4000 if (self.kon_delay[v] & 3) else 0
+            self.t_pitch = 0
+
+        output = self._interpolate(v)
+        if self.t_non & vbit:
+            output = <int32_t><int16_t>(<uint16_t>(<int>self.noise * 2))
+        self.t_output = ((output * self.env[v]) >> 11) & ~1
+        self.voice_out[v] = <int16_t>self.t_output
+        self.envx_out[v] = <uint8_t>(self.env[v] >> 4)
+
+        # A block that ends without looping, or a soft reset, silences at once.
+        if (self.reg[0x6C] & 0x80) or (self.t_brr_header & 3) == 1:
+            self.env_mode[v] = ENV_RELEASE
+            self.env[v] = 0
+
+        if self.every_other:
+            if self.t_koff & vbit:
                 self.env_mode[v] = ENV_RELEASE
-                self.env[v] = 0
+            if self.kon & vbit:
+                self.kon_delay[v] = 5
+                self.env_mode[v] = ENV_ATTACK
+                self.kon_count[v] += 1
 
-        # Noise generator.
-        rate = flg & 0x1F
-        if self._counter_poll(rate):
-            i = ((<int>self.noise << 13) ^ (<int>self.noise << 14)) & 0x4000
-            self.noise = <int16_t>(i ^ ((<int>self.noise >> 1) & 0x3FFF))
-
-        for v in range(8):
-            pitch = (<int32_t>self.reg[v * 16 + 2]
-                     | (<int32_t>(self.reg[v * 16 + 3] & 0x3F) << 8))
-            if (pmon & (1 << v)) and v > 0:
-                pitch = (pitch * (self.voice_out[v - 1] + 32768)) >> 15
-
-            self.interp_pos[v] += pitch
-            while self.interp_pos[v] >= 0x1000:
-                self.interp_pos[v] -= 0x1000
-                self._advance_sample(v)
-
-            if self.kon_delay[v] > 0:
-                self.kon_delay[v] -= 1
-                self.voice_out[v] = 0
-                self.reg[v * 16 + 8] = 0
-                self.reg[v * 16 + 9] = 0
-                continue
-
-            if non & (1 << v):
-                sample = <int32_t><int16_t>(<uint16_t>(<int>self.noise << 1))
-            else:
-                offset = (self.interp_pos[v] >> 4) & 0xFF
-                out = (<int32_t>self.gauss[255 - offset] * self.hist[v][0]) >> 11
-                out += (<int32_t>self.gauss[511 - offset] * self.hist[v][1]) >> 11
-                out += (<int32_t>self.gauss[256 + offset] * self.hist[v][2]) >> 11
-                out = <int32_t><int16_t>out
-                out += (<int32_t>self.gauss[offset] * self.hist[v][3]) >> 11
-                sample = _clamp16(out)
-
+        if not self.kon_delay[v]:
             self._run_envelope(v)
-            envval = self.env[v]
-            sample = (sample * envval) >> 11
-            self.voice_out[v] = <int16_t>sample
 
-            self.reg[v * 16 + 8] = <uint8_t>(envval >> 4)
-            self.reg[v * 16 + 9] = <uint8_t>((sample >> 8) & 0xFF)
+    cdef inline void _voice_output(self, int v, int ch) noexcept:
+        cdef int32_t amp
+        if self.solo >= 0 and v != self.solo:
+            return
+        amp = (self.t_output * <int32_t><signed char>self.reg[v * 16 + ch]) >> 7
+        self.t_main_out[ch] = _clamp16(self.t_main_out[ch] + amp)
+        if self.t_eon & (1 << v):
+            self.t_echo_out[ch] = _clamp16(self.t_echo_out[ch] + amp)
 
-            if self.solo >= 0 and v != self.solo:
-                continue
-            l = (sample * <int32_t><signed char>self.reg[v * 16 + 0]) >> 7
-            r = (sample * <int32_t><signed char>self.reg[v * 16 + 1]) >> 7
-            main_l += l
-            main_r += r
-            if eon & (1 << v):
-                echo_in_l += l
-                echo_in_r += r
+    cdef void _v4(self, int v) noexcept:
+        self.t_looped = 0
+        if self.interp_pos[v] >= 0x4000:
+            self._decode_brr(v)
+            self.brr_offset[v] += 2
+            if self.brr_offset[v] >= 9:
+                self.brr_addr[v] = <uint16_t>(self.brr_addr[v] + 9)
+                if self.t_brr_header & 1:
+                    self.brr_addr[v] = self.t_brr_next_addr
+                    self.t_looped = <uint8_t>(1 << v)
+                self.brr_offset[v] = 1
 
-        # -- echo ------------------------------------------------------------
-        #
-        # The registers that say *where* the echo buffer is are not read fresh
-        # every sample.  ESA is latched, and the pointer built from it at the
-        # start of a sample is the one both the read and the write use, so a
-        # program that moves the buffer sees the move take effect on the next
-        # sample rather than half way through this one.  EDL is looked at only
-        # when the offset is back at zero, so a length written part-way through
-        # a pass does not take effect until the pass ends -- which is what
-        # stops a shortened buffer from leaving the pointer outside it.
-        echo_addr = <uint16_t>((<int>self.echo_esa << 8) + self.echo_offset)
+        self.interp_pos[v] = (self.interp_pos[v] & 0x3FFF) + self.t_pitch
+        if self.interp_pos[v] > 0x7FFF:
+            self.interp_pos[v] = 0x7FFF
+        self._voice_output(v, 0)
 
-        # A sample coming out of the buffer is halved on the way into the
-        # filter's history, and the coefficients then divide by 64 rather than
-        # 128.  The product is the same but the bit lost in the halving is
-        # not, and the filter is where that shows.
-        fl = <int32_t><int16_t>(<uint16_t>(self.apu.ram[echo_addr]
-                                           | (<uint16_t>self.apu.ram[<uint16_t>(echo_addr + 1)] << 8))) >> 1
-        fr = <int32_t><int16_t>(<uint16_t>(self.apu.ram[<uint16_t>(echo_addr + 2)]
-                                           | (<uint16_t>self.apu.ram[<uint16_t>(echo_addr + 3)] << 8))) >> 1
-        self.fir_l[self.fir_pos] = fl
-        self.fir_r[self.fir_pos] = fr
+    cdef inline void _v5(self, int v) noexcept:
+        cdef int endx
+        self._voice_output(v, 1)
+        # ENDX, OUTX and ENVX do not take a write made one or two steps before
+        # the pipeline writes them, which is what these buffers are for.
+        endx = self.reg[0x7C] | self.t_looped
+        if self.kon_delay[v] == 5:
+            endx &= ~(1 << v)
+        self.endx_buf = <uint8_t>endx
 
-        # Seven taps accumulate without limit; the eighth is added to a total
-        # that has already been truncated to sixteen bits, and only then is the
-        # result clamped.  Summing all eight and clamping once is not the same
-        # arithmetic and does not overflow the same way.
-        for tap in range(7):
-            i = (self.fir_pos - 7 + tap) & 7
-            echo_l += (self.fir_l[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 6
-            echo_r += (self.fir_r[i] * <int32_t><signed char>self.reg[(tap << 4) + 0x0F]) >> 6
-        echo_l = <int32_t><int16_t>echo_l
-        echo_r = <int32_t><int16_t>echo_r
-        i = self.fir_pos
-        echo_l += <int32_t><int16_t>((self.fir_l[i] * <int32_t><signed char>self.reg[0x7F]) >> 6)
-        echo_r += <int32_t><int16_t>((self.fir_r[i] * <int32_t><signed char>self.reg[0x7F]) >> 6)
-        # The filter's output carries an even number of units into everything
-        # downstream: the low bit is dropped, not rounded.
-        echo_l = _clamp16(echo_l) & ~1
-        echo_r = _clamp16(echo_r) & ~1
-        self.fir_pos = (self.fir_pos + 1) & 7
+    cdef inline void _v6(self, int v) noexcept:
+        self.outx_buf = <uint8_t>((self.t_output >> 8) & 0xFF)
 
-        if not (self.echo_flg & 0x20):             # echo writes enabled
-            l = _clamp16(echo_in_l + ((echo_l * <int32_t><signed char>self.reg[0x0D]) >> 7)) & ~1
-            r = _clamp16(echo_in_r + ((echo_r * <int32_t><signed char>self.reg[0x0D]) >> 7)) & ~1
-            self.apu.ram[echo_addr] = <uint8_t>(l & 0xFF)
-            self.apu.ram[<uint16_t>(echo_addr + 1)] = <uint8_t>((l >> 8) & 0xFF)
-            self.apu.ram[<uint16_t>(echo_addr + 2)] = <uint8_t>(r & 0xFF)
-            self.apu.ram[<uint16_t>(echo_addr + 3)] = <uint8_t>((r >> 8) & 0xFF)
+    cdef inline void _v7(self, int v) noexcept:
+        self.reg[0x7C] = self.endx_buf
+        self.envx_buf = self.envx_out[v]
 
-        # Only now are the two placement registers looked at, for next time.
+    cdef inline void _v8(self, int v) noexcept:
+        self.reg[v * 16 + 9] = self.outx_buf
+
+    cdef inline void _v9(self, int v) noexcept:
+        self.reg[v * 16 + 8] = self.envx_buf
+
+    cdef inline void _v3(self, int v) noexcept:
+        self._v3a(v)
+        self._v3b(v)
+        self._v3c(v)
+
+    # -- the echo steps -----------------------------------------------------
+
+    cdef inline int32_t _echo_read(self, int ch) noexcept:
+        cdef uint16_t a = <uint16_t>(self.t_echo_ptr + ch * 2)
+        return <int32_t><int16_t>(<uint16_t>(self.apu.ram[a]
+                                             | (<uint16_t>self.apu.ram[<uint16_t>(a + 1)] << 8))) >> 1
+
+    cdef inline int32_t _fir(self, int i, int ch) noexcept:
+        cdef int j = self.echo_hist_pos + i + 1
+        cdef int32_t s = self.echo_hist_l[j] if ch == 0 else self.echo_hist_r[j]
+        return (s * <int32_t><signed char>self.reg[(i << 4) + 0x0F]) >> 6
+
+    cdef void _echo_22(self) noexcept:
+        self.echo_hist_pos += 1
+        if self.echo_hist_pos >= ECHO_HIST:
+            self.echo_hist_pos = 0
+        self.t_echo_ptr = <uint16_t>((<int>self.echo_esa << 8) + self.echo_offset)
+        self.echo_hist_l[self.echo_hist_pos] = self._echo_read(0)
+        self.echo_hist_l[self.echo_hist_pos + ECHO_HIST] = self.echo_hist_l[self.echo_hist_pos]
+        self.t_echo_in[0] = self._fir(0, 0)
+        self.t_echo_in[1] = self._fir(0, 1)
+
+    cdef void _echo_23(self) noexcept:
+        self.t_echo_in[0] += self._fir(1, 0) + self._fir(2, 0)
+        self.t_echo_in[1] += self._fir(1, 1) + self._fir(2, 1)
+        self.echo_hist_r[self.echo_hist_pos] = self._echo_read(1)
+        self.echo_hist_r[self.echo_hist_pos + ECHO_HIST] = self.echo_hist_r[self.echo_hist_pos]
+
+    cdef void _echo_24(self) noexcept:
+        self.t_echo_in[0] += self._fir(3, 0) + self._fir(4, 0) + self._fir(5, 0)
+        self.t_echo_in[1] += self._fir(3, 1) + self._fir(4, 1) + self._fir(5, 1)
+
+    cdef void _echo_25(self) noexcept:
+        cdef int32_t l = self.t_echo_in[0] + self._fir(6, 0)
+        cdef int32_t r = self.t_echo_in[1] + self._fir(6, 1)
+        l = <int32_t><int16_t>l
+        r = <int32_t><int16_t>r
+        l += <int32_t><int16_t>self._fir(7, 0)
+        r += <int32_t><int16_t>self._fir(7, 1)
+        self.t_echo_in[0] = _clamp16(l) & ~1
+        self.t_echo_in[1] = _clamp16(r) & ~1
+
+    cdef inline int32_t _echo_output(self, int ch) noexcept:
+        cdef int32_t out = <int32_t><int16_t>(
+            (self.t_main_out[ch] * <int32_t><signed char>self.reg[0x0C + ch * 0x10]) >> 7)
+        if self.echo_enabled:
+            out += <int32_t><int16_t>(
+                (self.t_echo_in[ch] * <int32_t><signed char>self.reg[0x2C + ch * 0x10]) >> 7)
+        return _clamp16(out)
+
+    cdef void _echo_26(self) noexcept:
+        cdef int32_t l, r
+        self.t_main_out[0] = self._echo_output(0)
+        l = self.t_echo_out[0] + <int32_t><int16_t>(
+            (self.t_echo_in[0] * <int32_t><signed char>self.reg[0x0D]) >> 7)
+        r = self.t_echo_out[1] + <int32_t><int16_t>(
+            (self.t_echo_in[1] * <int32_t><signed char>self.reg[0x0D]) >> 7)
+        self.t_echo_out[0] = _clamp16(l) & ~1
+        self.t_echo_out[1] = _clamp16(r) & ~1
+
+    cdef void _echo_27(self) noexcept:
+        cdef int32_t l = self.t_main_out[0]
+        cdef int32_t r = self._echo_output(1)
+        self.t_main_out[0] = 0
+        self.t_main_out[1] = 0
+        if self.reg[0x6C] & 0x40:                # mute
+            l = 0
+            r = 0
+        self.last_l = <int16_t>l
+        self.last_r = <int16_t>r
+        if self.out_count < OUT_SAMPLES:
+            self.out_buf[self.out_write * 2] = <int16_t>l
+            self.out_buf[self.out_write * 2 + 1] = <int16_t>r
+            self.out_write = (self.out_write + 1) % OUT_SAMPLES
+            self.out_count += 1
+
+    cdef void _echo_28(self) noexcept:
+        self.echo_flg = self.reg[0x6C]
+
+    cdef inline void _echo_write(self, int ch) noexcept:
+        cdef uint16_t a
+        if not (self.echo_flg & 0x20):
+            a = <uint16_t>(self.t_echo_ptr + ch * 2)
+            self.apu.ram[a] = <uint8_t>(self.t_echo_out[ch] & 0xFF)
+            self.apu.ram[<uint16_t>(a + 1)] = <uint8_t>((self.t_echo_out[ch] >> 8) & 0xFF)
+        self.t_echo_out[ch] = 0
+
+    cdef void _echo_29(self) noexcept:
+        # Where the buffer is, and how long, are settled here -- after this
+        # sample has already read and written through the pointer built at step
+        # 22.  A program that moves the buffer sees the move next sample, and
+        # one that shortens it sees that only when the pass comes round again.
         self.echo_esa = self.reg[0x6D]
         if self.echo_offset == 0:
-            self.echo_length = (<int>(self.reg[0x7D] & 0x0F)) * 2048
+            self.echo_length = (<int>(self.reg[0x7D] & 0x0F)) * 0x800
         self.echo_offset += 4
         if self.echo_offset >= self.echo_length:
             self.echo_offset = 0
-        self.echo_flg = flg
+        self._echo_write(0)
+        self.echo_flg = self.reg[0x6C]
 
-        # -- master mix ---------------------------------------------------------
-        l = (main_l * <int32_t><signed char>self.reg[0x0C]) >> 7
-        r = (main_r * <int32_t><signed char>self.reg[0x1C]) >> 7
-        if self.echo_enabled:
-            l += (echo_l * <int32_t><signed char>self.reg[0x2C]) >> 7
-            r += (echo_r * <int32_t><signed char>self.reg[0x3C]) >> 7
-        l = _clamp16(l)
-        r = _clamp16(r)
-        if flg & 0x40:                              # mute
-            l = 0
-            r = 0
+    cdef void _echo_30(self) noexcept:
+        self._echo_write(1)
 
-        self.last_l = <int16_t>l
-        self.last_r = <int16_t>r
-        self.out_buf[self.out_write * 2 + 0] = <int16_t>l
-        self.out_buf[self.out_write * 2 + 1] = <int16_t>r
-        self.out_write = (self.out_write + 1) % OUT_SAMPLES
-        if self.out_count < OUT_SAMPLES:
-            self.out_count += 1
-        else:                                       # ring full: drop the oldest
-            self.out_read = (self.out_read + 1) % OUT_SAMPLES
+    # -- the steps that belong to no voice ----------------------------------
 
+    cdef void _misc_27(self) noexcept:
+        self.t_pmon = self.reg[0x2D] & 0xFE      # voice 0 has nothing before it
 
+    cdef void _misc_28(self) noexcept:
+        self.t_non = self.reg[0x3D]
+        self.t_eon = self.reg[0x4D]
+        self.t_dir = self.reg[0x5D]
 
+    cdef void _misc_29(self) noexcept:
+        self.every_other ^= 1
+        if self.every_other:
+            self.new_kon &= ~self.kon
 
+    cdef void _misc_30(self) noexcept:
+        cdef int fb
+        if self.every_other:
+            self.kon = self.new_kon
+            self.t_koff = self.reg[0x5C]
+        self.counter -= 1
+        if self.counter < 0:
+            self.counter = 0x77FF
+        if self._counter_poll(self.reg[0x6C] & 0x1F):
+            fb = ((<int>self.noise << 13) ^ (<int>self.noise << 14)) & 0x4000
+            self.noise = <int16_t>(fb ^ ((<int>self.noise >> 1) & 0x3FFF))
+
+    # -- one step -----------------------------------------------------------
+
+    cdef void tick(self) noexcept:
+        """One of the chip's 32 steps.  Which voices are doing what on each is
+        the table the hardware runs; the shape of it is why a voice's output
+        appears several steps after its envelope was decided."""
+        cdef int p = self.phase
+        self.phase = (p + 1) & 31
+
+        if p == 0:
+            self._v5(0); self._v2(1)
+        elif p == 1:
+            self._v6(0); self._v3(1)
+        elif p == 2:
+            self._v7(0); self._v4(1); self._v1(3)
+        elif p == 3:
+            self._v8(0); self._v5(1); self._v2(2)
+        elif p == 4:
+            self._v9(0); self._v6(1); self._v3(2)
+        elif p == 5:
+            self._v7(1); self._v4(2); self._v1(4)
+        elif p == 6:
+            self._v8(1); self._v5(2); self._v2(3)
+        elif p == 7:
+            self._v9(1); self._v6(2); self._v3(3)
+        elif p == 8:
+            self._v7(2); self._v4(3); self._v1(5)
+        elif p == 9:
+            self._v8(2); self._v5(3); self._v2(4)
+        elif p == 10:
+            self._v9(2); self._v6(3); self._v3(4)
+        elif p == 11:
+            self._v7(3); self._v4(4); self._v1(6)
+        elif p == 12:
+            self._v8(3); self._v5(4); self._v2(5)
+        elif p == 13:
+            self._v9(3); self._v6(4); self._v3(5)
+        elif p == 14:
+            self._v7(4); self._v4(5); self._v1(7)
+        elif p == 15:
+            self._v8(4); self._v5(5); self._v2(6)
+        elif p == 16:
+            self._v9(4); self._v6(5); self._v3(6)
+        elif p == 17:
+            self._v1(0); self._v7(5); self._v4(6)
+        elif p == 18:
+            self._v8(5); self._v5(6); self._v2(7)
+        elif p == 19:
+            self._v9(5); self._v6(6); self._v3(7)
+        elif p == 20:
+            self._v1(1); self._v7(6); self._v4(7)
+        elif p == 21:
+            self._v8(6); self._v5(7); self._v2(0)
+        elif p == 22:
+            self._v3a(0); self._v9(6); self._v6(7); self._echo_22()
+        elif p == 23:
+            self._v7(7); self._echo_23()
+        elif p == 24:
+            self._v8(7); self._echo_24()
+        elif p == 25:
+            self._v3b(0); self._v9(7); self._echo_25()
+        elif p == 26:
+            self._echo_26()
+        elif p == 27:
+            self._misc_27(); self._echo_27()
+        elif p == 28:
+            self._misc_28(); self._echo_28()
+        elif p == 29:
+            self._misc_29(); self._echo_29()
+        elif p == 30:
+            self._misc_30(); self._v3c(0); self._echo_30()
+        else:
+            self._v4(0); self._v1(2)
 
     def set_solo(self, int v):
         self.solo = v
@@ -608,50 +777,75 @@ cdef class DSP:
 
     def state_ints(self):
         cdef int i, j
-        v = [self.counter, self.noise, self.echo_offset, self.echo_length, self.fir_pos, self.last_l, self.last_r]
+        v = [self.counter, self.noise, self.echo_offset, self.echo_length, self.echo_esa, self.echo_flg, self.echo_hist_pos, self.last_l, self.last_r, self.phase, self.every_other, self.kon, self.new_kon, self.t_koff, self.t_pmon, self.t_non, self.t_eon, self.t_dir, self.t_dir_addr, self.t_brr_next_addr, self.t_echo_ptr, self.t_srcn, self.t_adsr0, self.t_brr_byte, self.t_brr_header, self.t_looped, self.t_pitch, self.t_output, self.endx_buf, self.outx_buf, self.envx_buf]
         for i in range(8):
             v.append(self.brr_addr[i])
         for i in range(8):
             v.append(self.brr_offset[i])
         for i in range(8):
-            v.append(self.brr_header[i])
-        for i in range(8):
-            v.append(self.block_pos[i])
+            v.append(self.buf_pos[i])
         for i in range(8):
             v.append(self.interp_pos[i])
         for i in range(8):
             v.append(self.env[i])
         for i in range(8):
+            v.append(self.hidden_env[i])
+        for i in range(8):
             v.append(self.env_mode[i])
         for i in range(8):
             v.append(self.kon_delay[i])
         for i in range(8):
-            v.append(self.prev1[i])
-        for i in range(8):
-            v.append(self.prev2[i])
+            v.append(self.envx_out[i])
         for i in range(8):
             v.append(self.voice_out[i])
+        for i in range(16):
+            v.append(self.echo_hist_l[i])
+        for i in range(16):
+            v.append(self.echo_hist_r[i])
+        for i in range(2):
+            v.append(self.t_main_out[i])
+        for i in range(2):
+            v.append(self.t_echo_out[i])
+        for i in range(2):
+            v.append(self.t_echo_in[i])
         for i in range(8):
-            v.append(self.fir_l[i])
-        for i in range(8):
-            v.append(self.fir_r[i])
-        for i in range(8):
-            for j in range(4):
-                v.append(self.hist[i][j])
-        for i in range(8):
-            for j in range(16):
-                v.append(self.block[i][j])
+            for j in range(24):
+                v.append(self.buf[i][j])
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 7
+        cdef int i, j, k = 31
         self.counter = v[0]
         self.noise = v[1]
         self.echo_offset = v[2]
         self.echo_length = v[3]
-        self.fir_pos = v[4]
-        self.last_l = v[5]
-        self.last_r = v[6]
+        self.echo_esa = v[4]
+        self.echo_flg = v[5]
+        self.echo_hist_pos = v[6]
+        self.last_l = v[7]
+        self.last_r = v[8]
+        self.phase = v[9]
+        self.every_other = v[10]
+        self.kon = v[11]
+        self.new_kon = v[12]
+        self.t_koff = v[13]
+        self.t_pmon = v[14]
+        self.t_non = v[15]
+        self.t_eon = v[16]
+        self.t_dir = v[17]
+        self.t_dir_addr = v[18]
+        self.t_brr_next_addr = v[19]
+        self.t_echo_ptr = v[20]
+        self.t_srcn = v[21]
+        self.t_adsr0 = v[22]
+        self.t_brr_byte = v[23]
+        self.t_brr_header = v[24]
+        self.t_looped = v[25]
+        self.t_pitch = v[26]
+        self.t_output = v[27]
+        self.endx_buf = v[28]
+        self.outx_buf = v[29]
+        self.envx_buf = v[30]
         for i in range(8):
             self.brr_addr[i] = v[k + i]
         k += 8
@@ -659,10 +853,7 @@ cdef class DSP:
             self.brr_offset[i] = v[k + i]
         k += 8
         for i in range(8):
-            self.brr_header[i] = v[k + i]
-        k += 8
-        for i in range(8):
-            self.block_pos[i] = v[k + i]
+            self.buf_pos[i] = v[k + i]
         k += 8
         for i in range(8):
             self.interp_pos[i] = v[k + i]
@@ -671,34 +862,39 @@ cdef class DSP:
             self.env[i] = v[k + i]
         k += 8
         for i in range(8):
+            self.hidden_env[i] = v[k + i]
+        k += 8
+        for i in range(8):
             self.env_mode[i] = v[k + i]
         k += 8
         for i in range(8):
             self.kon_delay[i] = v[k + i]
         k += 8
         for i in range(8):
-            self.prev1[i] = v[k + i]
-        k += 8
-        for i in range(8):
-            self.prev2[i] = v[k + i]
+            self.envx_out[i] = v[k + i]
         k += 8
         for i in range(8):
             self.voice_out[i] = v[k + i]
         k += 8
+        for i in range(16):
+            self.echo_hist_l[i] = v[k + i]
+        k += 16
+        for i in range(16):
+            self.echo_hist_r[i] = v[k + i]
+        k += 16
+        for i in range(2):
+            self.t_main_out[i] = v[k + i]
+        k += 2
+        for i in range(2):
+            self.t_echo_out[i] = v[k + i]
+        k += 2
+        for i in range(2):
+            self.t_echo_in[i] = v[k + i]
+        k += 2
         for i in range(8):
-            self.fir_l[i] = v[k + i]
-        k += 8
-        for i in range(8):
-            self.fir_r[i] = v[k + i]
-        k += 8
-        for i in range(8):
-            for j in range(4):
-                self.hist[i][j] = v[k + i * 4 + j]
-        k += 32
-        for i in range(8):
-            for j in range(16):
-                self.block[i][j] = v[k + i * 16 + j]
-        k += 128
+            for j in range(24):
+                self.buf[i][j] = v[k + i * 24 + j]
+        k += 192
 
     def state_blobs(self):
         return [PyBytes_FromStringAndSize(<char *>self.reg, 128)]
@@ -818,9 +1014,10 @@ cdef class APU:
         cdef int32_t period
         cdef uint8_t target
 
-        self.dsp_counter -= cycles
-        while self.dsp_counter <= 0:
-            self.dsp_counter += DSP_DIV
+        # The DSP is clocked at the SPC700's rate and takes 32 of those to
+        # produce a sample, so one step per cycle is the hardware's own
+        # arrangement rather than a subdivision of ours.
+        for i in range(cycles):
             self.dsp.tick()
 
         # Three stages, and only the last two belong to the timer.  Stage one
@@ -1948,8 +2145,9 @@ cdef class APU:
         self.dsp.write_reg(<uint8_t>addr, <uint8_t>value)
 
     def dsp_tick(self, int n):
+        """Advance the DSP by n samples -- 32 of its steps each."""
         cdef int i
-        for i in range(n):
+        for i in range(n * 32):
             self.dsp.tick()
 
     @staticmethod

@@ -123,17 +123,17 @@ The largest single gap. Everything below the first item depends on it.
       timer is enabled; an enable resets the divisor and the output counter
       but not it.  All three used to be reset together, which put every timer
       in phase with whenever it was switched on
-- [~] **DSP as a 32-step pipeline** rather than one lump per sample.  The echo
-      half is done and `spc_dsp6` passes all eight of its echo sections against
-      three before: ESA is latched so a sample's read and write use the same
-      pointer, EDL is read only at the start of a pass, and the FIR halves on
-      the way in and divides by 64 rather than 128.  Levels measured unchanged
-      on four titles.  The envelope's shape is corrected too -- the mode
-      changes happen outside the branch that computes the value, so a voice
-      climbing under GAIN still leaves attack for decay.
-      What is left needs the steps to exist: ADSR0 is latched at one step and
-      the envelope runs at a later one, and KON/KOFF are acted on every other
-      sample
+- [~] **DSP as a 32-step pipeline** rather than one lump per sample.  Written
+      as the chip's own 32 steps, with eight voices each at a different one at
+      any moment.  `spc_dsp6` goes from three passing sections to twelve: the
+      whole echo unit, and the envelope's attack, decay and rates.  KON and
+      KOFF are acted on every other sample; ENDX, OUTX and ENVX are written
+      back from buffers; ESA and EDL are latched.  It also turned up that the
+      audio was 6 dB quiet -- the decoder's 15-bit sample is carried doubled,
+      and both this and the independent decoder in `test_dsp.py` kept the
+      undoubled value, so they agreed with each other and neither was right.
+      Faster as well, at 99 fps against 81.
+      One section left: "Envelope/gain SL=8 threshold"
 - [ ] The real gaussian table from the chip, replacing the generated one
 - [ ] $2140-$2143 access timing against the SPC700's own clock
 

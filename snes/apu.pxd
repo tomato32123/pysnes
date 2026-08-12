@@ -10,18 +10,15 @@ cdef class DSP:
     # -- per-voice state ---------------------------------------------------
     cdef uint16_t brr_addr[8]
     cdef int brr_offset[8]
-    cdef uint8_t brr_header[8]
-    cdef int block_pos[8]
-    cdef int16_t block[8][16]
-    cdef int32_t hist[8][4]
+    cdef int32_t buf[8][24]        # decoded samples, ring, kept twice over
+    cdef int buf_pos[8]
     cdef int32_t interp_pos[8]
     cdef int32_t env[8]
     cdef int32_t hidden_env[8]     # before clamping; the two-slope gain reads it
     cdef int env_mode[8]
     cdef int kon_delay[8]
-    cdef int32_t prev1[8]
-    cdef int32_t prev2[8]
-    cdef int16_t voice_out[8]
+    cdef uint8_t envx_out[8]
+    cdef int16_t voice_out[8]      # the last output of each voice, for tools
 
     # -- global ------------------------------------------------------------
     cdef int counter
@@ -30,10 +27,23 @@ cdef class DSP:
     cdef int echo_length
     cdef uint8_t echo_esa           # ESA, latched: where the buffer is now
     cdef uint8_t echo_flg           # FLG, latched: whether writes are allowed
-    cdef int32_t fir_l[8]
-    cdef int32_t fir_r[8]
-    cdef int fir_pos
+    cdef int32_t echo_hist_l[16]    # eight taps, kept twice over
+    cdef int32_t echo_hist_r[16]
+    cdef int echo_hist_pos
     cdef int16_t last_l, last_r
+
+    # -- where the chip is in its sample, and what it read on the way --------
+    cdef int phase
+    cdef int every_other
+    cdef uint8_t kon, new_kon, t_koff
+    cdef uint8_t t_pmon, t_non, t_eon, t_dir
+    cdef uint16_t t_dir_addr, t_brr_next_addr, t_echo_ptr
+    cdef uint8_t t_srcn, t_adsr0, t_brr_byte, t_brr_header, t_looped
+    cdef int32_t t_pitch, t_output
+    cdef int32_t t_main_out[2]
+    cdef int32_t t_echo_out[2]
+    cdef int32_t t_echo_in[2]
+    cdef uint8_t endx_buf, outx_buf, envx_buf
     cdef int solo                   # -1 = normal mix, else only this voice
     cdef int echo_enabled           # diagnostics: force the echo unit off
     cdef int kon_count[8]           # diagnostics: key-on events per voice
@@ -46,12 +56,40 @@ cdef class DSP:
     cdef uint8_t read_reg(self, uint8_t addr) noexcept
     cdef void write_reg(self, uint8_t addr, uint8_t value) noexcept
     cdef void tick(self) noexcept          # one 32 kHz sample
-    cdef void _key_on(self, int v) noexcept
-    cdef void _decode_block(self, int v) noexcept
-    cdef void _advance_sample(self, int v) noexcept
-    cdef uint16_t _loop_addr(self, int v) noexcept
     cdef int _counter_poll(self, int rate) noexcept
     cdef void _run_envelope(self, int v) noexcept
+    cdef int32_t _interpolate(self, int v) noexcept
+    cdef void _decode_brr(self, int v) noexcept
+    cdef void _v1(self, int v) noexcept
+    cdef void _v2(self, int v) noexcept
+    cdef void _v3(self, int v) noexcept
+    cdef void _v3a(self, int v) noexcept
+    cdef void _v3b(self, int v) noexcept
+    cdef void _v3c(self, int v) noexcept
+    cdef void _v4(self, int v) noexcept
+    cdef void _v5(self, int v) noexcept
+    cdef void _v6(self, int v) noexcept
+    cdef void _v7(self, int v) noexcept
+    cdef void _v8(self, int v) noexcept
+    cdef void _v9(self, int v) noexcept
+    cdef void _voice_output(self, int v, int ch) noexcept
+    cdef int32_t _echo_read(self, int ch) noexcept
+    cdef int32_t _fir(self, int i, int ch) noexcept
+    cdef int32_t _echo_output(self, int ch) noexcept
+    cdef void _echo_write(self, int ch) noexcept
+    cdef void _echo_22(self) noexcept
+    cdef void _echo_23(self) noexcept
+    cdef void _echo_24(self) noexcept
+    cdef void _echo_25(self) noexcept
+    cdef void _echo_26(self) noexcept
+    cdef void _echo_27(self) noexcept
+    cdef void _echo_28(self) noexcept
+    cdef void _echo_29(self) noexcept
+    cdef void _echo_30(self) noexcept
+    cdef void _misc_27(self) noexcept
+    cdef void _misc_28(self) noexcept
+    cdef void _misc_29(self) noexcept
+    cdef void _misc_30(self) noexcept
 
 
 cdef class APU:
