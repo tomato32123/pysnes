@@ -14,7 +14,7 @@ NO_ROM = 77          # the exit code tools/runtests.py reads as a skip
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def rom_path(explicit=None):
+def rom_path(explicit=None, quiet=False):
     if explicit:
         return _check(explicit)
 
@@ -33,18 +33,21 @@ def rom_path(explicit=None):
 
     # Exit 77 rather than 1: without a ROM these tools cannot run at all,
     # which is not the same as failing.  The test runner reads it as a skip,
-    # so a machine with no ROM on it still gets a green suite.
-    sys.stderr.write(
-        "no ROM given.  Pass a path as the first argument, set PYSNES_ROM, or"
-        + NL + "put a single .smc/.sfc into %s" % os.path.join(ROOT, "roms") + NL)
+    # so a machine with no ROM on it still gets a green suite.  A caller that
+    # has something to do without a ROM passes quiet=True and catches it: the
+    # message is for a tool that is about to stop, not for one carrying on.
+    if not quiet:
+        sys.stderr.write(
+            "no ROM given.  Pass a path as the first argument, set PYSNES_ROM, or"
+            + NL + "put a single .smc/.sfc into %s" % os.path.join(ROOT, "roms") + NL)
     raise SystemExit(NO_ROM)
 
 
-def from_argv(index=1):
+def from_argv(index=1, quiet=False):
     """Take argv[index] as the ROM if it looks like one, else fall back."""
     if len(sys.argv) > index and sys.argv[index].lower().endswith((".smc", ".sfc")):
         return _check(sys.argv.pop(index))
-    return rom_path()
+    return rom_path(quiet=quiet)
 
 
 def _check(path):

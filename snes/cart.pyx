@@ -176,7 +176,7 @@ cdef class Cart:
         cdef bytes rom = self.rom_data
         cdef int mapmode_byte, ram_k
         cdef uint32_t total = 0
-        cdef uint32_t i
+        cdef uint32_t i, window
 
         candidates = ((0x007FB0, <int>MAP_LOROM, 0, 0),
                       (0x00FFB0, <int>MAP_HIROM, 1, 0),
@@ -209,8 +209,17 @@ cdef class Cart:
         self.checksum_complement = (rom[self.header_offset + H_CKSUM_COMP]
                                     | (rom[self.header_offset + H_CKSUM_COMP + 1] << 8))
 
-        for i in range(self.rom_size):
-            total += self.rom[i]
+        # The checksum is over the ROM *as the console addresses it*, not over
+        # the file.  A cartridge whose size is not a power of two mirrors its
+        # tail to fill the window, so those bytes are counted more than once --
+        # summing the file instead reports a mismatch for every 12, 20 or 40
+        # Mbit game.  Folding each address through the same rule the bus uses
+        # keeps the two definitions from drifting apart.
+        window = 1
+        while window < self.rom_size:
+            window <<= 1
+        for i in range(window):
+            total += self.rom[_mirror(i, self.rom_size)]
         self.computed_checksum = total & 0xFFFF
         self.checksum_ok = 1 if self.computed_checksum == self.checksum else 0
 
