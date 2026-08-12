@@ -23,8 +23,15 @@ a suspicion into a located defect.
       transfer-then-advance order, repeat and non-repeat counts, indirect
       reloads, and a mid-frame enable waiting for the next frame
 - [x] **DRAM refresh**: 40 cycles stolen once per scanline at dot 134
-- [x] **Short scanline**: line 240 of a non-interlaced odd field is 1360
-      cycles; the PAL long line is still open
+- [x] **The scanlines that are not 1364 cycles, and the frames that are not
+      262 lines.**  An NTSC machine drops a dot from line 240 of a
+      non-interlaced odd field; a PAL machine adds one to line 311 of an
+      interlaced odd field.  Each belongs to one region only, and the short
+      one used to be applied to both, which cost every PAL game four cycles
+      every other frame.  Interlace separately adds a whole scanline to the
+      field whose flag in $213F is clear -- 263 lines on NTSC, 313 on PAL --
+      which is what makes the two fields comb together.  Five tests, three of
+      which discriminate against the old behaviour
 - [~] **$4200/$4210**: enabling NMI while the flag is set fires at once, and
       the flag clears both on read and at the top of the frame; the
       single-cycle read race is still open
@@ -70,14 +77,19 @@ The largest single gap. Everything below the first item depends on it.
 - [x] **EXTBG**: mode 7's pixel feeds BG1 whole and BG2 as seven bits plus a
       priority, so BG2 straddles BG1
 - [x] **Direct colour**: an 8bpp pixel becomes a colour rather than an index,
-      with the low bit of each channel from the tilemap's palette field
+      with the low bit of each channel from the tilemap's palette field.
+      Unit-tested, but no working cartridge in the library switches it on --
+      the one title that did turned out to be a broken image reaching it by
+      accident, so treat it as unexercised
 - [x] **Mosaic**: a counter rather than a division, so a size written
       part-way down the screen lets the current block finish
 - [~] H/V counter latch: $2137 and the $4201 latch line both work and
       $213F reports and clears the flag; the single-cycle read race is open
 - [x] **Colour math**: forcing the main screen black no longer skips the
       per-layer switch in $2131, so a region asked to stay black does.
-      Six tests, one of which discriminates against the old behaviour
+      Six tests, one of which discriminates against the old behaviour.
+      41 titles use colour math; the forced-black region, like direct colour,
+      has no working cartridge behind it
 - [ ] Half-height objects under $2133 bit 1
 
 ## 4. APU
@@ -95,6 +107,12 @@ The largest single gap. Everything below the first item depends on it.
 ## 5. Cartridge and coprocessors
 
 - [x] LoROM, HiROM, ExHiROM; interleaved dumps; PAL; battery SRAM
+- [x] **The header checksum over the ROM as the console addresses it**, not
+      over the file: a cartridge whose size is not a power of two mirrors its
+      tail to fill the window, so those bytes are counted more than once.
+      Folding each address through the same rule the bus uses took the local
+      library from 19 mismatches to 7, and every one of the 7 left is a hack
+      or a translation whose header was never updated
 - [x] **A cartridge board layer**: the bus asks the board what is at each
       page, and asks it again per access for the pages a board keeps for a
       chip of its own.  Anything in $2000-$5FFF the console does not decode
@@ -113,10 +131,23 @@ The largest single gap. Everything below the first item depends on it.
       up to the console rather than the two sharing a scheduler, so a game
       that depends on which of them wins a contended cycle would not see it
 - [ ] SuperFX
-- [ ] S-DD1, SPC7110, OBC1, RTC.  These are decompressors and glue logic
-      with documented behaviour and no firmware of their own, so they can be
-      written.  S-DD1 is the one the local library wants, for Street Fighter
-      Zero 2
+- [x] **S-DD1**: mapper and decompressor.  A 32 Mbit S-DD1 cartridge fits no
+      standard map -- banks $C0-$FF are four 1 MB slots chosen by $4804-$4807
+      -- and Street Fighter Zero 2 jumps into that window three instructions
+      after reset, so the mapper alone is the difference between a black
+      screen and a running game.  On top of it, the ABS decompressor: a bit
+      reader, eight Golomb decoders, a 33-state probability ladder per
+      context, a context model over the bits already decoded in the same
+      bitplane, and the output logic for the four tile arrangements.
+      Which transfers the chip takes over is settled by measurement: a
+      channel armed in both $4800 and $4801 *and* reading from the
+      cartridge's own banks, which over 600 frames is two transfers out of
+      496.  The arming masks alone are not enough -- the game leaves them set
+      and does its sprite DMA out of WRAM on the same channel.
+      Street Fighter Zero 2 draws its Capcom logo and its title screen
+- [ ] SPC7110, OBC1, RTC.  Glue logic and decompressors with documented
+      behaviour and no firmware of their own, so they can be written; nothing
+      in the local library needs them, so they would be written blind
 - [ ] DSP-1/2/3/4, CX4, ST010/011.  Each is a microcontroller running a
       program mask-ROMed into it, and that dump is not here.  Without it the
       only route is reimplementing what the program does from its documented
@@ -147,7 +178,11 @@ This is the part that decides whether any of the above converges.
 - [x] DMA and HDMA timing tests; PPU register timing still open
 - [x] Open bus suite, and display-mode tests for overscan, hires,
       interlace, EXTBG, direct colour and mosaic
-- [ ] SPC700 and DSP test ROMs
+- [~] **SPC700 and DSP test ROMs**: fetched and running.  `tools/testroms.py`
+      boots a directory of them and captures each verdict.  All four fail
+      today -- `spc_smp`, `spc_mem_access_times`, `spc_timer` and `spc_dsp6`
+      -- which is what the three open APU items predict.  The tests are the
+      apparatus, not the fix; the fixes are section 4
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images

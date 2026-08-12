@@ -5,9 +5,14 @@ thing still open, what it actually is, where in the code it goes, how you
 would know you got it right, and what — if anything — makes it impossible
 today. Written so it can be picked up cold.
 
-As of this writing: **36 done, 6 partial, 9 untouched** of 52 items. The
-66-ROM local library boots 61 titles; the five that do not are listed at the
-end with what is known about each.
+As of this writing: **38 done, 6 partial, 7 untouched** of 52 items. The
+66-ROM local library boots 63 titles; the three that do not are listed at the
+end. One wants a coprocessor whose firmware is not here, and two are
+defective ROM images — proved defective, not assumed so. No title in the
+library now fails for a reason inside this emulator.
+
+The 63rd is Street Fighter Zero 2, which was a black screen until the S-DD1
+was written and now draws its Capcom logo and its title screen.
 
 ---
 
@@ -16,6 +21,12 @@ end with what is known about each.
 **There is no reference emulator on this machine.** No bsnes, no ares, no
 Mesen. That single absence is why six items are "partial" rather than done,
 and it is worth understanding what it costs before reading the rest.
+
+There is now one thing that partly substitutes for it, and it is worth
+knowing which parts. blargg's SPC test ROMs are here (see item 10), and they
+are a real external authority — but only over the APU. Everything to do with
+the CPU's and the PPU's timing is still checked against nothing but this
+project's own reading of the documentation.
 
 A test says a feature behaves the way the test author believed it should. A
 reference says it behaves the way the hardware does. Everything below that
@@ -74,9 +85,14 @@ read right. That is not the same as being wrong — but it is the class of
 thing that quietly stays wrong for years, and it should be the first target
 whenever a reference or a wider ROM set becomes available.
 
-Note the two entries against `Mix.smc`: it is the only title in the library
-using direct colour or the forced-black region, and it is also one of the
-three that render nothing. That is a lead, not a coincidence worth ignoring.
+Note the two entries against `Mix.smc`. That was written down as a lead, on
+the grounds that the only title using direct colour or the forced-black
+region was also one of the three rendering nothing. The lead is now closed,
+and not in the direction hoped for: `Mix.smc` turns out to be a defective ROM
+image (below), so the settings it reaches are ones a crashed program wandered
+into rather than ones a game meant. Read the table with those two rows struck
+out: **direct colour and the forced-black region have no working cartridge
+behind them either**, which puts them in the same class as the nine in bold.
 
 ---
 
@@ -151,23 +167,72 @@ turns it on, and it only means anything in interlace, which nothing turns on
 either. Guessing would produce a confident-looking implementation with a
 coin-flip chance of being backwards. Wait for a reference.
 
-### 6. S-DD1
+### 6. S-DD1 — done
 
-*Where*: new `snes/sddi.pyx` alongside `snes/sa1.pyx`, registered in
-`snes/board.pyx`.
+*Where*: `snes/sdd1.pyx`, registered in `snes/board.pyx`.
 
-A decompressor on the cartridge. **No firmware**: it is an arithmetic
-decoder with a documented algorithm, so unlike DSP-1 it can be written.
+The chip is two things sharing eight registers, and they came apart cleanly.
 
-*Why it is next in line*: Street Fighter Zero 2 is in the library, renders
-nothing today, and would go from a black screen to a working game. That
-makes it the only remaining coprocessor with a verification target already
-to hand.
+**The mapper is written.** A 32 Mbit S-DD1 cartridge fits no standard map:
+banks $C0-$FF are a 4 MB window of four 1 MB slots, and `$4804-$4807` say
+which megabyte each slot shows. Below $C0 it is an ordinary LoROM. Street
+Fighter Zero 2 does `JML $C00000` three instructions after reset, so with no
+mapper it lands on the ROM's first bytes read through the wrong window,
+executes them, and traps. With the mapper it boots, runs, and draws — packed
+graphics as vertical stripes, because the second half is missing.
+`tests/test_sdd1.py` drives all of this from a 65816 program on a cartridge
+whose header says S-DD1, so the board is chosen the way a real one is.
 
-*Shape*: mapper registers at `$4800-$4807`, four decompression contexts, a
-bit-serial arithmetic decoder feeding DMA. The board layer already supports
-everything needed — see `SA1.classify` returning `PK_DEVICE` and the bus
-routing unclaimed `$2000-$5FFF` out to the cartridge.
+**Which transfers the chip takes over is settled, and by measurement.** The
+answer is not in the arming registers alone. Street Fighter Zero 2 sets
+`$4800` and `$4801` to 1 at frame 10 and then leaves them there for the rest
+of the run, while doing its sprite DMA out of WRAM on that same channel 0 —
+so "the channel is armed" would decompress the sprite table. What settles it
+is where the chip is: it sits on the cartridge and can only answer for
+addresses it decodes. Arming *and* a source in the cartridge's own banks
+picks out **2 transfers out of 496** across 600 frames, both in bank $D3,
+both the shape of a graphics load:
+
+| frame | source | bytes |
+|---|---|---|
+| 10 | `$D3:FB7D` | 2048 |
+| 352 | `$D3:0000` | 1152 |
+
+Both blocks begin `B0 00`, which is the documented two-byte header.
+
+The bus tells the board when a channel starts and finishes a transfer
+(`Board.dma_begin` / `dma_end`), because a chip on the cartridge cannot see
+`$420B` but does see the reads that follow it.
+
+**The decompressor is written too**, and Street Fighter Zero 2 draws its
+Capcom logo and its title screen.
+
+It is worth recording how, because the shape of it is the lesson. The
+algorithm is Ricoh's ABS: a bit reader, eight Golomb decoders, a 33-state
+probability ladder per context, and a context model that predicts a pixel
+from the bits already decoded above and to the left of it in the same
+bitplane. All of that is describable. What is not derivable is two tables of
+constants — the probability ladder and a 128-entry run-length table — which
+are hardware design data.
+
+Those were fetched rather than reasoned out, and that was the right call:
+the version written from memory first had at least four states wrong,
+including one in the middle of the ladder that would have quietly corrupted
+about a quarter of all runs. The tables are transcribed from the public
+description of the algorithm reverse-engineered by Andreas Naive, with The
+Dumper's hardware data behind it; the code around them is written here.
+
+The remaining risk with transcribed constants is a typo, not a
+misunderstanding, so that is what the test checks: the run table has to be a
+permutation of 1 to 128, and the probability ladder has to be a ladder —
+right takes you one rung up, wrong one down, the ends stay put. A
+transposition cannot survive either check.
+
+*What is still approximate*: the chip streams a byte at a time as the DMA
+asks for them; here the block is unpacked up front into a buffer. The bytes
+and their order are the same, and the console is halted throughout, so
+nothing can observe the difference — but a game that armed a channel and then
+did something other than a straight DMA would not be modelled.
 
 ### 7. SPC7110, OBC1, RTC
 
@@ -200,11 +265,35 @@ older emulators got Super Mario Kart subtly wrong for years.
 Super Mario Kart is in the library and needs DSP-1. It currently renders a
 flat screen. Leave it that way rather than guess.
 
-### 10. SPC700 and DSP test ROMs
+### 10. SPC700 and DSP test ROMs — fetched, and all four fail
 
-These exist publicly and would settle items 1, 2 and 4 at a stroke. They are
-not in this repository and should not be committed to it. Fetching them is a
-decision for whoever owns the project.
+blargg's SPC tests are now on this machine, outside the repository, where
+`tools/testroms.py` will boot them and capture what each says. They are the
+first thing in this project that can say the emulator is *wrong* rather than
+merely *unchanged*: they were not written from the same reading of the
+documentation the emulator was.
+
+The verdict, as of now:
+
+| ROM | what it exercises | result |
+|---|---|---|
+| `spc_smp.sfc` | the SPC700's own instruction behaviour | **Failed 02** |
+| `spc_mem_access_times.sfc` | when within an opcode each access happens | **Failed 02** |
+| `spc_timer.sfc` | timer read against write | **Failed 02** |
+| `spc_dsp6.sfc` | the echo unit: basics, ESA and EDL changes | **Failed 02** |
+
+That is four failures, not four surprises: items 1, 2 and 4 above are exactly
+what these test, and all three were known to be unmodelled. What has changed
+is that the gap is now a number on a screen instead of a paragraph, and the
+next attempt at any of them has something to be right against.
+
+Note also what getting them to run turned up. All four have a blank internal
+header — no title, no checksum — and the header detector counted those zeros
+against a candidate, so it rejected the images outright. A zero in the title
+field is not evidence of anything; it means nobody filled it in. Other
+control bytes still count against, which is what the check was for. All 66
+cartridges in the local library detect exactly the same header at the same
+offset with the same map mode after the change.
 
 ---
 
@@ -264,18 +353,97 @@ Covered at the top. The tooling is done; the reference is not available.
 
 ---
 
-## The five titles that do not render
+## The three titles that do not render
 
 | title | status | what is known |
 |---|---|---|
-| Street Fighter Zero 2 | black | S-DD1, not implemented. Expected. |
 | Super Mario Kart | flat | DSP-1, needs firmware not present. Expected. |
-| `Mix.smc` | black | **Unexplained.** The only title using direct colour and the forced-black region. Start here. |
-| `SMWREX.smc` | black | Unexplained. Appears to be a Super Mario World hack; may be a bad or modified image. Check the header and checksum first. |
-| Kunio-kun no Dodge Ball | flat (2 colours) | **Unexplained.** Fills the screen, so it is running; something about the palette or colour math. |
+| `Mix.smc` | black | **The image is broken, not the emulator.** See below. |
+| `SMWREX.smc` | black | **The image is broken, not the emulator.** See below. |
 
-`Mix.smc` and Kunio-kun are the two worth chasing: both are ordinary LoROM
-cartridges with no coprocessor, so whatever is wrong is wrong in the core.
+Both of the two that were "unexplained" are Super Mario World hacks that
+destroy something the base game still needs, and both are proved so by
+running unmodified `Super Mario World (E)` down the same path and watching it
+work. Nothing in the library now renders nothing for a reason inside this
+emulator.
+
+Kunio-kun no Dodge Ball was on this list as "flat, unexplained". It is not:
+it draws its title screen, takes START, and reaches the team menu. What was
+being measured was a run judged before the game had drawn anything. It is the
+second time a title has been libelled by the sampling and not by the
+emulation — the first was what made `batchtest` judge on the best frame
+rather than the last — so before chasing a title that renders nothing,
+confirm it with input rather than with a fixed frame count:
+
+```
+python tools/playtest.py <rom>          # scripted buttons, screenshot per step
+```
+
+### `Mix.smc` — a defective ROM image
+
+Worth writing down in full, because the shape of the argument is reusable.
+
+The image is a Super Mario World hack, and the hack's IPS patch sits beside
+it. `Mix.smc` is byte for byte `Super Mario World (E) (V1.1)` **with its
+512-byte copier header** plus `Mix.ips`, so it is what the author shipped,
+not a bad copy of it.
+
+What the patch does, among 4869 other records, is overwrite `$00:B992-$B9AA`
+with pointer-table data. In the base ROM those 15 bytes from `$00:B997` are
+the routine that reads the next byte of a compressed stream and carries the
+pointer over a bank boundary — and the decompressor at `$00:B8F1`, which the
+patch leaves alone, still calls it. Boot therefore runs into a table:
+
+```
+$00:9399  JSR $A99A         ; still stock
+$00:A9AD  JSL $00BA3C       ; still stock -- decompress GFX file $28
+$00:BA5B  JSR $B8F1         ; still stock
+$00:B8F6  JSR $B997         ; still stock -- and $B997 is now a pointer table
+```
+
+The tell is that unmodified `Super Mario World (E)` reaches `$00:B997`
+by the same four calls at instruction 949,669 of its own boot, one frame
+either side of where `Mix.smc` arrives. The path is the base game's, not
+something the emulation invented, so there is no emulator behaviour that
+could avoid it.
+
+`MixA.smc` — the same author's next release, ver 1.52 — boots and plays.
+
+### `SMWREX.smc` — the same verdict, by a different route
+
+Also a faithful patch of `Super Mario World (E) (V1.1)`, headered, this time
+expanded to 4 MB. The mapping is not the problem, despite the size: the hack
+puts its own code in the gap before the internal header at `$00:FFAD` and
+reaches it with a `JSL`, which only works if the banks land where it is
+putting them.
+
+It never leaves forced blank. The patched reset does `SEI / CLC / XCE / JML
+$80859A` — and `$00:859A`, which the patch does not touch, is the middle of a
+table of 24-bit pointers in the base game. The CPU chews through it as
+instructions (harmlessly: `TSB` and `ORA` on ROM addresses) and falls into
+real code at `$00:85D4`, which loads a pointer from `$00:84D0` and calls the
+VRAM upload routine at `$00:871E`. That routine walks a list of DMA
+descriptors, six bytes each, stopping at the first whose first byte has bit 7
+set. The list lives at `$7F:837D`, in WRAM.
+
+The measurement that settles it:
+
+| | reaches `$85D4` | `$7F:837D` at that moment |
+|---|---|---|
+| `Super Mario World (E)` | instruction 1,160,333, frame 70 | `$FF` — an empty list, so the routine returns at once |
+| `SMWREX.smc` | **instruction 24**, frame 0 | `$55` — untouched power-on fill |
+
+The hack's reset lands past the million-odd instructions of initialisation
+that put the `$FF` there, so the list never ends and the routine marches
+through WRAM for ever.
+
+The power-on fill is worth one paragraph, because it looks like it might be
+the lever and is not. Ours is `$55`, whose bit 7 is clear; a fill of `$AA`
+would satisfy the terminator by accident. Building with `$AA` was tried: the
+loop does exit, and the ROM then runs into a `BRK` at `$00:0000` and stays
+there. What is missing is the whole of initialisation, not one byte of it.
+`$55` stays, since a fill that makes a broken ROM appear to start is worse
+than one that does not.
 
 ---
 
@@ -283,8 +451,10 @@ cartridges with no coprocessor, so whatever is wrong is wrong in the core.
 
 ```
 python build.py                       # the cores are Cython; rebuild after edits
-python tools/runtests.py              # nine modules; ROM-dependent ones skip
+python tools/runtests.py              # ten modules; ROM-dependent ones skip
 python tools/batchtest.py <rom-dir>   # boots a library, best frame per title
+python tools/playtest.py <rom>        # scripted buttons, screenshot per step
+python tools/testroms.py <dir>        # hardware test ROMs, verdict per ROM
 python tools/featureprobe.py <dir>    # which features anything actually uses
 python tools/difftrace.py check       # committed traces, cycle for cycle
 ```
