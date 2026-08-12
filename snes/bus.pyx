@@ -1048,6 +1048,18 @@ cdef class Bus:
                     abus=[hex(self.dma_abus[i]) for i in range(8)],
                     line=[self.hdma_line[i] for i in range(8)])
 
+    def irq_state(self):
+        """What $4200 has been told and what has fired since.
+
+        A boot that has stopped moving has usually stopped waiting on one of
+        these, so a diagnostic wants them together rather than one at a time."""
+        return dict(nmi_enabled=bool(self.nmi_enabled), nmi_flag=bool(self.nmi_flag),
+                    nmi_pending=bool(self.nmi_pending), nmi_count=self.nmi_count,
+                    irq_mode=self.irq_mode, irq_flag=bool(self.irq_flag),
+                    irq_pending=bool(self.irq_pending), irq_count=self.irq_count,
+                    htime=self.htime, vtime=self.vtime,
+                    auto_joypad=bool(self.auto_joypad))
+
     def set_pad(self, int index, int value):
         self.pad_state[index & 3] = <uint16_t>value
 

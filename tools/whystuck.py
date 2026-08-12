@@ -53,8 +53,10 @@ def main():
     print()
 
     bus = machine.bus
+    irq = bus.irq_state()
     print("frame          : %d" % bus.frame)
-    print("NMI enabled    : %s   IRQ mode: %d" % (bool(bus.nmi_enabled), bus.irq_mode))
+    print("NMI enabled    : %s   fired: %d   IRQ mode: %d   fired: %d"
+          % (irq["nmi_enabled"], irq["nmi_count"], irq["irq_mode"], irq["irq_count"]))
     print("APU ports  cpu->apu %s   apu->cpu %s"
           % (machine.apu.ports_from_cpu, machine.apu.ports_to_cpu))
     print("SPC700         : pc=$%04X  ipl=%d  stopped=%d  clock=%d"
