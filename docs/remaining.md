@@ -98,19 +98,25 @@ behind them either**, which puts them in the same class as the nine in bold.
 
 ## The nine untouched items
 
-### 1. SPC700 bus-access timing
+### 1. SPC700 bus-access timing — the one to do next
 
 *Where*: `snes/apu.pyx`, the opcode dispatch.
 
-Today each opcode charges a flat cycle count from a table. The totals are
-right; what is missing is *when within the opcode* each access happens. That
-only becomes observable through `$2140-$2143`, where the console and the
-SPC700 hand bytes to each other and the order of a read against a write
-decides who sees what.
+Today each opcode charges a flat cycle count from a table when it finishes.
+The totals are right; what is missing is *when within the opcode* each access
+happens.
 
-*How you would know*: the CPU already charges per access (`snes/cpu.pyx`),
-and the same shape applies. A test would drive a handshake from both sides
-and assert the byte each sees, the way `test_timing.py` does for DMA.
+This was written down as one of three open APU items and as the least
+appealing of them, on the grounds that it is only observable through
+`$2140-$2143`. The test ROMs say otherwise. It is what
+`spc_mem_access_times` tests directly, what `spc_smp` turns red on after
+passing every instruction-behaviour section, and what `spc_timer` is really
+asking about when it compares a read against a write. Three of the four
+failures are this one thing, so it is now the highest-value item in the file
+by some distance.
+
+*How you would know*: those three ROMs stop saying Failed 02. The CPU already
+charges per access (`snes/cpu.pyx`), so the shape to copy is in the tree.
 
 *Risk*: the audio currently sounds right and was confirmed so by ear. Any
 change here can break that silently. Do it with the DSP output hashed before
@@ -277,15 +283,37 @@ The verdict, as of now:
 
 | ROM | what it exercises | result |
 |---|---|---|
-| `spc_smp.sfc` | the SPC700's own instruction behaviour | **Failed 02** |
+| `spc_smp.sfc` | instructions, then instruction timing | edge arith, full BRK, full CMP and full DAA/DAS **pass**; **fails** on "CPU timing/mem access times" |
 | `spc_mem_access_times.sfc` | when within an opcode each access happens | **Failed 02** |
-| `spc_timer.sfc` | timer read against write | **Failed 02** |
+| `spc_timer.sfc` | timer read against write | **Failed 02** on the first test |
 | `spc_dsp6.sfc` | the echo unit: basics, ESA and EDL changes | **Failed 02** |
 
-That is four failures, not four surprises: items 1, 2 and 4 above are exactly
-what these test, and all three were known to be unmodelled. What has changed
-is that the gap is now a number on a screen instead of a paragraph, and the
-next attempt at any of them has something to be right against.
+Four failures, but not four problems. Three of them are the same problem.
+
+`spc_smp` is the useful one to read closely, because it is the only test here
+that separates behaviour from timing, and it says the behaviour is right: the
+instruction sections all pass, including the two — decimal adjust and the
+full CMP matrix — most likely to hide an arithmetic mistake. It turns red
+only when it reaches its timing section. `spc_mem_access_times` tests that
+section alone and fails. And `spc_timer` fails on "timer read vs write",
+which is the same question wearing different clothes: what a read sees
+depends on which cycle of the instruction it happens on, and here the whole
+instruction's cycles are charged in one lump when it finishes.
+
+So item 1 — SPC700 bus-access timing — is not one of three open APU items.
+It is the one that three of the four tests are waiting on, which makes it a
+much better-defined piece of work than it looked when it was written down
+from the documentation alone. `spc_dsp6` is the one genuinely separate
+failure, and it belongs to item 2.
+
+One thing was fixed on the way, and it is worth noting that it did *not* fix
+the test. The timers' first stage is a scaler off the SPC700's clock, and it
+free-runs whether or not the timer is enabled: an enable resets the divisor
+and the output counter but not the scaler, so the first tick after an enable
+lands wherever the scaler happened to be. This emulator reset all three,
+which put every timer in phase with whenever it was switched on. That is
+wrong on the documentation's own terms and is now right, and `spc_timer`
+still fails, because what it is measuring is finer than that.
 
 Note also what getting them to run turned up. All four have a blank internal
 header — no title, no checksum — and the header detector counted those zeros

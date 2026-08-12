@@ -97,7 +97,13 @@ The largest single gap. Everything below the first item depends on it.
 - [x] SPC700: all 256 opcodes, three timers, the IPL boot ROM
 - [x] S-DSP: BRR, ADSR/GAIN, gaussian interpolation, noise, pitch modulation,
       the FIR echo unit
-- [ ] **SPC700 bus-access timing** rather than a flat per-opcode cycle table
+- [ ] **SPC700 bus-access timing** rather than a flat per-opcode cycle table.
+      Three of the four APU test ROMs fail on this one thing, which makes it
+      the next piece of work rather than the least appealing of three
+- [x] The timers' first stage is a scaler that free-runs whether or not the
+      timer is enabled; an enable resets the divisor and the output counter
+      but not it.  All three used to be reset together, which put every timer
+      in phase with whenever it was switched on
 - [ ] **DSP as a 32-step pipeline** rather than one lump per sample: KON/KOF
       latch on a 2-sample boundary, ENDX and ENVX read at the right moment,
       echo latency exact

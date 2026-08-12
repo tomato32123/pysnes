@@ -752,13 +752,20 @@ cdef class APU:
             self.dsp_counter += DSP_DIV
             self.dsp.tick()
 
+        # Three stages, and only the last two belong to the timer.  Stage one
+        # is a scaler off the SPC700's own clock -- 128 for the first two
+        # timers, 16 for the third -- and it free-runs whether or not the
+        # timer is enabled, which is what makes the first tick after an enable
+        # land wherever the scaler happened to be rather than a whole period
+        # later.  Stages two and three are the divisor and the four-bit output
+        # counter, and those are the ones an enable resets.
         for i in range(3):
-            if not self.timer_enabled[i]:
-                continue
             period = 128 if i < 2 else 16
             self.timer_stage[i] += cycles
             while self.timer_stage[i] >= period:
                 self.timer_stage[i] -= period
+                if not self.timer_enabled[i]:
+                    continue
                 self.timer_div[i] += 1
                 target = self.timer_target[i]      # 0 behaves as 256
                 if self.timer_div[i] == target:
@@ -805,10 +812,16 @@ cdef class APU:
             if i == 1:                            # $F1 CONTROL
                 for t in range(3):
                     if (value >> t) & 1:
+                        # Only the 0 -> 1 transition resets anything, and it
+                        # resets the divisor and the output counter but not
+                        # the scaler feeding them.  Writing a bit that is
+                        # already set does nothing at all, and writing zero
+                        # stops the timer without clearing what it had
+                        # counted, so a program can stop it and read the
+                        # count afterwards.
                         if not self.timer_enabled[t]:
                             self.timer_div[t] = 0
                             self.timer_counter[t] = 0
-                            self.timer_stage[t] = 0
                         self.timer_enabled[t] = 1
                     else:
                         self.timer_enabled[t] = 0
