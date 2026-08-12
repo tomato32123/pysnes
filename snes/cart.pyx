@@ -93,12 +93,16 @@ def score_header(bytes rom, uint32_t off, int is_hi, int is_ex):
     if 0x08 <= romsize_k <= 0x0D and (<uint32_t>1024 << romsize_k) >= size // 2:
         score += 6
 
-    # A sane title is mostly printable ASCII (or Shift-JIS high bytes).
+    # A sane title is mostly printable ASCII (or Shift-JIS high bytes).  A
+    # zero is not evidence either way: a homebrew image often leaves the whole
+    # header blank, and blargg's SPC tests do, so counting zeros against a
+    # candidate rejects ROMs that run perfectly well on hardware.  Any other
+    # control byte still counts against, which is what the check is for.
     for i in range(21):
         c = rom[off + H_TITLE + i]
         if 0x20 <= c < 0x7F:
             score += 1
-        elif c < 0x20:
+        elif 0 < c < 0x20:
             score -= 3
     return score
 
