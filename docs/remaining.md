@@ -110,18 +110,44 @@ to see the machine as of *before the instruction started*, whatever cycle the
 read was really on, because the whole opcode was charged from a table after
 it had finished.
 
-**Left**: the idle cycles. What the accesses do not spend is paid at the end
-of the instruction, which is not always where the opcode really spends it.
-Getting that right means a cycle-by-cycle account of each of the 256 opcodes
-— real work, but bounded work, and it can be done a few opcodes at a time:
-`tests/test_apu_timing.py` asserts that every opcode still costs exactly what
-the cycle table says, so moving an idle cycle around inside an instruction
-cannot silently change its length.
+**Also done**: the accesses an instruction makes that are not obviously part
+of it, and most of the idle placement.
 
-The change is visible in the tests already: `spc_timer` gets one case further
-than it did, and `spc_mem_access_times` reports far fewer wrong entries. Both
-still fail. Speed is unaffected in any way that matters — 92 fps on Super
-Mario World, against 60 for real time.
+- Every one-byte instruction reads the byte after itself and throws it away.
+  The SPC700 fetches it before it knows it does not need it, and the read is a
+  real bus cycle. Seventy-six opcodes, kept as a table rather than a line in
+  each branch.
+- A store reads its destination first and discards the byte. The cycle was
+  always charged; that it is a *bus access* was not modelled, and that is
+  most of what `mem_access_times` is looking at. The two indirect-increment
+  forms are the documented exceptions — one spends the cycle idle instead.
+- An indexed address costs a cycle of its own between the operand fetch and
+  the data access. Branches spend their two extra cycles before the jump
+  rather than after the instruction. Pushes idle last, pulls idle first.
+  Calls, returns, `MUL`, `DIV` and `XCN` spend theirs where the reference
+  says.
+
+**184 of the 256 opcodes now have every cycle where it belongs**, against 84
+when the accesses first started moving the clock. The other 72 carry 90
+cycles between them, still paid at the end of the instruction — a
+placeholder, not a model.
+
+Two tests keep this honest. Every opcode must still cost exactly what the
+cycle table says, so moving an idle around cannot silently change an
+instruction's length; and the count of fully placed opcodes is a ratchet, so
+it cannot quietly go back down. The remaining work can be done a few opcodes
+at a time against those two.
+
+The cycle-by-cycle account came from bsnes's SPC700 core, which writes each
+addressing mode as an explicit sequence of reads, writes and idles. Deriving
+it by reasoning was not on: the dummy read before a store and the two
+instructions that skip it are not the sort of thing that can be worked out
+from a cycle count.
+
+`spc_timer` gets a case further than it did and `spc_mem_access_times`
+reports fewer wrong entries, but all three still fail; the last 90 cycles are
+between here and passing. Speed is unaffected in any way that matters — 92
+fps on Super Mario World, against 60 for real time.
 
 This was written down as one of three open APU items and as the least
 appealing of them, on the grounds that it is only observable through

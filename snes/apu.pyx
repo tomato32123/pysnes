@@ -44,6 +44,35 @@ IPL_ROM[:] = [
 
 
 # Base cycle count per opcode; taken branches add two.
+# Opcodes that begin by reading the byte after themselves and throwing it
+# away.  Every one-byte instruction does it -- the SPC700 fetches the next
+# byte before it knows it does not need it, and the read is a real bus cycle
+# that a test ROM can see.  Keeping it as a table rather than a line in each
+# of the seventy-six branches means the dispatch stays about what the
+# instruction does.
+cdef uint8_t DUMMY_PC[256]
+cdef int _op
+for _op in range(256):
+    DUMMY_PC[_op] = 0
+for _op in (
+    0x00,                                            # NOP
+    0x0F, 0x6F, 0x7F, 0xEF, 0xFF,                    # BRK, RET, RETI, SLEEP, STOP
+    0x01, 0x11, 0x21, 0x31, 0x41, 0x51, 0x61, 0x71,  # TCALL 0-15
+    0x81, 0x91, 0xA1, 0xB1, 0xC1, 0xD1, 0xE1, 0xF1,
+    0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0, 0xED,  # flag sets, CLRV, NOTC
+    0x1C, 0x1D, 0x3C, 0x3D, 0x5C, 0x7C,              # ASL/ROL/LSR/ROR A, INC/DEC X
+    0x9C, 0xBC, 0xDC, 0xFC,                          # DEC/INC A, DEC/INC Y
+    0x5D, 0x7D, 0x9D, 0xBD, 0xDD, 0xFD,              # register transfers
+    0x0D, 0x2D, 0x4D, 0x6D,                          # PUSH
+    0x8E, 0xAE, 0xCE, 0xEE,                          # POP
+    0x06, 0x26, 0x46, 0x66, 0x86, 0xA6, 0xE6,        # ALU A, (X)
+    0xC6, 0xAF, 0xBF,                                # MOV (X),A / (X)+,A / A,(X)+
+    0x19, 0x39, 0x59, 0x79, 0x99, 0xB9,              # (X),(Y) forms
+    0x9E, 0x9F, 0xCF, 0xBE, 0xDF, 0xFE,              # DIV, XCN, MUL, DAS, DAA, DBNZ Y
+):
+    DUMMY_PC[_op] = 1
+
+
 cdef int CYCLES[256]
 CYCLES[:] = [
     2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 5, 4, 5, 4, 6, 8,
@@ -777,6 +806,20 @@ cdef class APU:
         self.clock += n
         self.tick(n)
 
+    cdef inline void idle(self) noexcept:
+        """A cycle the processor spends on itself, touching no memory."""
+        self.cycle(1)
+
+    cdef inline void store_abs(self, uint16_t addr, uint8_t value) noexcept:
+        """A store: the destination is read first, and the byte discarded."""
+        self.read(addr)
+        self.write(addr, value)
+
+    cdef inline void store_dp(self, uint8_t offset, uint8_t value) noexcept:
+        cdef uint16_t addr = self.dp(offset)
+        self.read(addr)
+        self.write(addr, value)
+
     cdef void step(self) noexcept:
         """One instruction, with each access charged where it happens.
 
@@ -797,9 +840,16 @@ cdef class APU:
         cdef int total, spent
         self.extra_cycles = 0
         op = self.fetch()
+        if DUMMY_PC[op]:
+            self.read(self.pc)
         self.execute(op)
         total = CYCLES[op] + self.extra_cycles
         spent = <int>(self.clock - start)
+        # What is left is the opcode's internal work that has not been placed
+        # yet.  Recording it is how the remaining work is measured: an opcode
+        # whose tail is zero has every one of its cycles accounted for where
+        # it belongs, and one with a tail still has that many to place.
+        self.idle_tail = total - spent
         if spent < total:
             self.cycle(total - spent)
 
@@ -1000,6 +1050,11 @@ cdef class APU:
     cdef inline void branch(self, int taken) noexcept:
         cdef int8_t offset = <int8_t>self.fetch()
         if taken:
+            # Two cycles to take it, and they are spent before the jump, not
+            # added to a bill at the end.  extra_cycles still carries them so
+            # the instruction's budget knows it is a four-cycle branch.
+            self.idle()
+            self.idle()
             self.pc = <uint16_t>(self.pc + offset)
             self.extra_cycles += 2
 
@@ -1019,13 +1074,19 @@ cdef class APU:
         elif op == 0x04:
             self.a = self.alu_or(self.a, self.read(self.dp(self.fetch())))
         elif op == 0x14:
-            self.a = self.alu_or(self.a, self.read(self.dp(<uint8_t>(self.fetch() + self.x))))
+            v = self.fetch()
+            self.idle()
+            self.a = self.alu_or(self.a, self.read(self.dp(<uint8_t>(v + self.x))))
         elif op == 0x05:
             self.a = self.alu_or(self.a, self.read(self.fetch16()))
         elif op == 0x15:
-            self.a = self.alu_or(self.a, self.read(<uint16_t>(self.fetch16() + self.x)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_or(self.a, self.read(<uint16_t>(addr + self.x)))
         elif op == 0x16:
-            self.a = self.alu_or(self.a, self.read(<uint16_t>(self.fetch16() + self.y)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_or(self.a, self.read(<uint16_t>(addr + self.y)))
         elif op == 0x06:
             self.a = self.alu_or(self.a, self.read(self.dp(self.x)))
         elif op == 0x07:
@@ -1055,13 +1116,19 @@ cdef class APU:
         elif op == 0x24:
             self.a = self.alu_and(self.a, self.read(self.dp(self.fetch())))
         elif op == 0x34:
-            self.a = self.alu_and(self.a, self.read(self.dp(<uint8_t>(self.fetch() + self.x))))
+            v = self.fetch()
+            self.idle()
+            self.a = self.alu_and(self.a, self.read(self.dp(<uint8_t>(v + self.x))))
         elif op == 0x25:
             self.a = self.alu_and(self.a, self.read(self.fetch16()))
         elif op == 0x35:
-            self.a = self.alu_and(self.a, self.read(<uint16_t>(self.fetch16() + self.x)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_and(self.a, self.read(<uint16_t>(addr + self.x)))
         elif op == 0x36:
-            self.a = self.alu_and(self.a, self.read(<uint16_t>(self.fetch16() + self.y)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_and(self.a, self.read(<uint16_t>(addr + self.y)))
         elif op == 0x26:
             self.a = self.alu_and(self.a, self.read(self.dp(self.x)))
         elif op == 0x27:
@@ -1091,13 +1158,19 @@ cdef class APU:
         elif op == 0x44:
             self.a = self.alu_eor(self.a, self.read(self.dp(self.fetch())))
         elif op == 0x54:
-            self.a = self.alu_eor(self.a, self.read(self.dp(<uint8_t>(self.fetch() + self.x))))
+            v = self.fetch()
+            self.idle()
+            self.a = self.alu_eor(self.a, self.read(self.dp(<uint8_t>(v + self.x))))
         elif op == 0x45:
             self.a = self.alu_eor(self.a, self.read(self.fetch16()))
         elif op == 0x55:
-            self.a = self.alu_eor(self.a, self.read(<uint16_t>(self.fetch16() + self.x)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_eor(self.a, self.read(<uint16_t>(addr + self.x)))
         elif op == 0x56:
-            self.a = self.alu_eor(self.a, self.read(<uint16_t>(self.fetch16() + self.y)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_eor(self.a, self.read(<uint16_t>(addr + self.y)))
         elif op == 0x46:
             self.a = self.alu_eor(self.a, self.read(self.dp(self.x)))
         elif op == 0x47:
@@ -1127,13 +1200,19 @@ cdef class APU:
         elif op == 0x64:
             self.alu_cmp(self.a, self.read(self.dp(self.fetch())))
         elif op == 0x74:
-            self.alu_cmp(self.a, self.read(self.dp(<uint8_t>(self.fetch() + self.x))))
+            v = self.fetch()
+            self.idle()
+            self.alu_cmp(self.a, self.read(self.dp(<uint8_t>(v + self.x))))
         elif op == 0x65:
             self.alu_cmp(self.a, self.read(self.fetch16()))
         elif op == 0x75:
-            self.alu_cmp(self.a, self.read(<uint16_t>(self.fetch16() + self.x)))
+            addr = self.fetch16()
+            self.idle()
+            self.alu_cmp(self.a, self.read(<uint16_t>(addr + self.x)))
         elif op == 0x76:
-            self.alu_cmp(self.a, self.read(<uint16_t>(self.fetch16() + self.y)))
+            addr = self.fetch16()
+            self.idle()
+            self.alu_cmp(self.a, self.read(<uint16_t>(addr + self.y)))
         elif op == 0x66:
             self.alu_cmp(self.a, self.read(self.dp(self.x)))
         elif op == 0x67:
@@ -1160,13 +1239,19 @@ cdef class APU:
         elif op == 0x84:
             self.a = self.alu_adc(self.a, self.read(self.dp(self.fetch())))
         elif op == 0x94:
-            self.a = self.alu_adc(self.a, self.read(self.dp(<uint8_t>(self.fetch() + self.x))))
+            v = self.fetch()
+            self.idle()
+            self.a = self.alu_adc(self.a, self.read(self.dp(<uint8_t>(v + self.x))))
         elif op == 0x85:
             self.a = self.alu_adc(self.a, self.read(self.fetch16()))
         elif op == 0x95:
-            self.a = self.alu_adc(self.a, self.read(<uint16_t>(self.fetch16() + self.x)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_adc(self.a, self.read(<uint16_t>(addr + self.x)))
         elif op == 0x96:
-            self.a = self.alu_adc(self.a, self.read(<uint16_t>(self.fetch16() + self.y)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_adc(self.a, self.read(<uint16_t>(addr + self.y)))
         elif op == 0x86:
             self.a = self.alu_adc(self.a, self.read(self.dp(self.x)))
         elif op == 0x87:
@@ -1196,13 +1281,19 @@ cdef class APU:
         elif op == 0xA4:
             self.a = self.alu_sbc(self.a, self.read(self.dp(self.fetch())))
         elif op == 0xB4:
-            self.a = self.alu_sbc(self.a, self.read(self.dp(<uint8_t>(self.fetch() + self.x))))
+            v = self.fetch()
+            self.idle()
+            self.a = self.alu_sbc(self.a, self.read(self.dp(<uint8_t>(v + self.x))))
         elif op == 0xA5:
             self.a = self.alu_sbc(self.a, self.read(self.fetch16()))
         elif op == 0xB5:
-            self.a = self.alu_sbc(self.a, self.read(<uint16_t>(self.fetch16() + self.x)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_sbc(self.a, self.read(<uint16_t>(addr + self.x)))
         elif op == 0xB6:
-            self.a = self.alu_sbc(self.a, self.read(<uint16_t>(self.fetch16() + self.y)))
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.alu_sbc(self.a, self.read(<uint16_t>(addr + self.y)))
         elif op == 0xA6:
             self.a = self.alu_sbc(self.a, self.read(self.dp(self.x)))
         elif op == 0xA7:
@@ -1246,13 +1337,19 @@ cdef class APU:
         elif op == 0xE4:
             self.a = self.read(self.dp(self.fetch())); self.nz8(self.a)
         elif op == 0xF4:
-            self.a = self.read(self.dp(<uint8_t>(self.fetch() + self.x))); self.nz8(self.a)
+            v = self.fetch()
+            self.idle()
+            self.a = self.read(self.dp(<uint8_t>(v + self.x))); self.nz8(self.a)
         elif op == 0xE5:
             self.a = self.read(self.fetch16()); self.nz8(self.a)
         elif op == 0xF5:
-            self.a = self.read(<uint16_t>(self.fetch16() + self.x)); self.nz8(self.a)
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.read(<uint16_t>(addr + self.x)); self.nz8(self.a)
         elif op == 0xF6:
-            self.a = self.read(<uint16_t>(self.fetch16() + self.y)); self.nz8(self.a)
+            addr = self.fetch16()
+            self.idle()
+            self.a = self.read(<uint16_t>(addr + self.y)); self.nz8(self.a)
         elif op == 0xE6:
             self.a = self.read(self.dp(self.x)); self.nz8(self.a)
         elif op == 0xBF:                                    # MOV A, (X)+
@@ -1272,7 +1369,9 @@ cdef class APU:
         elif op == 0xF8:
             self.x = self.read(self.dp(self.fetch())); self.nz8(self.x)
         elif op == 0xF9:
-            self.x = self.read(self.dp(<uint8_t>(self.fetch() + self.y))); self.nz8(self.x)
+            v = self.fetch()
+            self.idle()
+            self.x = self.read(self.dp(<uint8_t>(v + self.y))); self.nz8(self.x)
         elif op == 0xE9:
             self.x = self.read(self.fetch16()); self.nz8(self.x)
         elif op == 0x8D:
@@ -1280,49 +1379,69 @@ cdef class APU:
         elif op == 0xEB:
             self.y = self.read(self.dp(self.fetch())); self.nz8(self.y)
         elif op == 0xFB:
-            self.y = self.read(self.dp(<uint8_t>(self.fetch() + self.x))); self.nz8(self.y)
+            v = self.fetch()
+            self.idle()
+            self.y = self.read(self.dp(<uint8_t>(v + self.x))); self.nz8(self.y)
         elif op == 0xEC:
             self.y = self.read(self.fetch16()); self.nz8(self.y)
 
         # ---- MOV out of A / X / Y ------------------------------------------------------
+        # A store reads its destination first and throws the byte away.  The
+        # cycle was always charged; what was missing is that it is a real bus
+        # access, which is the whole of what mem_access_times is looking at.
+        # The two indirect-increment forms are the documented exceptions: one
+        # spends the cycle idle instead.
         elif op == 0xC4:
-            self.write(self.dp(self.fetch()), self.a)
+            self.store_dp(self.fetch(), self.a)
         elif op == 0xD4:
-            self.write(self.dp(<uint8_t>(self.fetch() + self.x)), self.a)
+            v = self.fetch()
+            self.idle()
+            self.store_dp(<uint8_t>(v + self.x), self.a)
         elif op == 0xC5:
-            self.write(self.fetch16(), self.a)
+            self.store_abs(self.fetch16(), self.a)
         elif op == 0xD5:
-            self.write(<uint16_t>(self.fetch16() + self.x), self.a)
+            addr = self.fetch16()
+            self.idle()
+            self.store_abs(<uint16_t>(addr + self.x), self.a)
         elif op == 0xD6:
-            self.write(<uint16_t>(self.fetch16() + self.y), self.a)
+            addr = self.fetch16()
+            self.idle()
+            self.store_abs(<uint16_t>(addr + self.y), self.a)
         elif op == 0xC6:
-            self.write(self.dp(self.x), self.a)
+            self.store_dp(self.x, self.a)
         elif op == 0xAF:                                    # MOV (X)+, A
+            self.idle()                                     # not a dummy read
             self.write(self.dp(self.x), self.a)
             self.x = <uint8_t>(self.x + 1)
         elif op == 0xC7:
             v = <uint8_t>(self.fetch() + self.x)
+            self.idle()
             addr = self.read(self.dp(v)) | (<uint16_t>self.read(self.dp(<uint8_t>(v + 1))) << 8)
-            self.write(addr, self.a)
+            self.store_abs(addr, self.a)
         elif op == 0xD7:
             v = self.fetch()
             addr = self.read(self.dp(v)) | (<uint16_t>self.read(self.dp(<uint8_t>(v + 1))) << 8)
-            self.write(<uint16_t>(addr + self.y), self.a)
+            self.idle()
+            self.store_abs(<uint16_t>(addr + self.y), self.a)
         elif op == 0xD8:
-            self.write(self.dp(self.fetch()), self.x)
+            self.store_dp(self.fetch(), self.x)
         elif op == 0xD9:
-            self.write(self.dp(<uint8_t>(self.fetch() + self.y)), self.x)
+            v = self.fetch()
+            self.idle()
+            self.store_dp(<uint8_t>(v + self.y), self.x)
         elif op == 0xC9:
-            self.write(self.fetch16(), self.x)
+            self.store_abs(self.fetch16(), self.x)
         elif op == 0xCB:
-            self.write(self.dp(self.fetch()), self.y)
+            self.store_dp(self.fetch(), self.y)
         elif op == 0xDB:
-            self.write(self.dp(<uint8_t>(self.fetch() + self.x)), self.y)
+            v = self.fetch()
+            self.idle()
+            self.store_dp(<uint8_t>(v + self.x), self.y)
         elif op == 0xCC:
-            self.write(self.fetch16(), self.y)
+            self.store_abs(self.fetch16(), self.y)
         elif op == 0x8F:                                    # MOV d, #i
             v = self.fetch()
-            self.write(self.dp(self.fetch()), v)
+            self.store_dp(self.fetch(), v)
         elif op == 0xFA:                                    # MOV dd, ds
             v = self.read(self.dp(self.fetch()))
             self.write(self.dp(self.fetch()), v)
@@ -1401,6 +1520,7 @@ cdef class APU:
         elif op == 0x6C:
             addr = self.fetch16(); self.write(addr, self.alu_ror(self.read(addr)))
         elif op == 0x9F:                                    # XCN A
+            self.cycle(3)
             self.a = <uint8_t>((self.a >> 4) | (self.a << 4))
             self.nz8(self.a)
 
@@ -1451,11 +1571,13 @@ cdef class APU:
             self.setf(P_C, z >= 0)
             self.nz16(<uint16_t>(z & 0xFFFF))
         elif op == 0xCF:                                    # MUL YA
+            self.cycle(7)
             big = <uint32_t>self.y * <uint32_t>self.a
             self.a = <uint8_t>(big & 0xFF)
             self.y = <uint8_t>((big >> 8) & 0xFF)
             self.nz8(self.y)
         elif op == 0x9E:                                    # DIV YA, X
+            self.cycle(10)
             ya = <uint16_t>((self.y << 8) | self.a)
             self.setf(P_H, (self.x & 15) <= (self.y & 15))
             self.setf(P_V, self.y >= self.x)
@@ -1473,6 +1595,7 @@ cdef class APU:
 
         # ---- decimal adjust ---------------------------------------------------------------------------
         elif op == 0xDF:                                    # DAA A
+            self.idle()
             if (self.psw & P_C) or self.a > 0x99:
                 self.a = <uint8_t>(self.a + 0x60)
                 self.psw |= P_C
@@ -1480,6 +1603,7 @@ cdef class APU:
                 self.a = <uint8_t>(self.a + 0x06)
             self.nz8(self.a)
         elif op == 0xBE:                                    # DAS A
+            self.idle()
             if not (self.psw & P_C) or self.a > 0x99:
                 self.a = <uint8_t>(self.a - 0x60)
                 self.psw &= ~P_C
@@ -1488,22 +1612,24 @@ cdef class APU:
             self.nz8(self.a)
 
         # ---- stack -------------------------------------------------------------------------------------
+        # A push spends its last cycle doing nothing; a pull spends its
+        # second cycle that way, before the stack is touched.
         elif op == 0x2D:
-            self.push(self.a)
+            self.push(self.a); self.idle()
         elif op == 0x4D:
-            self.push(self.x)
+            self.push(self.x); self.idle()
         elif op == 0x6D:
-            self.push(self.y)
+            self.push(self.y); self.idle()
         elif op == 0x0D:
-            self.push(self.psw)
+            self.push(self.psw); self.idle()
         elif op == 0xAE:
-            self.a = self.pull()
+            self.idle(); self.a = self.pull()
         elif op == 0xCE:
-            self.x = self.pull()
+            self.idle(); self.x = self.pull()
         elif op == 0xEE:
-            self.y = self.pull()
+            self.idle(); self.y = self.pull()
         elif op == 0x8E:
-            self.psw = self.pull()
+            self.idle(); self.psw = self.pull()
 
         # ---- branches ------------------------------------------------------------------------------------
         elif op == 0x2F:
@@ -1552,7 +1678,9 @@ cdef class APU:
             v = self.read(self.dp(self.fetch()))
             self.branch(1 if v != self.a else 0)
         elif op == 0xDE:                                    # CBNE d+X, r
-            v = self.read(self.dp(<uint8_t>(self.fetch() + self.x)))
+            v = self.fetch()
+            self.idle()
+            v = self.read(self.dp(<uint8_t>(v + self.x)))
             self.branch(1 if v != self.a else 0)
         elif op == 0x6E:                                    # DBNZ d, r
             addr = self.dp(self.fetch())
@@ -1571,13 +1699,17 @@ cdef class APU:
             self.pc = self.read16(addr)
         elif op == 0x3F:                                    # CALL !a
             addr = self.fetch16()
+            self.idle()
             self.push(<uint8_t>(self.pc >> 8))
             self.push(<uint8_t>(self.pc & 0xFF))
+            self.cycle(2)
             self.pc = addr
         elif op == 0x4F:                                    # PCALL u
             v = self.fetch()
+            self.idle()
             self.push(<uint8_t>(self.pc >> 8))
             self.push(<uint8_t>(self.pc & 0xFF))
+            self.idle()
             self.pc = <uint16_t>(0xFF00 | v)
         elif (op == 0x01 or op == 0x11 or op == 0x21 or op == 0x31 or
               op == 0x41 or op == 0x51 or op == 0x61 or op == 0x71 or
@@ -1588,9 +1720,11 @@ cdef class APU:
             self.push(<uint8_t>(self.pc & 0xFF))
             self.pc = self.read16(addr)
         elif op == 0x6F:                                    # RET
+            self.idle()
             self.pc = self.pull()
             self.pc |= <uint16_t>self.pull() << 8
         elif op == 0x7F:                                    # RETI
+            self.idle()
             self.psw = self.pull()
             self.pc = self.pull()
             self.pc |= <uint16_t>self.pull() << 8
@@ -1598,6 +1732,7 @@ cdef class APU:
             self.push(<uint8_t>(self.pc >> 8))
             self.push(<uint8_t>(self.pc & 0xFF))
             self.push(self.psw)
+            self.idle()
             self.psw |= P_B
             self.psw &= ~P_I
             self.pc = self.read16(0xFFDE)
@@ -1648,6 +1783,7 @@ cdef class APU:
         elif op == 0x80:
             self.psw |= P_C
         elif op == 0xED:
+            self.idle()
             self.psw ^= P_C
         elif op == 0xE0:
             self.psw &= ~(P_V | P_H)
@@ -1656,8 +1792,10 @@ cdef class APU:
         elif op == 0x40:
             self.psw |= P_P
         elif op == 0xA0:
+            self.idle()
             self.psw |= P_I
         elif op == 0xC0:
+            self.idle()
             self.psw &= ~P_I
 
         # ---- halt / nop --------------------------------------------------------------------------------------------
@@ -1791,7 +1929,7 @@ cdef class APU:
         return dict(pc=self.pc, a=self.a, x=self.x, y=self.y,
                     sp=self.sp, psw=self.psw, clock=self.clock,
                     stopped=self.stopped, ipl=self.ipl_enabled,
-                    extra_cycles=self.extra_cycles)
+                    extra_cycles=self.extra_cycles, idle_tail=self.idle_tail)
 
     def set_pc(self, int addr):
         """Point the SPC700 at an address, so a test can run one opcode."""

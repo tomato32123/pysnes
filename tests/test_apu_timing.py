@@ -50,6 +50,33 @@ def test_every_opcode_still_takes_what_the_table_says():
         print("      all 256 opcodes cost what the cycle table says")
 
 
+# How many opcodes have every one of their cycles accounted for where it
+# belongs.  The rest still pay their leftover at the end of the instruction,
+# which is a placeholder, not a model.  Raise this as opcodes are done; it is
+# here so the number cannot quietly go down again.
+PLACED = 184
+
+
+def test_most_opcodes_have_every_cycle_where_it_belongs():
+    unplaced = []
+    for op in range(256):
+        apu = APU()
+        apu.do_reset()
+        apu.poke_ram(CODE, bytes([op, 0, 0, 0]))
+        apu.set_pc(CODE)
+        apu.do_step()
+        if apu.regs["idle_tail"]:
+            unplaced.append((op, apu.regs["idle_tail"]))
+    placed = 256 - len(unplaced)
+    if placed < PLACED:
+        FAILURES.append("%d opcodes fully placed, was %d -- something regressed"
+                        % (placed, PLACED))
+    else:
+        print("      %d of 256 opcodes fully placed; %d cycles still unplaced "
+              "across %d opcodes"
+              % (placed, sum(t for _op, t in unplaced), len(unplaced)))
+
+
 def test_an_access_moves_the_clock_before_it_happens():
     """MOV A, dp is three cycles: opcode fetch, operand fetch, the read.  The
     read is the third, so by the time it happens the clock has moved three --
