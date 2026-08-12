@@ -123,23 +123,17 @@ The largest single gap. Everything below the first item depends on it.
       timer is enabled; an enable resets the divisor and the output counter
       but not it.  All three used to be reset together, which put every timer
       in phase with whenever it was switched on
-- [~] **DSP as a 32-step pipeline** rather than one lump per sample.  Written
+- [x] **DSP as a 32-step pipeline** rather than one lump per sample.  Written
       as the chip's own 32 steps, with eight voices each at a different one at
-      any moment.  `spc_dsp6` goes from three passing sections to twelve: the
-      whole echo unit, and the envelope's attack, decay and rates.  KON and
-      KOFF are acted on every other sample; ENDX, OUTX and ENVX are written
-      back from buffers; ESA and EDL are latched.  It also turned up that the
-      audio was 6 dB quiet -- the decoder's 15-bit sample is carried doubled,
-      and both this and the independent decoder in `test_dsp.py` kept the
-      undoubled value, so they agreed with each other and neither was right.
-      Faster as well, at 99 fps against 81.
-      `tools/dspdiff.py` runs this DSP and blargg's own through the same script
-      of register writes and reports the first sample they disagree on -- the
-      differential comparison section 6 has wanted all along, for the one chip
-      whose reference builds in seconds.  **All ten of its scripts now agree,
-      sample for sample.**  It found two things on the way: the DSP comes out
-      of reset half way through a KON pair, so every key-on was acted on a
-      sample late; and the generated gaussian table was a unit out
+      any moment.  KON and KOFF are acted on every other sample; ENDX, OUTX
+      and ENVX are written back from buffers; ESA and EDL are latched; the
+      echo's FIR halves on the way in and truncates between its last two taps.
+      It also turned up that the audio was 6 dB quiet -- the decoder's 15-bit
+      sample is carried doubled, and both this and the independent decoder in
+      `test_dsp.py` kept the undoubled value, so they agreed with each other
+      and neither was right.  Faster as well, at 99 fps against 81.
+      `spc_dsp6` **passes**, all thirteen sections, having reached three when
+      the work started
 - [x] **The real gaussian table from the chip**, replacing the generated one.
       The generated one had its width solved to put the peak on the real
       table's 1305 and each group of four taps normalised to sum to exactly
@@ -223,10 +217,9 @@ This is the part that decides whether any of the above converges.
 - [x] DMA and HDMA timing tests; PPU register timing still open
 - [x] Open bus suite, and display-mode tests for overscan, hires,
       interlace, EXTBG, direct colour and mosaic
-- [~] **SPC700 and DSP test ROMs**: fetched and running.  `tools/testroms.py`
+- [x] **SPC700 and DSP test ROMs**: fetched, running, and all passing.  `tools/testroms.py`
       boots a directory of them and captures each verdict.  `spc_smp`,
-      `spc_mem_access_times` and `spc_timer` all pass.  `spc_dsp6` clears its
-      eight echo sections and stops in the envelope.
+      `spc_mem_access_times`, `spc_timer` and `spc_dsp6` **all pass**.
       The tests are the apparatus, not the fix; the remaining fix is the DSP
       pipeline above
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The

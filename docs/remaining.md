@@ -5,7 +5,7 @@ thing still open, what it actually is, where in the code it goes, how you
 would know you got it right, and what — if anything — makes it impossible
 today. Written so it can be picked up cold.
 
-As of this writing: **39 done, 6 partial, 6 untouched** of 52 items. The
+As of this writing: **42 done, 5 partial, 5 untouched** of 52 items. The
 66-ROM local library boots 63 titles; the three that do not are listed at the
 end. One wants a coprocessor whose firmware is not here, and two are
 defective ROM images — proved defective, not assumed so. No title in the
@@ -175,9 +175,9 @@ candidate was the value an access returns rather than the cycle it lands on.
 and they read back zero. This emulator handed back whatever had been written
 to them. A read is an access, and that one returned the wrong byte.
 
-With that, **three of the four test ROMs pass** — `spc_smp` in all sixteen
-of its sections, `spc_mem_access_times`, and `spc_timer`. The fourth clears
-twelve of its thirteen sections; what is left of it belongs to item 2.
+**All four test ROMs pass.** Every section of every one: the SPC700's
+instructions and their timing, the timers, the whole DSP including the step
+each voice register is written back on.
 
 Speed: 81 fps on Super Mario World against 92 before and 60 for real time.
 The extra bus accesses cost about a tenth of the frame rate, which is a fair
@@ -199,7 +199,7 @@ charges per access (`snes/cpu.pyx`), so the shape to copy is in the tree.
 change here can break that silently. Do it with the DSP output hashed before
 and after.
 
-### 2. DSP as a 32-step pipeline — done, bar one section
+### 2. DSP as a 32-step pipeline — done
 
 The chip does not compute a sample and then move on. It walks 32 steps, and at
 any moment eight voices are each at a different one: while voice 0 is being
@@ -233,7 +233,8 @@ was right, and it caught the scale the moment its own reference was corrected.
 Faster, too, at 99 fps on Super Mario World against 81 before: the steps do
 less work between them than the lump did in one go.
 
-**Left**: one section, and it is now localised rather than guessed at.
+**How the last of it was found** is worth recording, because guessing had run
+out.
 
 `tools/dspdiff.py` drives this DSP and blargg's own through the same script of
 register writes and reports the first sample where they disagree, reading both
@@ -243,19 +244,14 @@ written, and it exists for the DSP because the reference builds in a few
 seconds and needs nothing but a C++ compiler. `tools/dspprobe.cpp` is the
 reference half; the reference itself is not in this repository.
 
-It found one thing immediately: the chip comes out of reset **half way through
-a KON pair**, and this started at the other half, so every key-on was acted on
-one sample late. With that fixed the envelope agrees exactly across all ten
-scripts.
+It found two things. The chip comes out of reset **half way through a KON
+pair**, and this started at the other half, so every key-on was acted on one
+sample late. And once the internals were dumped side by side and found
+identical — same kon_delay, same interp_pos, same buffer, same envelope, every
+sample — the only thing left that could differ was the interpolation
+coefficients. It was the gaussian table (item 3).
 
-What is left is one sample of a voice's *output*: after a key-on this emits
-its first non-silent sample one earlier than the reference, and they agree
-from the next one on. Two of the ten scripts agree throughout; the other eight
-differ only in that. Both sides fill their decode buffers on the same steps
-and their envelopes agree to the sample, so the difference is in when the
-first decoded sample becomes visible to the interpolator. That is a much
-smaller question than the one this item started with, and the tool to answer
-it is now in the tree.
+`spc_dsp6` passes all thirteen sections, from three when this started.
 
 ### 3. The real gaussian table — done
 
@@ -407,7 +403,7 @@ The verdict, as of now:
 | `spc_smp.sfc` | instructions, instruction timing, register behaviour, timers — sixteen sections | **PASSED** |
 | `spc_mem_access_times.sfc` | when within an opcode each access happens | **PASSED** |
 | `spc_timer.sfc` | timer read against write | **PASSED** |
-| `spc_dsp6.sfc` | the echo unit and the envelope — thirteen sections | twelve pass; stops at "Envelope/gain SL=8 threshold" |
+| `spc_dsp6.sfc` | the echo unit, the envelope, key-on ordering, and the per-step timing of every voice register | **PASSED** |
 
 Four failures, but not four problems: three of them were the same problem,
 and one of those three is now fixed. `spc_timer` passes.
