@@ -161,15 +161,16 @@ emulator actually puts on the bus. Writing it found the last ordering bug:
 chip reads the low byte, writes it back, and only then reads the high one.
 A program watching the address bus can tell those apart.
 
-*What is still wrong*: `spc_mem_access_times` still fails, and it is no
-longer clear from the outside what it is unhappy about. Counts match, order
-matches, and its own on-screen table is a description of the access pattern
-rather than a list of complaints — the verdict is a CRC over everything, so
-one wrong detail anywhere shows up as one wrong number. The remaining
-candidates are the *addresses* of accesses rather than their order, and the
-cycle on which a register access takes effect — reading `$FD` clears the
-counter, writing `$F3` reaches the DSP — neither of which the order test
-looks at. That is where to go next.
+**And the last difference was not timing at all.** With counts and order
+both matching, `spc_mem_access_times` still failed, and the remaining
+candidate was the value an access returns rather than the cycle it lands on.
+`$F0`, `$F1` and the three timer targets are write-only: they can be written
+and they read back zero. This emulator handed back whatever had been written
+to them. A read is an access, and that one returned the wrong byte.
+
+With that, **three of the four test ROMs pass** — `spc_smp` in all sixteen
+of its sections, `spc_mem_access_times`, and `spc_timer`. Only the DSP echo
+test is left, and it belongs to item 2 rather than here.
 
 Speed: 81 fps on Super Mario World against 92 before and 60 for real time.
 The extra bus accesses cost about a tenth of the frame rate, which is a fair
@@ -352,8 +353,8 @@ The verdict, as of now:
 
 | ROM | what it exercises | result |
 |---|---|---|
-| `spc_smp.sfc` | instructions, then instruction timing | edge arith, full BRK, full CMP and full DAA/DAS **pass**; **fails** on "CPU timing/mem access times" |
-| `spc_mem_access_times.sfc` | when within an opcode each access happens | **Failed 02** |
+| `spc_smp.sfc` | instructions, instruction timing, register behaviour, timers — sixteen sections | **PASSED** |
+| `spc_mem_access_times.sfc` | when within an opcode each access happens | **PASSED** |
 | `spc_timer.sfc` | timer read against write | **PASSED** |
 | `spc_dsp6.sfc` | the echo unit: basics, ESA and EDL changes | **Failed 02** |
 

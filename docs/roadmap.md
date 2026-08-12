@@ -110,12 +110,15 @@ The largest single gap. Everything below the first item depends on it.
       The order is pinned as well: `test_apu_cycles.py` holds the expected run
       of reads, writes and idles for all 256 and compares it against what
       reaches the bus.
-      This is what `spc_timer.sfc` was failing on, and it now **passes**: the
-      first hardware test ROM this emulator has passed.  It also turned up two
-      plain bugs -- `DBNZ Y` ran eight cycles when taken against hardware's
-      six, because the table already held the taken cost and the branch added
-      it again; and `INCW`/`DECW` read both bytes before writing either, where
-      the chip writes the low byte back before it reads the high one
+      `spc_timer`, `spc_mem_access_times` and `spc_smp` all **pass** -- the
+      first hardware test ROMs this emulator has passed, and `spc_smp` in all
+      sixteen of its sections.  Three plain bugs fell out on the way: `DBNZ Y`
+      ran eight cycles when taken against hardware's six, because the table
+      already held the taken cost and the branch added it again; `INCW`/`DECW`
+      read both bytes before writing either, where the chip writes the low
+      byte back before it reads the high one; and `$F0`, `$F1` and the three
+      timer targets are write-only registers that were handing back what had
+      been written to them instead of zero
 - [x] The timers' first stage is a scaler that free-runs whether or not the
       timer is enabled; an enable resets the divisor and the output counter
       but not it.  All three used to be reset together, which put every timer
@@ -201,9 +204,10 @@ This is the part that decides whether any of the above converges.
 - [x] Open bus suite, and display-mode tests for overscan, hires,
       interlace, EXTBG, direct colour and mosaic
 - [~] **SPC700 and DSP test ROMs**: fetched and running.  `tools/testroms.py`
-      boots a directory of them and captures each verdict.  `spc_timer`
-      passes; `spc_smp`, `spc_mem_access_times` and `spc_dsp6` do not.  The
-      tests are the apparatus, not the fix; the fixes are section 4
+      boots a directory of them and captures each verdict.  `spc_smp`,
+      `spc_mem_access_times` and `spc_timer` all pass; `spc_dsp6` does not.
+      The tests are the apparatus, not the fix; the remaining fix is the DSP
+      pipeline above
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images

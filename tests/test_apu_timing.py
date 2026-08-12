@@ -139,6 +139,34 @@ def test_reading_a_timer_sees_the_cycles_of_its_own_instruction():
               % (first, second))
 
 
+def test_the_write_only_registers_read_back_as_zero():
+    """$F0, $F1 and the three timer targets can be written and cannot be read.
+    They used to hand back whatever had been written, which is what
+    `spc_mem_access_times` was failing on after everything else about the bus
+    cycles was right: a read is an access, and this one returned the wrong
+    byte."""
+    write_only = {0xF0: "TEST", 0xF1: "CONTROL",
+                  0xFA: "T0TARGET", 0xFB: "T1TARGET", 0xFC: "T2TARGET"}
+    readable = {0xF2: "DSPADDR", 0xF8: "AUXIO4", 0xF9: "AUXIO5"}
+
+    for addr, name in sorted(write_only.items()) + sorted(readable.items()):
+        apu = APU()
+        apu.do_reset()
+        apu.poke_ram(CODE, bytes([0x8F, 0x5A, addr & 0xFF]))   # MOV reg, #$5A
+        apu.set_pc(CODE)
+        apu.do_step()
+        apu.poke_ram(CODE, bytes([0xE4, addr & 0xFF]))         # MOV A, reg
+        apu.set_pc(CODE)
+        apu.do_step()
+        got = apu.regs["a"]
+        want = 0x00 if addr in write_only else 0x5A
+        if got != want:
+            FAILURES.append("$%02X (%s) read back $%02X, want $%02X"
+                            % (addr, name, got, want))
+    if not FAILURES:
+        print("      write-only registers read zero, readable ones read back")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:

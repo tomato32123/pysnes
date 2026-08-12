@@ -894,6 +894,12 @@ cdef class APU:
                 val = self.timer_counter[i - 13] & 0x0F
                 self.timer_counter[i - 13] = 0
                 return val
+            # $F0 and $F1 are write-only, and so are the three timer targets:
+            # they read back zero rather than what was written.  The value is
+            # kept in RAM underneath, which is what a write to any of these
+            # addresses also updates, but nothing can see it through here.
+            if i == 0 or i == 1 or (10 <= i <= 12):
+                return 0
             return self.ram[addr]
         if addr >= 0xFFC0 and self.ipl_enabled:
             return self.ipl[addr - 0xFFC0]
