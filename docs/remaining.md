@@ -695,19 +695,53 @@ Covered at the top. The tooling is done; the reference is not available.
 
 ---
 
-## The three titles that do not render
+## The titles that do not render
 
 | title | status | what is known |
 |---|---|---|
 | Super Mario Kart | flat | DSP-1, needs firmware not present. Expected. |
+| Momotarou Dentetsu Happy | flat | **Correct.** A blank cartridge boots its own check program; see item 7. |
 | `Mix.smc` | black | **The image is broken, not the emulator.** See below. |
 | `SMWREX.smc` | black | **The image is broken, not the emulator.** See below. |
+| Rudra no Hihou (J), and its three translations | flat | **A real defect.** The one open game-level bug. |
 
-Both of the two that were "unexplained" are Super Mario World hacks that
-destroy something the base game still needs, and both are proved so by
-running unmodified `Super Mario World (E)` down the same path and watching it
-work. Nothing in the library now renders nothing for a reason inside this
-emulator.
+Both of the two black ones are Super Mario World hacks that destroy something
+the base game still needs, and both are proved so by running unmodified
+`Super Mario World (E)` down the same path and watching it work.
+
+### Rudra no Hihou — stuck in the sound driver's upload handshake
+
+This one is ours, and the plain Japanese dump is the proof: its checksum is
+correct, `$4CE6` computed and stored, so it is not a bad image. It renders a
+flat screen with **one CGRAM entry of 256** — it never reaches the point of
+loading a palette.
+
+What it is doing, in order:
+
+- The main thread sits at `$C0:04A8` on `LDA $3B / BEQ`, waiting on a job
+  queue whose length is `$06:3B`. The queue is filled from banks `$E6`/`$E7`,
+  which are never executed, so it waits for ever. That is a symptom.
+- The cause is one level down: bank `$EB` is the sound driver's uploader, and
+  it runs the IPL-compatible block protocol — `$2141` the byte, `$2140` the
+  counter, `CMP $2140 / BNE` until the APU echoes. 44,202 port writes go out
+  over sixty frames, so the transfer is working, and it works right up to the
+  last block.
+- On the APU side the driver is alive: it runs its own code, reads port 0
+  (`$F4`) 4,549 times in 200,000 steps and reads both timers. But it never
+  *writes* port 0, which is what the CPU is waiting for.
+- Its main loop is at SPC `$03A5`: `MOV A,$F4 / BEQ +8`. It acts on a command
+  only when port 0 is non-zero, and the CPU's last write to `$2140` is `$00`.
+  So the driver has already left the upload handler it should still be inside.
+
+Where to pick it up: the handler is the `CALL $0CF5` at SPC `$03A7`. Find why
+it returns early — one value of the handshake seen twice, or one missed. The
+SPC-to-CPU clock ratio is *not* the cause: it is the nominal 1024000 /
+21477272, and the comment in `run_until` records that a 5% error there was
+found and fixed once already.
+
+This is the same area as the open `$2140-$2143` timing item below, and it is
+the best lead this project has for it: a real game, a good dump, and a
+handshake that can be logged from both ends.
 
 Kunio-kun no Dodge Ball was on this list as "flat, unexplained". It is not:
 it draws its title screen, takes START, and reaches the team menu. What was
