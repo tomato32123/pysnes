@@ -969,6 +969,10 @@ cdef class APU:
         self.sp = 0xEF
         self.psw = 0x02
         self.ipl_enabled = 1
+        self.test_timers_disable = 0
+        self.test_ram_writable = 1
+        self.test_ram_disable = 0
+        self.test_timers_enable = 1
         self.pc = (<uint16_t>self.ipl[0x3E]) | (<uint16_t>self.ipl[0x3F] << 8)
         for i in range(4):
             self.port_in[i] = 0
@@ -1045,7 +1049,12 @@ cdef class APU:
             self.timer_stage[i] += cycles
             while self.timer_stage[i] >= period:
                 self.timer_stage[i] -= period
+                # $F1 enables a timer; $F0 can switch all three off underneath
+                # it, and carries its own enable that has to be set as well.
+                # blargg's test_timer_stop turns on exactly this.
                 if not self.timer_enabled[i]:
+                    continue
+                if self.test_timers_disable or not self.test_timers_enable:
                     continue
                 self.timer_div[i] += 1
                 target = self.timer_target[i]      # 0 behaves as 256
@@ -1158,6 +1167,11 @@ cdef class APU:
             return 0
         if addr >= 0xFFC0 and self.ipl_enabled:
             return self.ipl[addr - 0xFFC0]
+        # $F0 bit 2 cuts the RAM out of the map.  What comes back instead is
+        # not open bus and not zero: it is $5A, which is a property of this
+        # chip and not derivable from anything.
+        if self.test_ram_disable:
+            return 0x5A
         return self.ram[addr]
 
     cdef void write(self, uint16_t addr, uint8_t value) noexcept:
@@ -1169,7 +1183,20 @@ cdef class APU:
             # The write reaches the RAM under the register page as well as the
             # register.  Nothing can read it back through here, but the DSP
             # fetches its samples straight out of that RAM and would see it.
-            self.ram[addr] = value
+            if self.test_ram_writable and not self.test_ram_disable:
+                self.ram[addr] = value
+            if i == 0:                            # $F0 TEST
+                # Write-only, and refused outright while the direct-page flag
+                # is set -- which is the sort of rule that only a test ROM
+                # ever finds.  Its bits switch off the timers, make the RAM
+                # read-only, and take the RAM out of the map entirely.
+                if self.psw & P_P:
+                    return
+                self.test_timers_disable = value & 1
+                self.test_ram_writable = (value >> 1) & 1
+                self.test_ram_disable = (value >> 2) & 1
+                self.test_timers_enable = (value >> 3) & 1
+                return
             if i == 1:                            # $F1 CONTROL
                 for t in range(3):
                     if (value >> t) & 1:
@@ -1211,7 +1238,8 @@ cdef class APU:
             elif i == 9:
                 self.aux5 = value
             return
-        self.ram[addr] = value
+        if self.test_ram_writable and not self.test_ram_disable:
+            self.ram[addr] = value
 
     cdef uint16_t read16(self, uint16_t addr) noexcept:
         cdef uint16_t lo = self.read(addr)
@@ -2192,7 +2220,7 @@ cdef class APU:
 
     def state_ints(self):
         cdef int i, j
-        v = [self.pc, self.a, self.x, self.y, self.sp, self.psw, self.ipl_enabled, self.clock, self.cycle_target, self.master_prev, self.frac, self.dsp_counter, self.extra_cycles, self.stopped, self.dsp_addr, self.aux4, self.aux5]
+        v = [self.pc, self.a, self.x, self.y, self.sp, self.psw, self.ipl_enabled, self.clock, self.test_timers_disable, self.test_ram_writable, self.test_ram_disable, self.test_timers_enable, self.cycle_target, self.master_prev, self.frac, self.dsp_counter, self.extra_cycles, self.stopped, self.dsp_addr, self.aux4, self.aux5]
         for i in range(4):
             v.append(self.port_in[i])
         for i in range(4):
@@ -2210,7 +2238,7 @@ cdef class APU:
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 17
+        cdef int i, j, k = 21
         self.pc = v[0]
         self.a = v[1]
         self.x = v[2]
@@ -2219,15 +2247,19 @@ cdef class APU:
         self.psw = v[5]
         self.ipl_enabled = v[6]
         self.clock = v[7]
-        self.cycle_target = v[8]
-        self.master_prev = v[9]
-        self.frac = v[10]
-        self.dsp_counter = v[11]
-        self.extra_cycles = v[12]
-        self.stopped = v[13]
-        self.dsp_addr = v[14]
-        self.aux4 = v[15]
-        self.aux5 = v[16]
+        self.test_timers_disable = v[8]
+        self.test_ram_writable = v[9]
+        self.test_ram_disable = v[10]
+        self.test_timers_enable = v[11]
+        self.cycle_target = v[12]
+        self.master_prev = v[13]
+        self.frac = v[14]
+        self.dsp_counter = v[15]
+        self.extra_cycles = v[16]
+        self.stopped = v[17]
+        self.dsp_addr = v[18]
+        self.aux4 = v[19]
+        self.aux5 = v[20]
         for i in range(4):
             self.port_in[i] = v[k + i]
         k += 4

@@ -780,8 +780,11 @@ cdef class PPU:
         cdef int words_per_tile = bpp * 4
         cdef int x, sx, tile_x, tile_y, screen, sub_x, sub_y
         cdef uint32_t map_addr, chr_addr
-        cdef uint16_t entry, plane
-        cdef int tile_num, palette, prio, hflip, vflip, row_in, col, colour
+        cdef uint32_t cached_map = 0xFFFFFFFF
+        cdef uint32_t cached_chr = 0xFFFFFFFF
+        cdef uint16_t entry, plane0 = 0, plane1 = 0, plane2 = 0, plane3 = 0
+        cdef int tile_num, tile_base = 0, palette = 0, prio = 0
+        cdef int hflip = 0, vflip = 0, row_in, col, colour
         cdef int px_in_tile, py_in_tile
 
         for x in range(x0, x1):
@@ -800,12 +803,20 @@ cdef class PPU:
                 screen += 0x800 if self.bg_map_wide[bg] else 0x400
             map_addr = (map_base + screen + ((tile_y & 0x1F) << 5) + (tile_x & 0x1F)) & 0x7FFF
 
-            entry = self.vram[map_addr]
-            tile_num = entry & 0x03FF
-            palette = (entry >> 10) & 7
-            prio = (entry >> 13) & 1
-            hflip = (entry >> 14) & 1
-            vflip = (entry >> 15) & 1
+            # Eight pixels in a row come out of one tilemap entry and one set
+            # of bitplanes, and VRAM cannot change inside a span -- a write
+            # during display is refused.  So both are fetched when the address
+            # moves and reused until it does.  That is the same fetch pattern
+            # the hardware has, and it is most of what this renderer costs:
+            # the reads were being done once per pixel.
+            if map_addr != cached_map:
+                cached_map = map_addr
+                entry = self.vram[map_addr]
+                tile_base = entry & 0x03FF
+                palette = (entry >> 10) & 7
+                prio = (entry >> 13) & 1
+                hflip = (entry >> 14) & 1
+                vflip = (entry >> 15) & 1
 
             px_in_tile = sx & ((1 << tile_shift) - 1)
             py_in_tile = y & ((1 << tile_shift) - 1)
@@ -814,6 +825,7 @@ cdef class PPU:
             if vflip:
                 py_in_tile = ((1 << tile_shift) - 1) - py_in_tile
 
+            tile_num = tile_base
             if self.bg_tile_size[bg]:
                 sub_x = (px_in_tile >> 3) & 1
                 sub_y = (py_in_tile >> 3) & 1
@@ -822,16 +834,21 @@ cdef class PPU:
             col = px_in_tile & 7
 
             chr_addr = (chr_base + tile_num * words_per_tile + row_in) & 0x7FFF
-            plane = self.vram[chr_addr]
-            colour = ((plane >> (7 - col)) & 1) | (((plane >> (15 - col)) & 1) << 1)
+            if chr_addr != cached_chr:
+                cached_chr = chr_addr
+                plane0 = self.vram[chr_addr]
+                if bpp >= 4:
+                    plane1 = self.vram[(chr_addr + 8) & 0x7FFF]
+                if bpp == 8:
+                    plane2 = self.vram[(chr_addr + 16) & 0x7FFF]
+                    plane3 = self.vram[(chr_addr + 24) & 0x7FFF]
+
+            colour = ((plane0 >> (7 - col)) & 1) | (((plane0 >> (15 - col)) & 1) << 1)
             if bpp >= 4:
-                plane = self.vram[(chr_addr + 8) & 0x7FFF]
-                colour |= (((plane >> (7 - col)) & 1) << 2) | (((plane >> (15 - col)) & 1) << 3)
+                colour |= (((plane1 >> (7 - col)) & 1) << 2) | (((plane1 >> (15 - col)) & 1) << 3)
             if bpp == 8:
-                plane = self.vram[(chr_addr + 16) & 0x7FFF]
-                colour |= (((plane >> (7 - col)) & 1) << 4) | (((plane >> (15 - col)) & 1) << 5)
-                plane = self.vram[(chr_addr + 24) & 0x7FFF]
-                colour |= (((plane >> (7 - col)) & 1) << 6) | (((plane >> (15 - col)) & 1) << 7)
+                colour |= (((plane2 >> (7 - col)) & 1) << 4) | (((plane2 >> (15 - col)) & 1) << 5)
+                colour |= (((plane3 >> (7 - col)) & 1) << 6) | (((plane3 >> (15 - col)) & 1) << 7)
 
             if colour:
                 if bpp == 8:

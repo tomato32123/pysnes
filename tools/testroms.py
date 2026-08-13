@@ -50,7 +50,11 @@ def verdict(framebuffer):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("romdir")
-    ap.add_argument("--frames", type=int, default=1500)
+    # 1500 frames is not enough for two of blargg's SPC ROMs: spc_smp needs
+    # about 6000 and spc_dsp6 about 14000, and both report "unfinished"
+    # rather than failing when cut short -- which reads exactly like a
+    # regression and was twice mistaken for one.
+    ap.add_argument("--frames", type=int, default=14000)
     ap.add_argument("--shots", default="shots/testroms")
     args = ap.parse_args()
 

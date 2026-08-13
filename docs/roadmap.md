@@ -273,6 +273,19 @@ This is the part that decides whether any of the above converges.
       `spc_mem_access_times`, `spc_timer` and `spc_dsp6` **all pass**.
       The tests are the apparatus, not the fix; the remaining fix is the DSP
       pipeline above
+- [x] **higan's test-ROM collection**: 312 ROMs, byuu's own gathering of what
+      the SNES scene has written -- blargg's, krom's, undisbeliever's, neser's,
+      Sour's, and more.  `tools/blarggtests.py` runs the self-checking ones and
+      reads the verdict off the screen, which for these has to be done by
+      pixels: unlike krom's, they build their font in VRAM, so there is no
+      character code in the tile map to read.  The word `Passed` is stored as
+      the pixels it makes and searched for.
+      It found a defect immediately.  `3-test_write_disable` **failed**: the
+      SPC700's $F0 TEST register was not implemented at all, so its bits --
+      RAM read-only, RAM out of the map, timers off -- did nothing.  Two of
+      blargg's tests turn on exactly those, and both pass now.  The register
+      also refuses writes while the direct-page flag is set, which is the kind
+      of rule only a test ROM ever finds
 - [x] **The SPC7110's own check program**: Momotarou Dentetsu Happy carries
       one in its ROM and boots into it whenever the save RAM does not say the
       chip has been checked.  `tools/spc7110check.py` runs both its modes and

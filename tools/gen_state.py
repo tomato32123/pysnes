@@ -77,6 +77,8 @@ SPECS = [
         marker="    # =====================================================================\n"
                "    # python helpers",
         scalars=["pc", "a", "x", "y", "sp", "psw", "ipl_enabled", "clock",
+                 "test_timers_disable", "test_ram_writable",
+                 "test_ram_disable", "test_timers_enable",
                  "cycle_target",
                  "master_prev", "frac", "dsp_counter", "extra_cycles", "stopped",
                  "dsp_addr", "aux4", "aux5"],

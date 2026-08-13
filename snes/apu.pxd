@@ -101,6 +101,13 @@ cdef class APU:
     cdef uint8_t ram[0x10000]
     cdef uint8_t ipl[64]
     cdef int ipl_enabled
+    # $F0 TEST.  The timers can be switched off, the RAM made read-only, and
+    # the RAM taken out of the map so reads give $5A.  Defaults are the
+    # power-on state: writable, present, timers enabled.
+    cdef int test_timers_disable
+    cdef int test_ram_writable
+    cdef int test_ram_disable
+    cdef int test_timers_enable
 
     # -- S-CPU <-> APU communication ports ($2140-$2143 <-> $F4-$F7) ------
     cdef uint8_t port_in[4]      # written by the S-CPU, read by the SPC700
