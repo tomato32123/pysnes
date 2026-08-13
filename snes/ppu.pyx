@@ -872,7 +872,15 @@ cdef class PPU:
 
     cdef void _render_bg_hires(self, int bg, int line, int bpp,
                                int x0, int x1) noexcept:
-        cdef int tile_shift = 3 + self.bg_tile_size[bg]
+        # A hires tile is always sixteen half-dots wide -- eight dots, the
+        # same ground a tile covers in any other mode.  $2105's size bit only
+        # chooses the height here, so the two axes cannot share a shift as
+        # they do everywhere else.  With them shared, an 8x8 tile in mode 5 is
+        # drawn half as wide as it should be and the map is read at twice the
+        # rate: krom's interlaced font demo comes out as fragments of the
+        # wrong letters.
+        cdef int tile_shift = 4
+        cdef int tile_shift_v = 3 + self.bg_tile_size[bg]
         cdef int base_y = self._mosaic_y(bg, line)
         cdef int y = base_y + self.bg_vofs[bg]
         cdef int hofs = self.bg_hofs[bg]
@@ -899,7 +907,7 @@ cdef class PPU:
             else:
                 sx = x + hofs * 2
             tile_x = sx >> tile_shift
-            tile_y = y >> tile_shift
+            tile_y = y >> tile_shift_v
 
             screen = 0
             if self.bg_map_wide[bg] and (tile_x & 0x20):
@@ -917,16 +925,18 @@ cdef class PPU:
             vflip = (entry >> 15) & 1
 
             px_in_tile = sx & ((1 << tile_shift) - 1)
-            py_in_tile = y & ((1 << tile_shift) - 1)
+            py_in_tile = y & ((1 << tile_shift_v) - 1)
             if hflip:
                 px_in_tile = ((1 << tile_shift) - 1) - px_in_tile
             if vflip:
-                py_in_tile = ((1 << tile_shift) - 1) - py_in_tile
+                py_in_tile = ((1 << tile_shift_v) - 1) - py_in_tile
 
-            if self.bg_tile_size[bg]:
-                sub_x = (px_in_tile >> 3) & 1
-                sub_y = (py_in_tile >> 3) & 1
-                tile_num = (tile_num + sub_y * 16 + sub_x) & 0x03FF
+            # The right half of a sixteen-wide tile is the next character
+            # along, and the bottom half of a sixteen-tall one is sixteen
+            # further on -- the map holds one entry for the whole of it.
+            sub_x = (px_in_tile >> 3) & 1
+            sub_y = ((py_in_tile >> 3) & 1) if self.bg_tile_size[bg] else 0
+            tile_num = (tile_num + sub_y * 16 + sub_x) & 0x03FF
             row_in = py_in_tile & 7
             col = px_in_tile & 7
 

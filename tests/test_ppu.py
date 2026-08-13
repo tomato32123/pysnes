@@ -540,6 +540,35 @@ def test_mode5_makes_a_tile_half_as_wide():
     check("half-dot 9", hipixel(machine, 9, 0), BACKDROP)
 
 
+def test_a_hires_map_entry_covers_sixteen_half_dots():
+    """A hires tile is always sixteen half-dots wide, whatever $2105 says.
+
+    The size bit chooses the height in modes 5 and 6, not the width, so an
+    entry covers the same eight dots of screen it would in any other mode --
+    the map is read at the same rate, and the extra width comes from reading
+    two characters for it rather than one.  Sharing one size for both axes
+    reads the map twice as fast and draws the wrong half of every tile, which
+    is what krom's interlaced font demo shows and what no test here caught.
+
+    Map entry 0 and entry 1 both select the SETUP scene's eight-wide tile, so
+    the picture is eight half-dots of it, eight of the blank character after
+    it, and then the next entry.
+    """
+    machine = scene(MODE5 + """
+        rep #$20
+        lda #$0401
+        sta $2116               ; the second tilemap entry
+        lda #$0001
+        sta $2118               ; also tile 1
+        sep #$20
+""")
+    check("half-dot 7 is entry 0's character", hipixel(machine, 7, 0), TILE)
+    check("half-dot 8 is the character after it", hipixel(machine, 8, 0), BACKDROP)
+    check("half-dot 15 still is", hipixel(machine, 15, 0), BACKDROP)
+    check("half-dot 16 is entry 1", hipixel(machine, 16, 0), TILE)
+    check("half-dot 23 is entry 1", hipixel(machine, 23, 0), TILE)
+
+
 def test_mode5_without_the_sub_screen_shows_only_the_odd_half_dots():
     """The main screen owns the right pixel of each dot, so a layer that is
     only on the main screen appears in half the columns."""

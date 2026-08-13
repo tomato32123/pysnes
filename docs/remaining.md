@@ -164,10 +164,21 @@ left: bsnes emits black there and says in a comment that the value is not
 confirmed on hardware; the references show the sub screen untouched, which is
 what is implemented and what takes those demos to 100.00%.
 
-*Still open, from the same comparison*: three mode 5 interlace demos differ,
-and the differences are confined to a band at the top of the screen — 66 rows
-of 448 in `InterlaceFont`, with the other 382 exact. `InterlaceRPG` (34.65%)
-and `MosaicMode5` (68.17%) are worse and are the place to start. Six more
+**A hires tile is always sixteen half-dots wide.** $2105's size bit chooses the
+height in modes 5 and 6, not the width, and this emulator used it for both. An
+8x8 tile in mode 5 was therefore drawn eight half-dots wide, which reads the
+tilemap at twice the rate and puts the wrong half of every character on the
+screen. `InterlaceRPG` went from 34.65% to 98.77% and `MosaicMode5` from
+68.17% to 90.30%; `InterlaceFont` — whose whole picture is in its top 72 rows,
+so its earlier "95%" was black agreeing with black — went from letters made of
+fragments of other letters to letters. Two mode 5 tests in `test_ppu.py`
+passed before and after, because what they assert is true either way.
+
+*Still open, from the same comparison*: the same three mode 5 interlace demos
+still differ — `InterlaceRPG` 98.77%, `MosaicMode5` 90.30%, `InterlaceFont`
+95.71% — and the residue is scattered rather than a global offset (row and
+column shifts, and swapping the two fields, all make it worse). Interlace
+itself is the remaining suspect. Six more
 references cannot be used at all, because they contain colours the SNES cannot
 produce; `RedSpace9BitHDMA` is the interesting one of those. It drives
 brightness through HDMA a line at a time, our output matches it exactly on
