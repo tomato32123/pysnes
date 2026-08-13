@@ -1388,7 +1388,18 @@ cdef class PPU:
             if self.obj_interlace:
                 py <<= 1
             if vflip:
-                py = h - 1 - py
+                # A square object mirrors against its whole height.  A
+                # rectangular one -- the undocumented 16x32 and 32x64 sizes --
+                # mirrors within each square block instead, so the bottom half
+                # of a 16x32 flips inside itself rather than swapping with the
+                # top.  neser's obj-y-wrap shows it: the flipped sprite has to
+                # read tiles 30/31 above 20/21, not 10/11 above 00/01.
+                if w == h:
+                    py = h - 1 - py
+                elif py < w:
+                    py = w - 1 - py
+                else:
+                    py = w + (w - 1) - (py - w)
             if self.obj_interlace:
                 # Which of the two rows in the pair this field draws.  The
                 # flip runs first and on the full height, so the field moves

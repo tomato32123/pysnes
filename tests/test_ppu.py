@@ -1321,6 +1321,130 @@ def objects(count, attr="$20", size="$00"):
                max_frames=4).machine
 
 
+RECT_FLIP = """
+        sep #$20
+        lda #$8F
+        sta $2100
+
+        stz $2121
+        lda #$00
+        sta $2122
+        lda #$00
+        sta $2122               ; backdrop black
+        lda #$81
+        sta $2121
+        lda #$E0
+        sta $2122
+        lda #$03
+        sta $2122               ; sprite colour 1 = green
+        lda #$1F
+        sta $2122
+        lda #$00
+        sta $2122               ; sprite colour 2 = red
+
+        lda #$80
+        sta $2115
+        rep #$20
+        ; The sprite starts at tile $04, so its four rows of tiles are
+        ; $04 $14 $24 $34.  Nothing else in OAM can reach those.
+        ; tile $14 -- the second row -- in colour 1
+        lda #$0140
+        sta $2116
+        ldx #$0008
+t14:    lda #$00FF
+        sta $2118
+        dex
+        bne t14
+        ; tile $34 -- the fourth row -- in colour 2.  Bitplane 1 is the
+        ; high byte of the first eight words.
+        lda #$0340
+        sta $2116
+        ldx #$0008
+t34:    lda #$FF00
+        sta $2118
+        dex
+        bne t34
+        sep #$20
+
+        lda #$C0
+        sta $2101               ; OBJ base $0000, size select 6: 16x32
+
+        ; park every sprite, then put one at the origin.  A 32-tall sprite
+        ; parked below the screen wraps back onto the top rows, so they are
+        ; pushed off the left edge instead -- X bit 8 in the high table
+        ; makes X = -256.
+        stz $2102
+        stz $2103
+        ldx #$00
+park:   lda #$00
+        sta $2104
+        lda #$F0
+        sta $2104
+        lda #$00
+        sta $2104
+        lda #$00
+        sta $2104
+        inx
+        cpx #$80
+        bne park
+
+        lda #$00
+        sta $2102
+        lda #$01
+        sta $2103               ; the high table, at word $0100
+        lda #$54
+        sta $2104               ; sprite 0 on screen, sprites 1-3 off to the left
+        ldx #$1F
+high:   lda #$55
+        sta $2104
+        dex
+        bne high
+
+        stz $2102
+        stz $2103
+        lda #$00
+        sta $2104               ; X = 0
+        lda #$00
+        sta $2104               ; Y = 0
+        lda #$04
+        sta $2104               ; tile $04
+        lda #$80
+        sta $2104               ; V-flip, palette 0
+
+        lda #$10
+        sta $212C               ; objects on the main screen
+        lda #$0F
+        sta $2100
+spin:   bra spin
+"""
+
+
+def test_a_rectangular_sprite_flips_as_two_squares():
+    """$2101's undocumented sizes give rectangular objects -- 16x32 and 32x64
+    -- and a vertical flip does not mirror one of those against its full
+    height.  It mirrors within each square block, so the bottom half turns
+    over inside itself instead of swapping with the top.
+
+    neser's obj-y-wrap ROM shows it directly, because each of its sprite tiles
+    draws its own number: a flipped 16x32 has to read tiles 30/31 above 20/21.
+    Mirroring against the full height gives 10/11 above 00/01, which is what
+    this emulator did.
+
+    Here tile $10 -- the second row of a 16x32 -- is green and tile $30, the
+    fourth, is red.  Flipped, the top of the object has to come from the
+    second row, because that is the bottom of the *upper* square.
+    """
+    machine = run(RECT_FLIP, max_frames=4).machine
+    green = (0, expand(31), 0)
+    red = (expand(31), 0, 0)
+    got = pixel(machine, 0, 0)
+    if got == red:
+        FAILURES.append("the flip mirrored against the full height: the top "
+                        "row came from tile $34, not tile $14")
+    else:
+        check("flipped 16x32 takes its top row from the upper square", got, green)
+
+
 def test_sprite_is_drawn_where_oam_puts_it():
     machine = objects(1)
     green = (0, expand(31), 0)
