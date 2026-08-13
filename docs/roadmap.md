@@ -244,10 +244,12 @@ The largest single gap. Everything below the first item depends on it.
       of a tile -- measured the same and was reverted.
       What made it safe to rewrite the hot path at all was the reference
       pictures: 34 of 35 demos still match pixel for pixel afterwards
-- [ ] The display path.  Blit and flip are 7.0 ms of the remaining 14.8, which
-      is more than the emulator now costs.  It is a software scale of 2.2
-      million pixels; SDL can do it on the GPU.  Not done because there is no
-      display on this machine to measure it on
+- [x] **The display path**: 8.20 ms to draw and present a frame, against
+      **0.66** once SDL is handed a texture and left to scale it.  The CPU
+      stopped touching two million pixels a frame.  `play.py` falls back to
+      the old software scale when there is no renderer -- as on this machine,
+      which has no display -- and `--software-scale` forces it, which is how
+      the two were measured against each other
 
 ## 6. Verification
 

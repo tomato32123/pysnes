@@ -12,7 +12,8 @@ from snes.system import System
 from snes.rewind import Rewind
 
 ROM = from_argv()
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 900
+args = [a for a in sys.argv[1:] if not a.startswith("-")]
+N = int(args[0]) if args else 900
 SCALE = 3
 W, H = 512, 478
 
@@ -22,7 +23,11 @@ for _ in range(1700):
 
 pygame.mixer.pre_init(frequency=32000, size=-16, channels=2, buffer=1024)
 pygame.init()
-screen = pygame.display.set_mode((W * SCALE, H * SCALE))
+import play as _play
+screen = _play.Display("frameprof", W * SCALE, H * SCALE,
+                       software="--software-scale" in sys.argv, vsync=False)
+print("scaling: %s" % ("SDL, during presentation" if screen.hardware
+                       else "software, on the CPU"))
 pygame.display.set_caption("pysnes frame profile")
 audio = None
 try:
@@ -41,10 +46,8 @@ for i in range(N):
     t1 = time.perf_counter()
     rewind.capture(s)
     t2 = time.perf_counter()
-    frame = pygame.image.frombuffer(bytes(s.framebuffer), (W, H), "BGRA")
-    pygame.transform.scale(frame, screen.get_size(), screen)
+    screen.show(s.framebuffer, s.visible_height)
     t3 = time.perf_counter()
-    pygame.display.flip()
     t4 = time.perf_counter()
     if audio:
         audio.feed(s)

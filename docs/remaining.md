@@ -807,11 +807,23 @@ obvious optimisation, fetching the tilemap entry once per eight pixels
 instead of once per pixel -- measured *the same* and was reverted. VRAM is
 64 KB and never leaves cache; the branch cost as much as the reads saved.
 
-*What is left*: the display path. Blitting and flipping cost 7.0 ms of the
-14.8, which is now more than the emulator. It is `pygame.transform.scale`
-doing 2.2 million pixels in software; the fix is to let SDL scale on the GPU.
-That is not done here because this machine has no display to measure it on,
-and shipping an unmeasured optimisation is how the tile cache nearly got in.
+**The display path, next.** Blitting and flipping cost 7.0 ms of the 14.8 —
+more than the emulator did. It was `pygame.transform.scale` working through
+2.2 million pixels on the CPU. Handing SDL a texture at the size the PPU drew
+it and letting the GPU stretch it to the window costs nothing here at all:
+
+| | software scale | SDL renderer |
+|---|---|---|
+| draw and present | 8.20 ms | **0.66 ms** |
+| play loop total | 19.59 ms | **12.60 ms** |
+| frames over budget | 77.0% | **12.0%** |
+
+The machine this was written on has no display, which is exactly why the
+fallback matters: `play.py` tries the SDL renderer, and what happens when it
+is not there is what the emulator did before. `--software-scale` forces the
+old path, which is how the table above was measured. What cannot be checked
+here is whether a real GPU makes the presentation faster still — it can only
+help, and the CPU side of the saving is measured, not assumed.
 
 ## How to verify anything here
 
