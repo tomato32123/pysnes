@@ -35,6 +35,23 @@ def find_roms(root):
     return sorted(out)
 
 
+# The pad, for the runs that press it.  Start and A between them get past
+# a title screen, a "press start", a corrupt-save prompt and most opening
+# cutscenes -- which is as far as a run that presses nothing ever gets.
+PAD_START = 0x1000
+PAD_A = 0x80
+
+
+def frame_signature(fb):
+    """A cheap fingerprint of a frame, for telling motion from a still.
+
+    A title screen is a still.  A game that has actually started is not.
+    Booting is the only thing a run that never presses a button can check,
+    and it is much less than these ROMs can be asked.
+    """
+    return hash(bytes(fb[::4 * 397]))
+
+
 def analyse_frame(fb):
     """Rough description of what is on screen."""
     colours = set()
@@ -48,7 +65,7 @@ def analyse_frame(fb):
     return nonblack, len(colours)
 
 
-def run_one(path, frames, shots_dir):
+def run_one(path, frames, shots_dir, play=False):
     result = {"path": path, "name": os.path.basename(path)}
     try:
         machine = System(path)
@@ -72,11 +89,26 @@ def run_one(path, frames, shots_dir):
     best = (0, 0)
     best_frame = 0
     every = max(1, frames // 12)
+    signatures = []
     try:
         for i in range(frames):
+            if play:
+                # Press start, then A, over and over: enough to get past a
+                # title screen and a prompt, and short enough that a menu it
+                # opens gets closed again.
+                phase = i % 120
+                if phase == 0:
+                    machine.set_pad(0, PAD_START)
+                elif phase == 8:
+                    machine.set_pad(0, 0)
+                elif phase == 60:
+                    machine.set_pad(0, PAD_A)
+                elif phase == 68:
+                    machine.set_pad(0, 0)
             machine.run_frame()
             if (i + 1) % every == 0 or i == frames - 1:
                 seen = analyse_frame(machine.framebuffer)
+                signatures.append(frame_signature(machine.framebuffer))
                 if seen > best:
                     best = seen
                     best_frame = i + 1
@@ -114,6 +146,10 @@ def run_one(path, frames, shots_dir):
     result["mode"] = machine.ppu.bg_mode if hasattr(machine.ppu, "bg_mode") else -1
     top = pcs.most_common(1)
     result["hot_pc_share"] = (top[0][1] / float(sum(pcs.values()))) if pcs else 0.0
+    # How much of the run was not a still picture.
+    moved = sum(1 for a, b in zip(signatures, signatures[1:]) if a != b)
+    result["moved"] = moved
+    result["samples"] = max(0, len(signatures) - 1)
 
     if nonblack == 0:
         result["status"] = "black"
@@ -142,6 +178,9 @@ def main():
     # earlier run's output means the same ROM here.
     ap.add_argument("--start", type=int, default=1,
                     help="skip to this position in the list (1-based)")
+    ap.add_argument("--play", action="store_true",
+                    help="press start and A while it runs, and report how "
+                         "much of the run was not a still picture")
     args = ap.parse_args()
 
     roms = find_roms(args.romdir)
@@ -154,15 +193,16 @@ def main():
     for i, path in enumerate(roms, 1):
         if i < args.start:
             continue
-        res = run_one(path, args.frames, args.shots)
+        res = run_one(path, args.frames, args.shots, play=args.play)
         results.append(res)
         chip = res.get("coproc") or ""
         print("%3d/%-3d %-9s %-46s %-8s $%02X %-8s %s%s"
               % (i, len(roms), res["status"], res["name"][:46],
                  res.get("map", "-"), res.get("chip", 0), chip,
-                 res.get("detail", "nonblack=%s colours=%s @f%s" %
+                 res.get("detail", "nonblack=%s colours=%s @f%s moving=%s/%s" %
                          (res.get("nonblack"), res.get("colours"),
-                          res.get("best_frame"))),
+                          res.get("best_frame"), res.get("moved"),
+                          res.get("samples"))),
                  "  (slow to start)" if res.get("slow") else ""),
               flush=True)
 

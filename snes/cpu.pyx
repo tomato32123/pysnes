@@ -277,10 +277,27 @@ cdef class CPU:
         return ((<uint32_t>self.db << 16) + ((hi << 8) | lo)) & 0xFFFFFF
 
     cdef inline uint32_t am_dpix(self) noexcept:
-        """(dp,X)"""
+        """(dp,X)
+
+        In emulation mode this mode fetches its pointer oddly, and only this
+        one does.  The low byte comes from D + dp + X with no page wrapping,
+        so a direct page whose low byte is not zero can put it anywhere; the
+        high byte comes from that address plus one, and *the plus one wraps
+        inside the page*.  With D=$11A, X=$EE and `lda ($F7,x)` the sum is
+        $2FF, and the high byte is read from $200 rather than $300.
+
+        gilyon's 65C816 test ROM fails at its test 27 without this, and it
+        is documented in that ROM's own README as undocumented hardware
+        behaviour -- the sort of thing that is only ever found by running
+        someone else's test.
+        """
         cdef uint32_t ptr = self.am_dpx()
-        cdef uint32_t lo = self.read(ptr)
-        cdef uint32_t hi = self.read(self.nxt(ptr))
+        cdef uint32_t lo
+        cdef uint32_t hi
+        if self.e:
+            self.ea_wrap = 2
+        lo = self.read(ptr)
+        hi = self.read(self.nxt(ptr))
         self.ea_wrap = 0
         return ((<uint32_t>self.db << 16) + ((hi << 8) | lo)) & 0xFFFFFF
 
@@ -297,10 +314,23 @@ cdef class CPU:
         return ((<uint32_t>self.db << 16) + base + self.y) & 0xFFFFFF
 
     cdef inline uint32_t am_dpil(self) noexcept:
-        """[dp]"""
+        """[dp]
+
+        The three bytes of the pointer are read in a row, even when the
+        first is the last byte of the direct page.  In emulation mode with
+        DL zero the direct page wraps within itself for the operand, but
+        this pointer fetch does not: gilyon's test 2d reads $01FF, $0200
+        and $0201 with D=$0100, and the README that comes with it says the
+        wrapping applies to (dp,X) alone.  A long indirect is not a mode
+        the 6502 had, so it has no 6502 habit to imitate.
+        """
         cdef uint32_t ptr = self.am_dp()
-        cdef uint32_t a1 = self.nxt(ptr)
-        cdef uint32_t a2 = self.nxt(a1)
+        cdef uint32_t a1
+        cdef uint32_t a2
+        if self.ea_wrap == 2:
+            self.ea_wrap = 1
+        a1 = self.nxt(ptr)
+        a2 = self.nxt(a1)
         cdef uint32_t lo = self.read(ptr)
         cdef uint32_t hi = self.read(a1)
         cdef uint32_t bank = self.read(a2)
@@ -567,16 +597,23 @@ cdef class CPU:
             self.io()
         self.pc = target
 
-    cdef void interrupt(self, uint16_t vector, int is_brk) noexcept:
+    cdef void interrupt(self, uint16_t vector, int software) noexcept:
+        """Take an interrupt.  `software` separates BRK and COP from the pins.
+
+        In emulation mode bit 4 of the pushed status is the B flag rather
+        than the index width, and what it says is which kind of interrupt
+        this was: set for the two the program asked for, clear for the two
+        the hardware raised.  COP is one a program asks for, and was being
+        pushed as though a pin had raised it -- gilyon's test 103 runs COP
+        with the stack at $0100 and wants $3b on the stack, not $2b.
+        """
         cdef uint8_t pushed = self.p
         self.io()
         self.io()
         if not self.e:
             self.push(self.pb)
         else:
-            # In emulation mode bit 4 of the pushed status is the B flag; it
-            # must not disturb the live X (index width) bit.
-            pushed = (self.p | FLAG_B) if is_brk else (self.p & ~FLAG_B)
+            pushed = (self.p | FLAG_B) if software else (self.p & ~FLAG_B)
         self.push16(self.pc)
         self.push(pushed)
         self.p |= FLAG_I
@@ -1396,9 +1433,9 @@ cdef class CPU:
         elif op == 0x02:                                    # COP
             self.fetch()
             if self.e:
-                self.interrupt(VEC_EMU_COP, 0)
+                self.interrupt(VEC_EMU_COP, 1)
             else:
-                self.interrupt(VEC_NATIVE_COP, 0)
+                self.interrupt(VEC_NATIVE_COP, 1)
         elif op == 0xCB:                                    # WAI
             self.io(); self.io()
             self.waiting = 1
