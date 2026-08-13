@@ -231,8 +231,18 @@ The largest single gap. Everything below the first item depends on it.
       the verdict out of the program's own result table.  All twelve of its
       tests pass, it writes the signature, and the game boots to its title
       screen.
-      Missing: the RTC at $4840-$4842, which only Far East of Eden Zero has
-      and which nothing here can check
+      The RTC at $4840-$4842 is now there too.  Which cartridges have one is
+      in the header -- Tengai Makyou Zero says $F9 and has a clock, Momotarou
+      Dentetsu Happy says $F5 and does not -- and it is an Epson part with
+      sixteen four-bit registers holding the digits of the time, reached
+      through a small state machine: a command saying whether the exchange
+      reads or writes, a register number, then the nibbles, which step along
+      by themselves.  The time it reports is this machine's.
+      The game does not read its clock in the first minute after boot, so
+      waiting for it would be a hope rather than a check; the protocol is
+      driven against the real cartridge instead, and the digits that come
+      back are compared with the host clock, in both twelve- and
+      twenty-four-hour form
 - [x] **OBC1.**  Glue logic that builds an object table: a base, a sprite
       index, four bytes a sprite and a two-bit field packed four to a byte,
       with the chip doing the read-mask-shift-write the console would

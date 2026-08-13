@@ -69,3 +69,16 @@ cdef class SPC7110(Board):
     cdef uint8_t dec_read(self) noexcept
     cdef void dec_initialize(self, int mode, uint32_t origin) noexcept
     cdef void dec_decode(self) noexcept
+
+    # -- the real-time clock, on the cartridges that have one -------------
+    cdef int has_rtc
+    cdef uint8_t rtc[16]             # sixteen four-bit registers
+    cdef int rtc_state               # 0 idle, 1 command, 2 index, 3 write, 4 read
+    cdef int rtc_reading
+    cdef int rtc_index
+    cdef uint32_t rtc_reads          # how often the game has asked, for tooling
+    cdef uint32_t rtc_touches        # any access at all to $4840-$4842
+
+    cdef void rtc_sync(self) noexcept
+    cdef uint8_t rtc_read(self, uint32_t off, uint8_t data) noexcept
+    cdef void rtc_write(self, uint32_t off, uint8_t value) noexcept

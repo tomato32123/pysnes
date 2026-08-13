@@ -30,11 +30,21 @@ guessable and the table below is hardware design data: it is transcribed from
 the public implementation by neviksti and talarubi rather than reasoned out
 here.  The code around it is written here; the numbers are theirs.
 
-There is also an RTC on some SPC7110 cartridges ($4840-$4842).  Momotarou
-Dentetsu Happy does not have one and nothing else here does either, so it is
-absent rather than written blind.
+There is also an RTC on some SPC7110 cartridges, at $4840-$4842, and which
+cartridges those are is written into the header: Tengai Makyou Zero carries
+chipset $F9 and has one, Momotarou Dentetsu Happy carries $F5 and does not.
+It is an Epson part with sixteen four-bit registers holding the digits of the
+time, reached through a little state machine -- a command saying whether this
+exchange reads or writes, then a register number, then the nibbles, which
+step on by themselves.  The register layout and that protocol are as ares
+implements them.
+
+The time it reports is this machine's, taken when the console asks.  A clock
+that a game reads to decide what day it is has nothing to gain from being
+emulated slowly.
 """
 from cpython.bytes cimport PyBytes_FromStringAndSize
+from libc.time cimport time, time_t, localtime, tm
 from libc.stdint cimport (uint8_t, uint16_t, uint32_t, uint64_t,
                           int16_t, int32_t)
 from libc.string cimport memset, memcpy
@@ -113,6 +123,12 @@ cdef class SPC7110(Board):
     def __cinit__(self, Cart cart):
         self.name = u"SPC7110"
         self.rom = cart.rom
+        # Which of these cartridges has a clock is in the header: Tengai
+        # Makyou Zero says $F9 and has one, Momotarou Dentetsu Happy says
+        # $F5 and does not.
+        self.has_rtc = 1 if (cart.coprocessor & 0x0F) == 0x09 else 0
+        if self.has_rtc:
+            self.name = u"SPC7110 + RTC"
         # The program ROM is the first megabyte of the image and the data ROM
         # is everything after it.  That split is the cartridge's wiring and
         # the image records nothing about it, so it is an assumption -- one
@@ -127,6 +143,14 @@ cdef class SPC7110(Board):
         self.reset_board()
 
     cdef void reset_board(self) noexcept:
+        cdef int i
+        self.rtc_state = 0
+        self.rtc_reading = 0
+        self.rtc_index = 0
+        self.rtc_reads = 0
+        self.rtc_touches = 0
+        for i in range(16):
+            self.rtc[i] = 0
         self.r4801 = 0
         self.r4802 = 0
         self.r4803 = 0
@@ -271,6 +295,8 @@ cdef class SPC7110(Board):
         if (bank & 0x7F) < 0x40:
             if 0x4800 <= off <= 0x483F:
                 return self.read_reg(off, data)
+            if self.has_rtc and 0x4840 <= off <= 0x4842:
+                return self.rtc_read(off, data)
             if 0x6000 <= off < 0x8000:
                 if not (self.r4830 & 0x80) or c.sram_size == 0:
                     return 0x00
@@ -318,6 +344,9 @@ cdef class SPC7110(Board):
         if (bank & 0x7F) < 0x40:
             if 0x4800 <= off <= 0x483F:
                 self.write_reg(off, value)
+                return
+            if self.has_rtc and 0x4840 <= off <= 0x4842:
+                self.rtc_write(off, value)
                 return
             if 0x6000 <= off < 0x8000:
                 if (self.r4830 & 0x80) and c.sram_size:
@@ -995,9 +1024,120 @@ cdef class SPC7110(Board):
         return bytes(out)
 
 
+    # =====================================================================
+    # the clock
+    # =====================================================================
+
+    cdef void rtc_sync(self) noexcept:
+        """Fill the registers from this machine's clock.
+
+        The chip's own counter is not modelled: a game reads this to find
+        out the date, and the date it should find out is today's.  The
+        registers hold decimal digits a nibble at a time, so each field is
+        split into its tens and units.
+        """
+        cdef time_t now = time(NULL)
+        cdef tm *t = localtime(&now)
+        cdef int hour = t.tm_hour
+        cdef int pm = 0
+        if t is NULL:
+            return
+        # Register 15 bit 2 chooses the 24-hour clock; without it the hours
+        # run 1 to 12 and register 5 bit 2 says which half of the day.
+        if not (self.rtc[15] & 4):
+            pm = 1 if hour >= 12 else 0
+            hour = hour % 12
+            if hour == 0:
+                hour = 12
+        self.rtc[0] = t.tm_sec % 10
+        self.rtc[1] = (self.rtc[1] & 8) | (t.tm_sec / 10)
+        self.rtc[2] = t.tm_min % 10
+        self.rtc[3] = (self.rtc[3] & 8) | (t.tm_min / 10)
+        self.rtc[4] = hour % 10
+        self.rtc[5] = (self.rtc[5] & 8) | (hour / 10) | (4 if pm else 0)
+        self.rtc[6] = t.tm_mday % 10
+        self.rtc[7] = (self.rtc[7] & 0x0C) | (t.tm_mday / 10)
+        self.rtc[8] = (t.tm_mon + 1) % 10
+        self.rtc[9] = (self.rtc[9] & 0x0A) | ((t.tm_mon + 1) / 10)
+        self.rtc[10] = (t.tm_year + 1900) % 10
+        self.rtc[11] = ((t.tm_year + 1900) / 10) % 10
+        self.rtc[12] = (self.rtc[12] & 8) | t.tm_wday
+
+    cdef uint8_t rtc_read(self, uint32_t off, uint8_t data) noexcept:
+        cdef uint8_t value
+        self.rtc_touches += 1
+        if off == 0x4842:
+            # Bit 7 says a transfer may happen.  Nothing here takes time.
+            return 0x80
+        if off == 0x4841:
+            if self.rtc_state == 4:
+                value = self.rtc[self.rtc_index & 15] & 15
+                self.rtc_index = (self.rtc_index + 1) & 15
+                self.rtc_reads += 1
+                return value
+            return 0
+        return data
+
+    cdef void rtc_write(self, uint32_t off, uint8_t value) noexcept:
+        self.rtc_touches += 1
+        if off == 0x4840:
+            # The chip select: raising it starts an exchange, dropping it
+            # ends whatever was in progress.
+            if value & 1:
+                self.rtc_state = 1
+            else:
+                self.rtc_state = 0
+            return
+        if off != 0x4841:
+            return
+        if self.rtc_state == 1:
+            # $03 begins a write, $0C a read; anything else is not a command.
+            if value == 0x03:
+                self.rtc_reading = 0
+                self.rtc_state = 2
+            elif value == 0x0C:
+                self.rtc_reading = 1
+                self.rtc_state = 2
+                self.rtc_sync()
+            return
+        if self.rtc_state == 2:
+            self.rtc_index = value & 15
+            self.rtc_state = 4 if self.rtc_reading else 3
+            return
+        if self.rtc_state == 3:
+            self.rtc[self.rtc_index & 15] = value & 15
+            self.rtc_index = (self.rtc_index + 1) & 15
+
+    def rtc_drive(self, uint32_t off, value=None):
+        """Read or write one of the clock's three addresses.
+
+        The same entry points the console reaches through the bus, called
+        directly so a test can run the protocol against a real cartridge --
+        the only one that has this part does not read its clock in the
+        first minute after boot, and waiting for it is not a test.
+        """
+        if value is None:
+            return self.rtc_read(off, 0)
+        self.rtc_write(off, value)
+        return None
+
+    @property
+    def rtc_registers(self):
+        return [self.rtc[i] for i in range(16)]
+
+    @property
+    def rtc_read_count(self):
+        return self.rtc_reads
+
+    @property
+    def rtc_touch_count(self):
+        return self.rtc_touches
+
+
 def tables():
     """The transcribed ladder, so a test can look for a typo in it."""
     return [(EVO_PROB[i], EVO_NEXT[i][0], EVO_NEXT[i][1]) for i in range(53)]
+
 
 
 from snes.board import register
