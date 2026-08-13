@@ -1933,10 +1933,12 @@ cdef class APU:
             ya = <uint16_t>((self.y << 8) | self.a)
             self.setf(P_H, (self.x & 15) <= (self.y & 15))
             self.setf(P_V, self.y >= self.x)
-            if self.x == 0:
-                self.a = 0xFF
-                self.y = 0xFF
-            elif self.y < (self.x << 1):
+            # A divisor of zero is not a special case in the hardware: it
+            # goes down the same path as any other quotient that will not
+            # fit, and falls out as $FF with a remainder of zero.  Making it
+            # a special case that answered $FF/$FF is what gilyon's SPC700
+            # test 521 catches.
+            if self.y < (self.x << 1):
                 self.a = <uint8_t>(ya // self.x)
                 self.y = <uint8_t>(ya % self.x)
             else:

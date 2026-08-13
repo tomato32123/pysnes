@@ -1,4 +1,4 @@
-"""Run gilyon's 65C816 test ROM and read its verdict off the screen.
+"""Run gilyon's 65C816 and SPC700 test ROMs and read their verdicts.
 
 The ROM works through 1610 tests of the instruction set: every opcode
 except STP and WAI, in every addressing mode it has, with the awkward
@@ -24,7 +24,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from snes.system import System
 
-DEFAULT_ROM = "/home/moto/Projects/rom/testroms/higan/gilyon/cputest.sfc"
+ROOT = "/home/moto/Projects/rom/testroms/higan/gilyon"
+DEFAULT_ROMS = [os.path.join(ROOT, "cputest.sfc"), os.path.join(ROOT, "spctest.sfc")]
 FRAMES = 4000
 
 
@@ -41,32 +42,42 @@ def screen_lines(machine):
     return out
 
 
-def main():
-    rom = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ROM
-    if not os.path.exists(rom):
-        print("no ROM at %s" % rom)
-        return 1
+def verdict(rom):
+    """(ok, the lines it printed) for one ROM."""
     machine = System(rom)
     for _ in range(FRAMES):
         machine.run_frame()
-
     lines = [l for l in screen_lines(machine) if l.strip()]
-    for line in lines:
-        print("  %s" % line)
-    print()
-
     text = " ".join(lines)
     if "Success" in text:
-        print("all 1610 tests pass")
-        return 0
-    if "Failed" in text:
-        # The number is in hex, and so are the numbers in the tests.txt the
-        # ROM's generator writes, so it can be looked up as printed.
-        print("a test failed -- look its number up in the tests.txt that "
-              "make_cpu_tests.py writes")
+        return True, lines
+    return False, lines
+
+
+def main():
+    roms = sys.argv[1:] or DEFAULT_ROMS
+    bad = 0
+    for rom in roms:
+        name = os.path.basename(rom)
+        if not os.path.exists(rom):
+            print("  %-14s is not here" % name)
+            bad += 1
+            continue
+        ok, lines = verdict(rom)
+        print("  %-14s %s" % (name, "ok" if ok else "FAILED"))
+        for line in lines:
+            print("      %s" % line)
+        if not ok:
+            bad += 1
+    print()
+    if bad:
+        # The number on screen is hex, and so are the numbers in the
+        # tests.txt each ROM's generator writes, so it looks up as printed.
+        print("%d of %d report a failure -- look the number up in the "
+              "tests.txt that ROM's generator writes" % (bad, len(roms)))
         return 1
-    print("the ROM did not reach a verdict in %d frames" % FRAMES)
-    return 1
+    print("every test in both ROMs passes")
+    return 0
 
 
 if __name__ == "__main__":
