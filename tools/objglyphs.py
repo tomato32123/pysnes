@@ -357,7 +357,76 @@ def check_priority(path, name):
     return bad
 
 
+# obj-bg-priority.asm draws a BG1 band of tilemap priority 0 across rows
+# 96-103 and one of priority 1 across rows 104-119, with backdrop above,
+# then lays four 32x32 sprites across all three.  Each sprite's OAM
+# priority equals its palette index.  What must happen, from the header of
+# that source: priority 3 shows over both bands, priority 2 shows over the
+# priority-0 band and is hidden by the priority-1 one, and priorities 0 and
+# 1 are hidden by both and show only against the backdrop.
+BANDS = ((88, 96, "backdrop"), (96, 104, "BG pri 0"), (104, 120, "BG pri 1"))
+OVER_BAND = {0: (True, False, False), 1: (True, False, False),
+             2: (True, True, False), 3: (True, True, True)}
+
+
+def check_bg_priority(path, name):
+    """Which of an object and a background wins, band by band.
+
+    The two OAM priority bits do not order objects against each other --
+    obj-priority settles that -- they choose which of four places the
+    object takes in the layer order against the backgrounds.  This reads
+    that ordering straight off the screen: at every pixel a sprite paints,
+    either the sprite's own colour is there or it is not.
+    """
+    machine = System(path)
+    for _ in range(FRAMES):
+        machine.run_frame()
+    vram = bytes(machine.ppu.vram_bytes)
+    base = obj_base_bytes(machine)
+    cgram = machine.ppu.cgram_list
+    at = screen(machine)
+
+    def rgb(index):
+        word = cgram[index]
+        return tuple(((word >> s) & 31) << 3 | ((word >> s) & 31) >> 2
+                     for s in (0, 5, 10))
+
+    bad = 0
+    for s, x, y, tile, palette, w, h in sprites(machine)[:4]:
+        for (top, bottom, what), want in zip(BANDS, OVER_BAND[s]):
+            shown = hidden = 0
+            for py in range(max(top, y) - y, min(bottom, y + h) - y):
+                for px in range(w):
+                    if not 0 <= x + px < 256:
+                        continue
+                    index = obj_pixel(vram, base, tile, palette, w, px, py)
+                    if not index:
+                        continue
+                    if at(x + px, y + py) == rgb(index):
+                        shown += 1
+                    else:
+                        hidden += 1
+            total = shown + hidden
+            if not total:
+                print("  %-14s sprite %d over %-9s nothing to compare"
+                      % (name, s, what))
+                bad += 1
+            elif (shown == total) == want:
+                print("  %-14s sprite %d (OAM priority %d) is %s the %-9s"
+                      " ok  %d pixels"
+                      % (name, s, s, "over " if want else "under", what, total))
+            else:
+                bad += 1
+                print("  %-14s sprite %d (OAM priority %d) should be %s the %s,"
+                      " but %d of %d pixels show the sprite"
+                      % (name, s, s, "over" if want else "under", what,
+                         shown, total))
+    return bad
+
+
 def check(path, name):
+    if name == "obj-bg-priority":
+        return check_bg_priority(path, name)
     if name in PIXELWISE:
         return check_priority(path, name)
     if name.startswith("obj-size-grid-"):
@@ -391,7 +460,7 @@ def check(path, name):
 def main():
     target = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DIR
     if os.path.isdir(target):
-        names = (sorted(EXPECTED) + list(PIXELWISE)
+        names = (sorted(EXPECTED) + list(PIXELWISE) + ["obj-bg-priority"]
                  + ["obj-size-grid-%d" % i for i in range(8)])
         roms = [(os.path.join(target, n + ".sfc"), n) for n in names]
     else:
