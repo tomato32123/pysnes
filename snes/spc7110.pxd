@@ -1,5 +1,5 @@
 # cython: language_level=3
-from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int32_t
+from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t, int32_t, int64_t
 
 from snes.board cimport Board
 
@@ -78,7 +78,17 @@ cdef class SPC7110(Board):
     cdef int rtc_index
     cdef uint32_t rtc_reads          # how often the game has asked, for tooling
     cdef uint32_t rtc_touches        # any access at all to $4840-$4842
+    cdef int64_t rtc_seconds         # the time the chip is holding
+    cdef int64_t rtc_last_clock      # master clock when it last advanced
+    cdef int rtc_dirty               # digits were written; take the time from them
+    # What the game asked of the clock, so its own check program can be
+    # read rather than guessed at: address, whether it was a write, value.
+    cdef uint8_t rtc_trace[3][512]
+    cdef int rtc_trace_len
 
+    cdef void rtc_powerup_weekday(self) noexcept
+    cdef void rtc_advance(self) noexcept
+    cdef void rtc_from_digits(self) noexcept
     cdef void rtc_sync(self) noexcept
     cdef uint8_t rtc_read(self, uint32_t off, uint8_t data) noexcept
     cdef void rtc_write(self, uint32_t off, uint8_t value) noexcept

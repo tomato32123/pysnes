@@ -43,7 +43,7 @@ RUN_FRAMES = 4000                     # by here it has printed COMPLETE
 
 def run_mode(rom, button):
     machine = System(rom_data=rom)
-    if machine.bus.board.name != "SPC7110":
+    if not machine.bus.board.name.startswith("SPC7110"):
         raise SystemExit("this cartridge has no SPC7110 on it (board: %s)"
                          % machine.bus.board.name)
     for _ in range(PROMPT_FRAMES):

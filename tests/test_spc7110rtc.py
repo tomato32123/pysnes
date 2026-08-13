@@ -98,6 +98,39 @@ def test_nothing_is_handed_over_without_a_command():
     check("no answer before a command", chip.rtc_drive(0x4841), 0, "%d")
 
 
+def test_the_cartridges_own_check_program_gets_its_rollover():
+    """The strongest evidence available for this chip.
+
+    Tengai Makyou Zero carries a hardware self-test written by the people
+    who built the cartridge.  Its clock section sets 23:59:59 on the last
+    day of '99 with weekday 6, lets the clock run, stops it and reads back
+    -- so what it is looking for is the roll across midnight, the month,
+    the year and the century at once, with the weekday carried by one.
+
+    Getting this wrong is what "RTC TIME  NG" on its screen means, and it
+    said exactly that until the weekday stopped being worked out from the
+    date: the chip does not know what day of the week a date falls on, it
+    only counts.
+    """
+    machine = System(ROM)
+    for _ in range(900):
+        machine.run_frame()
+    for _ in range(4):
+        for button in (0x80, 0x1000):          # A, then start
+            machine.set_pad(0, button)
+            for _ in range(10):
+                machine.run_frame()
+            machine.set_pad(0, 0)
+            for _ in range(60):
+                machine.run_frame()
+
+    got = [v for off, write, v in machine.bus.board.rtc_exchanges if not write]
+    check("the check program reached its clock test", len(got) >= 13, True)
+    # second, minute, hour, day, month, year, weekday -- all rolled over.
+    check("what the cartridge reads back", got[:13],
+          [0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0])
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

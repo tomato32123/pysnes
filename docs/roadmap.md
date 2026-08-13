@@ -242,7 +242,20 @@ The largest single gap. Everything below the first item depends on it.
       waiting for it would be a hope rather than a check; the protocol is
       driven against the real cartridge instead, and the digits that come
       back are compared with the host clock, in both twelve- and
-      twenty-four-hour form
+      twenty-four-hour form.
+      Then the cartridge said the clock was wrong.  Its own check program --
+      reachable past the corrupt-backup prompt, which is what "flat" in the
+      library run really was -- prints `RTC TIME  NG`, and reading the
+      exchange it performs says why: it writes 23:59:59 on 31 December '99
+      with weekday 6, runs the clock, stops it and reads back, expecting the
+      roll across midnight, month, year and century with the weekday carried
+      by one.  Three things were wrong and each was a different kind of
+      mistake: the weekday was worked out from the date, which the chip
+      never does -- it is a counter a game sets; the clock only moved when a
+      read command arrived, so it never moved between the write and the
+      read; and midnights were counted by dividing a timestamp by 86400,
+      which counts them in UTC rather than where the cartridge is.  The
+      cartridge now prints `ALL OK`
 - [x] **OBC1.**  Glue logic that builds an object table: a base, a sprite
       index, four bytes a sprite and a two-bit field packed four to a byte,
       with the chip doing the read-mask-shift-write the console would

@@ -44,12 +44,43 @@ that a game reads to decide what day it is has nothing to gain from being
 emulated slowly.
 """
 from cpython.bytes cimport PyBytes_FromStringAndSize
-from libc.time cimport time, time_t, localtime, tm
+from libc.time cimport time, time_t, localtime, mktime, tm
 from libc.stdint cimport (uint8_t, uint16_t, uint32_t, uint64_t,
-                          int16_t, int32_t)
+                          int16_t, int32_t, int64_t)
 from libc.string cimport memset, memcpy
 
 from snes.board cimport Board, PK_OPENBUS, PK_DEVICE
+
+# Master clocks in a second, which is what turns the console's clock into
+# the wall clock the chip keeps.
+cdef int64_t MASTER_HZ = 21477272
+
+
+cdef int64_t days_from_civil(int y, int m, int d) noexcept:
+    """A day number for a date, so two dates can be subtracted.
+
+    Counting midnights by dividing a timestamp by 86400 counts them in UTC,
+    which is not where the cartridge's midnight is; and counting them by day
+    of the year goes wrong across a new year.  This is the usual civil-date
+    algorithm, exact in both places.
+    """
+    cdef int64_t era, yoe, doy, doe
+    if m <= 2:
+        y -= 1
+    era = (y if y >= 0 else y - 399) / 400
+    yoe = y - era * 400
+    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) / 5 + d - 1
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    return era * 146097 + doe - 719468
+
+
+cdef int64_t local_day(int64_t seconds) noexcept:
+    """Which day, in this machine's own reckoning, a timestamp falls on."""
+    cdef time_t when = <time_t>seconds
+    cdef tm *t = localtime(&when)
+    if t is NULL:
+        return 0
+    return days_from_civil(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday)
 from snes.cart cimport Cart, _mirror
 
 
@@ -149,8 +180,13 @@ cdef class SPC7110(Board):
         self.rtc_index = 0
         self.rtc_reads = 0
         self.rtc_touches = 0
+        self.rtc_dirty = 0
+        self.rtc_trace_len = 0
+        self.rtc_last_clock = 0
+        self.rtc_seconds = <int64_t>time(NULL)
         for i in range(16):
             self.rtc[i] = 0
+        self.rtc_powerup_weekday()
         self.r4801 = 0
         self.r4802 = 0
         self.r4803 = 0
@@ -1028,20 +1064,87 @@ cdef class SPC7110(Board):
     # the clock
     # =====================================================================
 
-    cdef void rtc_sync(self) noexcept:
-        """Fill the registers from this machine's clock.
-
-        The chip's own counter is not modelled: a game reads this to find
-        out the date, and the date it should find out is today's.  The
-        registers hold decimal digits a nibble at a time, so each field is
-        split into its tens and units.
-        """
-        cdef time_t now = time(NULL)
+    cdef void rtc_powerup_weekday(self) noexcept:
+        """A cartridge coming up for the first time has to start somewhere,
+        and this machine's weekday is a better guess than zero."""
+        cdef time_t now = <time_t>self.rtc_seconds
         cdef tm *t = localtime(&now)
-        cdef int hour = t.tm_hour
+        if t is not NULL:
+            self.rtc[12] = <uint8_t>t.tm_wday
+
+    cdef void rtc_advance(self) noexcept:
+        """Move the clock on by however long the console has been running.
+
+        The chip keeps its own time.  It is set to this machine's when the
+        cartridge is powered on, and after that it runs -- so a game that
+        writes a time and reads it back gets what it wrote, which is what
+        the cartridge's own check program looks for.  Register 15 bit 1
+        stops it and register 13 bit 0 holds it.
+        """
+        cdef int64_t elapsed
+        cdef int64_t was
+        cdef int64_t days
+        if self.rtc_last_clock == 0:
+            self.rtc_last_clock = self.clock
+            return
+        elapsed = self.clock - self.rtc_last_clock
+        if elapsed < MASTER_HZ:
+            return
+        self.rtc_last_clock += (elapsed / MASTER_HZ) * MASTER_HZ
+        if (self.rtc[15] & 2) or (self.rtc[13] & 1):
+            return
+        was = local_day(self.rtc_seconds)
+        self.rtc_seconds += elapsed / MASTER_HZ
+        # The weekday is not worked out from the date -- the chip does not
+        # know what day of the week a date is, and the cartridge's own check
+        # program proves it: it writes 31 December '99 with weekday 6 and
+        # expects 6 back, where the calendar says Thursday.  It is a counter
+        # the game sets, and all the chip does is carry it at midnight.
+        days = local_day(self.rtc_seconds) - was
+        if days > 0:
+            self.rtc[12] = <uint8_t>((self.rtc[12] + days) % 7)
+
+    cdef void rtc_from_digits(self) noexcept:
+        """Take the time back out of the registers, after a game wrote them."""
+        cdef tm t
+        cdef int hour = (self.rtc[5] & 3) * 10 + self.rtc[4]
+        cdef time_t made
+        if not (self.rtc[15] & 4):
+            # Twelve-hour form: register 5 bit 2 says which half of the day.
+            hour = hour % 12
+            if self.rtc[5] & 4:
+                hour += 12
+        t.tm_sec = (self.rtc[1] & 7) * 10 + self.rtc[0]
+        t.tm_min = (self.rtc[3] & 7) * 10 + self.rtc[2]
+        t.tm_hour = hour
+        t.tm_mday = (self.rtc[7] & 3) * 10 + self.rtc[6]
+        t.tm_mon = ((self.rtc[9] & 1) * 10 + self.rtc[8]) - 1
+        # Two digits of year, which the chip is all that holds; the century
+        # is the one the machine is in.
+        t.tm_year = (self.rtc[11] * 10 + self.rtc[10]) + 100
+        t.tm_isdst = -1
+        made = mktime(&t)
+        if made != <time_t>-1:
+            self.rtc_seconds = made
+        self.rtc_dirty = 0
+
+    cdef void rtc_sync(self) noexcept:
+        """Fill the registers from the time the chip is holding.
+
+        The registers hold decimal digits a nibble at a time, so each field
+        is split into its tens and units.
+        """
+        cdef time_t now
+        cdef tm *t
+        if self.rtc_dirty:
+            self.rtc_from_digits()
+        now = <time_t>self.rtc_seconds
+        t = localtime(&now)
+        cdef int hour
         cdef int pm = 0
         if t is NULL:
             return
+        hour = t.tm_hour
         # Register 15 bit 2 chooses the 24-hour clock; without it the hours
         # run 1 to 12 and register 5 bit 2 says which half of the day.
         if not (self.rtc[15] & 4):
@@ -1061,25 +1164,37 @@ cdef class SPC7110(Board):
         self.rtc[9] = (self.rtc[9] & 0x0A) | ((t.tm_mon + 1) / 10)
         self.rtc[10] = (t.tm_year + 1900) % 10
         self.rtc[11] = ((t.tm_year + 1900) / 10) % 10
-        self.rtc[12] = (self.rtc[12] & 8) | t.tm_wday
 
     cdef uint8_t rtc_read(self, uint32_t off, uint8_t data) noexcept:
         cdef uint8_t value
+        cdef uint8_t answer
         self.rtc_touches += 1
+        self.rtc_advance()
         if off == 0x4842:
             # Bit 7 says a transfer may happen.  Nothing here takes time.
             return 0x80
         if off == 0x4841:
+            answer = 0
             if self.rtc_state == 4:
-                value = self.rtc[self.rtc_index & 15] & 15
+                answer = self.rtc[self.rtc_index & 15] & 15
                 self.rtc_index = (self.rtc_index + 1) & 15
                 self.rtc_reads += 1
-                return value
-            return 0
+            if self.rtc_trace_len < 512:
+                self.rtc_trace[0][self.rtc_trace_len] = 0x41
+                self.rtc_trace[1][self.rtc_trace_len] = 0
+                self.rtc_trace[2][self.rtc_trace_len] = answer
+                self.rtc_trace_len += 1
+            return answer
         return data
 
     cdef void rtc_write(self, uint32_t off, uint8_t value) noexcept:
         self.rtc_touches += 1
+        self.rtc_advance()
+        if self.rtc_trace_len < 512:
+            self.rtc_trace[0][self.rtc_trace_len] = off & 0xFF
+            self.rtc_trace[1][self.rtc_trace_len] = 1
+            self.rtc_trace[2][self.rtc_trace_len] = value
+            self.rtc_trace_len += 1
         if off == 0x4840:
             # The chip select: raising it starts an exchange, dropping it
             # ends whatever was in progress.
@@ -1087,6 +1202,9 @@ cdef class SPC7110(Board):
                 self.rtc_state = 1
             else:
                 self.rtc_state = 0
+                # The digits a game just wrote are the time from now on.
+                if self.rtc_dirty:
+                    self.rtc_from_digits()
             return
         if off != 0x4841:
             return
@@ -1106,6 +1224,8 @@ cdef class SPC7110(Board):
             return
         if self.rtc_state == 3:
             self.rtc[self.rtc_index & 15] = value & 15
+            if (self.rtc_index & 15) < 13:
+                self.rtc_dirty = 1       # a digit changed: this is the time now
             self.rtc_index = (self.rtc_index + 1) & 15
 
     def rtc_drive(self, uint32_t off, value=None):
@@ -1132,6 +1252,12 @@ cdef class SPC7110(Board):
     @property
     def rtc_touch_count(self):
         return self.rtc_touches
+
+    @property
+    def rtc_exchanges(self):
+        """[(address, is_write, value)] for what the game asked of it."""
+        return [(self.rtc_trace[0][i], self.rtc_trace[1][i], self.rtc_trace[2][i])
+                for i in range(self.rtc_trace_len)]
 
 
 def tables():
