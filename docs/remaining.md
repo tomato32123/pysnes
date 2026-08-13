@@ -801,6 +801,23 @@ The golden interrupt trace changed, and was re-recorded deliberately after
 reading the diff: it had encoded the old behaviour, taking the IRQ
 immediately after CLI. `test_cpu.py` now pins the delay directly.
 
+## VRAM address remapping, checked without a reference
+
+$2115's low bits remap the VRAM address so a game can write tile data in
+whatever order suits it. Nothing in the library exercises it and no reference
+picture covers it, so it had never been checked.
+
+undisbeliever's ROMs check it in a way that needs neither: they come in pairs
+where one writes the data plainly and the other writes it in a different order
+with remapping on, and both must produce **the same picture**. That is a
+property of the hardware, not of anyone's description of it — if remapping
+were ignored the second would scramble, and if it were applied when it should
+not be the first would.
+
+Eleven ROMs across 1, 2, 4 and 8 bpp, word and split modes: every group agrees
+on one picture, and the pictures are not blank. `tools/vmaintest.py` keeps it
+that way.
+
 ## Speed, measured for the first time
 
 An emulator that is accurate and cannot run at sixty frames a second is not
