@@ -465,17 +465,16 @@ cdef class NECDSP:
     # the host's side
     # =====================================================================
 
-    def read_status(self):
+    cdef uint8_t host_status(self) noexcept:
         return (self.sr >> 8) & 0xFF
 
-    def read_data(self):
+    cdef uint8_t host_read(self) noexcept:
         """The console reads the data register.
 
         In byte mode it takes one byte; in word mode the first read takes
         the high byte and the second the low one, and only the second ends
         the transfer.
         """
-        cdef uint8_t value
         if self.sr & SR_DRC:
             self.sr &= ~SR_RQM
             return self.dr & 0xFF
@@ -486,7 +485,7 @@ cdef class NECDSP:
         self.sr &= ~SR_RQM
         return self.dr & 0xFF
 
-    def write_data(self, uint8_t value):
+    cdef void host_write(self, uint8_t value) noexcept:
         if self.sr & SR_DRC:
             self.sr &= ~SR_RQM
             self.dr = (self.dr & 0xFF00) | value
@@ -498,6 +497,15 @@ cdef class NECDSP:
         self.sr &= ~SR_DRS
         self.sr &= ~SR_RQM
         self.dr = (self.dr & 0xFF00) | value
+
+    def read_status(self):
+        return self.host_status()
+
+    def read_data(self):
+        return self.host_read()
+
+    def write_data(self, uint8_t value):
+        self.host_write(value)
 
     # -- for tests and save states -----------------------------------------
 

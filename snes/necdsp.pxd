@@ -43,3 +43,6 @@ cdef class NECDSP:
     cdef int _cond(self, int brch) noexcept
     cdef void step(self) noexcept
     cdef void run_cycles(self, int cycles) noexcept
+    cdef uint8_t host_status(self) noexcept
+    cdef uint8_t host_read(self) noexcept
+    cdef void host_write(self, uint8_t value) noexcept

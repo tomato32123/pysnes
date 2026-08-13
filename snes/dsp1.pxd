@@ -1,11 +1,19 @@
 # cython: language_level=3
-from libc.stdint cimport uint8_t, uint16_t, uint32_t
+from libc.stdint cimport uint8_t, uint16_t, uint32_t, int64_t
 
 from snes.board cimport Board
+from snes.necdsp cimport NECDSP
 
 
 cdef class DSP1(Board):
     cdef int hirom                   # map 21: registers at $6000/$7000
+
+    # The processor, once there is a program to put in it.  Without one the
+    # board still answers -- it has to, or the console hangs on the status
+    # register -- but it answers nothing and counts what it was asked.
+    cdef NECDSP core
+    cdef int64_t last_clock
+    cdef int64_t owed
 
     # -- the register pair the console talks through ------------------------
     cdef uint8_t sr                  # status: bit 7 says a transfer may happen

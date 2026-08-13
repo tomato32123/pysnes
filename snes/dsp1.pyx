@@ -29,11 +29,47 @@ $30-$3F:C000-FFFF on a map-20 cartridge, at $00-$0F:6000 and $7000 on a
 map-21 one, with bit 7 of the status register saying a transfer may
 happen.
 """
-from libc.stdint cimport uint8_t, uint16_t, uint32_t
+from libc.stdint cimport uint8_t, uint16_t, uint32_t, int64_t
 from libc.string cimport memset
 
 from snes.board cimport Board, PK_OPENBUS, PK_ROM, PK_SRAM, PK_DEVICE
 from snes.cart cimport Cart, MAP_LOROM
+from snes.necdsp cimport NECDSP
+
+import os
+
+# Where a firmware dump is looked for, and what it is called.  The names
+# are the ones higan and ares use: a program ROM of 24-bit words and a data
+# ROM of 16-bit ones, per chip.
+FIRMWARE_DIRS = [
+    os.environ.get("PYSNES_FIRMWARE", ""),
+    "/home/moto/Projects/rom/firmware",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "firmware"),
+]
+
+# Which part each chip is, as (program words, data words, RAM words).  The
+# DSP-n are a uPD77C25; the ST01x a uPD96050, which is the same with more
+# of everything.
+PARTS = {
+    "dsp1": (2048, 1024, 256), "dsp1b": (2048, 1024, 256),
+    "dsp2": (2048, 1024, 256), "dsp3": (2048, 1024, 256),
+    "dsp4": (2048, 1024, 256),
+    "st010": (16384, 2048, 2048), "st011": (16384, 2048, 2048),
+}
+
+
+def find_firmware(names):
+    """The first (program, data) pair present for any of these chips."""
+    for name in names:
+        for directory in FIRMWARE_DIRS:
+            if not directory:
+                continue
+            prg = os.path.join(directory, name + ".program.rom")
+            dat = os.path.join(directory, name + ".data.rom")
+            if os.path.exists(prg) and os.path.exists(dat):
+                return name, prg, dat
+    return None, None, None
 
 
 # Bit 7 of the status register: the console spins on this before every
@@ -44,8 +80,24 @@ cdef uint8_t SR_READY = 0x80
 cdef class DSP1(Board):
 
     def __cinit__(self, Cart cart):
-        self.name = u"DSP-1 (HLE)"
         self.hirom = 0 if cart.map_mode == MAP_LOROM else 1
+        self.core = None
+        self.last_clock = 0
+        self.owed = 0
+        # A DSP-1 cartridge may carry a DSP-1 or the later DSP-1B; nothing
+        # in the header says which, so whichever dump is present is used.
+        name, prg, dat = find_firmware(["dsp1b", "dsp1"])
+        if name:
+            words, drom, ram = PARTS[name]
+            core = NECDSP(words, drom, ram)
+            with open(prg, "rb") as fh:
+                core.load_program(fh.read())
+            with open(dat, "rb") as fh:
+                core.load_data(fh.read())
+            self.core = core
+            self.name = u"DSP-1 (%s)" % name
+        else:
+            self.name = u"DSP-1 (no firmware: answers nothing)"
         self.reset_board()
 
     cdef void reset_board(self) noexcept:
@@ -104,7 +156,29 @@ cdef class DSP1(Board):
     # the register pair
     # =====================================================================
 
+    cdef void run_until(self, int64_t master_clock) noexcept:
+        """Let the chip catch up.  It runs at 8.192 MHz against the
+        console's 21.477, and an instruction takes one of its cycles."""
+        cdef int64_t elapsed
+        if self.core is None:
+            return
+        elapsed = master_clock - self.last_clock
+        if elapsed <= 0:
+            return
+        self.last_clock = master_clock
+        self.owed += elapsed * 8192
+        if self.owed > 21477272 * 100:       # a long jump: do not spin
+            self.owed = 21477272 * 100
+        while self.owed >= 21477272:
+            self.owed -= 21477272
+            self.core.step()
+
     cdef uint8_t read(self, uint32_t addr, uint8_t data) noexcept:
+        if self.core is not None:
+            self.run_until(self.clock)
+            if self._is_status(addr):
+                return self.core.host_status()
+            return self.core.host_read()
         if self._is_status(addr):
             return self.sr
         self._note(1, 0)
@@ -122,6 +196,11 @@ cdef class DSP1(Board):
         return data
 
     cdef void write(self, uint32_t addr, uint8_t value) noexcept:
+        if self.core is not None:
+            self.run_until(self.clock)
+            if not self._is_status(addr):
+                self.core.host_write(value)
+            return
         if self._is_status(addr):
             return
         self._note(0, value)
