@@ -174,11 +174,21 @@ so its earlier "95%" was black agreeing with black — went from letters made of
 fragments of other letters to letters. Two mode 5 tests in `test_ppu.py`
 passed before and after, because what they assert is true either way.
 
-*Still open, from the same comparison*: the same three mode 5 interlace demos
-still differ — `InterlaceRPG` 98.77%, `MosaicMode5` 90.30%, `InterlaceFont`
-95.71% — and the residue is scattered rather than a global offset (row and
-column shifts, and swapping the two fields, all make it worse). Interlace
-itself is the remaining suspect. Six more
+**Objects can be half height.** `InterlaceRPG`'s remaining difference was a
+single 40x112 rectangle, which is a sprite-shaped hole, and the demo turns on
+`$2133` bit 1. Implementing it took that demo to 100.00% exact — see item 5
+below, which had been waiting for exactly this.
+
+*Still open, from the same comparison*: two mode 5 interlace demos.
+`InterlaceFont` is at 95.71% and `MosaicMode5` at 90.30%, and the font one is
+worth describing because it is not what it looks like. Every row we draw
+matches a row of the reference *exactly* — all 512 pixels of it — but sits
+about nine rows higher up the screen. The content is right and its vertical
+placement is not, and the offset is not constant enough to be one number:
+nine rows for the first block, ten after it. A whole-picture row shift, a
+column shift and swapping the two fields all make the match worse, so it is
+none of those. Interlaced vertical placement is the open question, and this
+demo answers it the moment someone works out what the offset is a function of. Six more
 references cannot be used at all, because they contain colours the SNES cannot
 produce; `RedSpace9BitHDMA` is the interesting one of those. It drives
 brightness through HDMA a line at a time, our output matches it exactly on
@@ -366,17 +376,24 @@ The port is a latch clocked by the SPC700, not by the console, so a console
 read landing inside the SPC700's write window can see either byte. Modelling
 it needs the item above (bus-access timing) to say where that window is.
 
-### 5. Half-height objects (`$2133` bit 1)
+### 5. Half-height objects (`$2133` bit 1) — done, and the answer was both
 
-*Where*: `snes/ppu.pyx`, `begin_line`, which currently evaluates sprites
-against the display row and says so in a comment.
+*Where*: `snes/ppu.pyx`, `_render_objects`.
 
-Left undone deliberately. There are two readings of what the bit does — that
-sprites halve in height on screen, or that they take alternate source lines
-per field — and no way to choose between them here: nothing in the library
-turns it on, and it only means anything in interlace, which nothing turns on
-either. Guessing would produce a confident-looking implementation with a
-coin-flip chance of being backwards. Wait for a reference.
+This was left undone deliberately, with a note saying there were two readings
+of the bit — that sprites halve in height on screen, or that they take
+alternate source lines per field — and no way to choose between them, since
+nothing in the library turned it on. The note ended "wait for a reference."
+
+The reference turned up in krom's `InterlaceRPG`, which sets the bit. Both
+readings are right and they are the same reading: an object covers half as
+many scanlines *and* takes every other row of its own tiles, with the field
+choosing which row, so the two fields together draw all of it at its proper
+shape. The flip is applied first, on the full height, and the field moves the
+other way once it has.
+
+The demo goes from 34.65% to **100.00%** exact, which is as good as this kind
+of evidence gets: 229,376 pixels, no tolerance.
 
 ### 6. S-DD1 — done
 

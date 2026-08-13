@@ -1318,7 +1318,14 @@ cdef class PPU:
             py = line - sy
             if py < 0:
                 py += 256
-            if py < 0 or py >= h:
+            # $2133 bit 1 halves an object's height: it covers half as many
+            # scanlines and takes every other row of its own tiles, so the two
+            # fields together draw all of it.  That is how a game keeps its
+            # sprites the right shape on an interlaced screen.
+            if self.obj_interlace:
+                if py < 0 or py >= (h >> 1):
+                    continue
+            elif py < 0 or py >= h:
                 continue
 
             if count == 32:
@@ -1351,8 +1358,16 @@ cdef class PPU:
             py = line - sy
             if py < 0:
                 py += 256
+            if self.obj_interlace:
+                py <<= 1
             if vflip:
                 py = h - 1 - py
+            if self.obj_interlace:
+                # Which of the two rows in the pair this field draws.  The
+                # flip runs first and on the full height, so the field moves
+                # the other way once it has.
+                py = (py - self.field) if vflip else (py + self.field)
+            py &= 0xFF
             ty = py >> 3
             row_in = py & 7
 

@@ -59,7 +59,6 @@ PALETTE = {(v << 3) | (v >> 2) for v in range(32)}
 # is still compared, over a search for the frame that matches best, because a
 # demo that reaches an exact match at *some* frame has been verified.
 ANIMATED = {
-    "RotZoom": 400,
     "Perspective": 400,
     "StarWars": 400,
     "PlotLineMode7": 400,
@@ -71,6 +70,12 @@ ANIMATED = {
 DRIVE = {
     "MosaicMode3": [("R", 15)],
     "MosaicMode5": [("R", 15)],
+}
+
+# Demos the pad steers, whose screenshot is of a position there is no way to
+# reproduce -- the rotation and zoom have been set by hand.
+INTERACTIVE = {
+    "RotZoom": "A/B/X/Y set the rotation and zoom; the screenshot is one of them",
 }
 
 # Demos driven by the pad in a way there is no way to reproduce: the map has
@@ -122,6 +127,9 @@ def drive(machine, script):
 
 def compare(rom, png, frames=FRAMES, write_diff=False):
     name = os.path.basename(rom)[:-4]
+    if name in INTERACTIVE:
+        print("  %-46s unusable -- %s" % (name, INTERACTIVE[name]))
+        return None
     raw = np.asarray(Image.open(png).convert("RGB")).astype(int)
 
     share = on_palette(raw)

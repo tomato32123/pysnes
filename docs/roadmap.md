@@ -90,7 +90,12 @@ The largest single gap. Everything below the first item depends on it.
       Six tests, one of which discriminates against the old behaviour.
       41 titles use colour math; the forced-black region, like direct colour,
       has no working cartridge behind it
-- [ ] Half-height objects under $2133 bit 1
+- [x] **Half-height objects under $2133 bit 1**: an object covers half as many
+      scanlines and takes every other row of its own tiles, the field choosing
+      which, so the two fields together draw it at its proper shape.  Left
+      undone for a year for want of anything that turns the bit on; krom's
+      InterlaceRPG turns it on, and goes from 34.65% to 100.00% exact against
+      its own screenshot with it implemented
 
 ## 4. APU
 
@@ -291,10 +296,13 @@ This is the part that decides whether any of the above converges.
       an analog capture and cannot be compared exactly.  Six of krom's
       pictures fail that test and are reported as unusable rather than as
       failures.
-      It found three defects, none of which any test in this repository could
+      It found five defects, none of which any test in this repository could
       have: every background drawn one line too high, the hires sub half-dot
-      emitted raw instead of through colour math, and that half-dot taking its
-      operand from the wrong dot.  See `docs/remaining.md`
+      emitted raw instead of through colour math, that half-dot taking its
+      operand from the wrong dot, hires tiles drawn eight half-dots wide
+      instead of sixteen, and half-height objects not implemented at all --
+      the last of which had been deliberately left undone for want of exactly
+      such a reference.  See `docs/remaining.md`
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images
