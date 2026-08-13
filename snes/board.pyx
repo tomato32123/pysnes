@@ -135,6 +135,7 @@ def _load_boards():
     not have to know about every chip at compile time."""
     from snes import sa1                      # noqa: F401  (registers itself)
     from snes import sdd1                     # noqa: F401
+    from snes import superfx                  # noqa: F401
 
 
 def make_board(Cart cart):

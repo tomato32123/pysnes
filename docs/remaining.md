@@ -363,19 +363,42 @@ Same category as S-DD1 — documented behaviour, nothing hidden inside — but
 nothing in the local library needs them, so they would be written blind.
 Lower priority than S-DD1 for exactly that reason.
 
-### 8. SuperFX
+### 8. SuperFX — running, on one game and five tests
 
-*Where*: new board, plus a second `AddressSpace`.
+*Where*: `snes/superfx.pyx`, `tests/test_superfx.py`.
 
-Structurally the easiest of the big ones now, because `snes/space.pyx`
-already exists: the SA-1 work proved that a second processor can be given
-its own map without duplicating a core. SuperFX needs its own instruction
-set rather than reusing the 65816, which is the bulk of the work — 500-odd
-opcodes across the ALT1/ALT2 prefix modes — plus the plot/pixel cache unit,
-which is where the subtlety lives.
+The instruction set is the bulk of it — the opcode range across the ALT1,
+ALT2 and ALT3 prefixes, with FROM/TO/WITH deciding which register each one
+reads and writes — plus the 512-byte instruction cache, the buffered ROM and
+RAM readers, and the plot unit with its pixel cache.
 
-*Blocked on*: nothing. Just size. No title in the local library uses it, so
-verification would need a ROM that is not here.
+The bug that cost the most time was not in any of that. `$98`-`$9d` are
+`jmp r8` through `jmp r13`: the register is the opcode's low nibble, the same
+as everywhere else. Written as `op - 0x98` it names r0 through r5 instead,
+and Star Fox's GSU loops for ever at `$01:8199` on `jmp r11` — a hang with no
+diagnostic, on the first frame that would have drawn a polygon.
+
+The second thing worth writing down is a property of the *cartridge*, not the
+chip. While the GSU is running with `SCMR`'s RON bit set it has the ROM, and
+a console read of ROM returns a sixteen-byte vector table instead. That
+includes the console's instruction fetches, so the routine that starts the
+chip and waits for it cannot be in ROM; Star Fox's runs from work RAM, and so
+does the one in `tests/test_superfx.py`. Getting this wrong looks like a
+correct emulator running a program that mysteriously loses its own stores —
+which is precisely how it presented while writing the tests.
+
+*What is unverified*: everything, in the sense that matters. There is no
+hardware test ROM for the GSU on this machine, so the evidence is one
+commercial game rendering correctly and five unit tests written against the
+same understanding as the code. That is the second and fourth rungs of the
+evidence ladder, not the first. Nine defects were found in the APU — which
+the roadmap called done — the day a test ROM was pointed at it.
+
+*What is approximate*: the chip catches up to the console at each access and
+at the end of every scanline rather than the two sharing a scheduler, so
+cycles are counted but contention is not. Star Fox's intro leaves stray black
+rectangles, and the catch-up model is the first place to look. `CLSR`'s
+21 MHz mode changes the cycle counts but nothing here runs faster for it.
 
 ### 9. DSP-1/2/3/4, CX4, ST010/011
 

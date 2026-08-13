@@ -169,7 +169,23 @@ The largest single gap. Everything below the first item depends on it.
       they are unverified.  And there is no bus arbitration: the SA-1 catches
       up to the console rather than the two sharing a scheduler, so a game
       that depends on which of them wins a contended cycle would not see it
-- [ ] SuperFX
+- [~] **SuperFX**: the GSU runs.  Its own instruction set across the ALT1,
+      ALT2 and ALT3 prefixes with the FROM/TO/WITH register prefixes, the
+      512-byte instruction cache, the buffered ROM and RAM readers, the plot
+      unit with its pixel cache and `rpix` read-back, the screen modes, and
+      the interrupt on `stop`.
+      The part that is easy to get wrong and hard to notice is what the
+      *console* sees: while the chip is running the cartridge hands it the
+      ROM, and a console read gets a sixteen-byte vector table instead --
+      including when that read is the console fetching its own instructions.
+      A game's wait loop therefore cannot live in ROM, and Star Fox's does
+      not: it runs from work RAM.
+      Star Fox draws its intro polygons and its title screen.  Two caveats.
+      The chip catches up to the console rather than the two sharing a
+      scheduler, so cycles are counted but contention is not, and some stray
+      black rectangles in Star Fox's intro are most likely that.  And there
+      is no hardware test ROM for the GSU here, so the instruction set rests
+      on one game and five unit tests
 - [x] **S-DD1**: mapper and decompressor.  A 32 Mbit S-DD1 cartridge fits no
       standard map -- banks $C0-$FF are four 1 MB slots chosen by $4804-$4807
       -- and Street Fighter Zero 2 jumps into that window three instructions
@@ -248,7 +264,9 @@ This is the part that decides whether any of the above converges.
    the same way `tools/testroms.py` runs the SPC ones; and a reference
    emulator for `tools/difftrace.py`, which has waited for one since it was
    written.
-9. SA-1 bus arbitration, and SuperFX.
+9. SA-1 bus arbitration, and the SuperFX's contention -- both are the same
+   problem, and both now have a game to answer to.
+10. SPC7110, for Momotarou Dentetsu Happy.
 
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and
