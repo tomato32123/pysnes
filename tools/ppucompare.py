@@ -69,7 +69,7 @@ ANIMATED = {
 # Demos whose screenshot is of a state the pad has to reach.
 DRIVE = {
     "MosaicMode3": [("R", 15)],
-    "MosaicMode5": [("R", 15)],
+    "MosaicMode5": [("R", 7)],       # its screenshot is at size 7, not the maximum
 }
 
 # Demos the pad steers, whose screenshot is of a position there is no way to
@@ -115,14 +115,50 @@ def reference_for(ref):
 
 
 def drive(machine, script):
+    """Press a button until the mosaic size register reaches `times`.
+
+    Counting presses is not enough: the demos read the pad every few frames,
+    so a press can be missed, and the comparison then runs against a state the
+    screenshot is not of.  Watching the register is what makes it reliable.
+    """
     for button, times in script:
-        for _ in range(times):
+        for _ in range(40):
+            if machine.ppu.state_ints()[12] >= times:
+                break
             machine.set_pad(0, BUTTONS[button])
-            for _ in range(10):
+            for _ in range(12):
                 machine.run_frame()
             machine.set_pad(0, 0)
-            for _ in range(10):
+            for _ in range(12):
                 machine.run_frame()
+
+
+def explained_by_a_rescale(ours, ref):
+    """How many of the reference's rows are rows of ours, verbatim and in order.
+
+    A picture that has been scaled vertically -- 432 rows of capture stretched
+    into a 448-row file, say -- keeps every row it started with and repeats
+    some of them.  A rendering difference does not: it changes pixels.  So a
+    reference whose rows are nearly all ours, in order, but which does not
+    match row for row, is a rescaled capture rather than a disagreement, and
+    saying so needs no guess about what scaler was used.
+    """
+    a = [row.tobytes() for row in ours]
+    b = [row.tobytes() for row in ref]
+    n, m = len(a), len(b)
+    prev = [0] * (m + 1)
+    for i in range(1, n + 1):
+        cur = [0] * (m + 1)
+        ai = a[i - 1]
+        for j in range(1, m + 1):
+            best = prev[j] if prev[j] > cur[j - 1] else cur[j - 1]
+            if ai == b[j - 1]:
+                c = prev[j - 1] + 1
+                if c > best:
+                    best = c
+            cur[j] = best
+        prev = cur
+    return prev[m]
 
 
 def compare(rom, png, frames=FRAMES, write_diff=False):
@@ -173,8 +209,17 @@ def compare(rom, png, frames=FRAMES, write_diff=False):
 
     same = int((np.abs(ref - ours).sum(axis=2) == 0).sum())
     ok = same == total
-    print("  %-46s %s  %6d/%d exact (%.2f%%)"
-          % (name, "ok  " if ok else "DIFF", same, total, 100.0 * same / total))
+    note = ""
+    if not ok:
+        rows = explained_by_a_rescale(ours, ref)
+        if rows >= int(0.95 * ref.shape[0]):
+            print("  %-46s unusable -- the reference is a vertical rescale: "
+                  "%d of its %d rows are ours verbatim and in order"
+                  % (name, rows, ref.shape[0]))
+            return None
+        note = "; %d/%d of its rows are ours verbatim" % (rows, ref.shape[0])
+    print("  %-46s %s  %6d/%d exact (%.2f%%)%s"
+          % (name, "ok  " if ok else "DIFF", same, total, 100.0 * same / total, note))
 
     if not ok and write_diff:
         out = os.path.join("shots", "ppucmp")

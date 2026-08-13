@@ -179,16 +179,27 @@ single 40x112 rectangle, which is a sprite-shaped hole, and the demo turns on
 `$2133` bit 1. Implementing it took that demo to 100.00% exact — see item 5
 below, which had been waiting for exactly this.
 
-*Still open, from the same comparison*: two mode 5 interlace demos.
-`InterlaceFont` is at 95.71% and `MosaicMode5` at 90.30%, and the font one is
-worth describing because it is not what it looks like. Every row we draw
-matches a row of the reference *exactly* — all 512 pixels of it — but sits
-about nine rows higher up the screen. The content is right and its vertical
-placement is not, and the offset is not constant enough to be one number:
-nine rows for the first block, ten after it. A whole-picture row shift, a
-column shift and swapping the two fields all make the match worse, so it is
-none of those. Interlaced vertical placement is the open question, and this
-demo answers it the moment someone works out what the offset is a function of. Six more
+**`InterlaceFont` was not a difference at all — its reference is a rescale.**
+Every row we draw appears in the reference *exactly*, all 512 pixels of it, in
+order, but spread out: the offset grows from +9 to +10 to +11, at a slope of
+28/27, which is 448/432. The reference is a 432-row capture stretched into a
+448-row file, and 437 of its 448 rows are ours verbatim — the missing eleven
+being the rows the stretch duplicated. A rendering difference changes pixels;
+it does not reproduce our exact rows in order at a different spacing.
+
+That reasoning is now in `tools/ppucompare.py` rather than in this file: a
+demo that fails the pixel comparison is aligned against our output row by row,
+and a reference whose rows are 95% ours, in order, is reported as a rescale
+instead of a failure. It needs no guess about which scaler was used.
+
+*Still open, from the same comparison*: `MosaicMode5`, at 96.26% — and this
+one is real. 280 of its 448 rows are ours verbatim, so it is not a rescale,
+and the difference is in a band from row 48 to row 415. Mosaic in mode 5 with
+interlace is the last untested corner of the renderer. Note that the
+screenshot is at mosaic size 7, not the maximum: the comparison was measuring
+the wrong state until `drive` was changed to watch the register rather than
+count button presses, which is worth remembering for any other demo the pad
+steers. Six more
 references cannot be used at all, because they contain colours the SNES cannot
 produce; `RedSpace9BitHDMA` is the interesting one of those. It drives
 brightness through HDMA a line at a time, our output matches it exactly on
