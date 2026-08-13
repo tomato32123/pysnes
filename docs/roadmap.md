@@ -38,7 +38,17 @@ a suspicion into a located defect.
 
 ## 2. S-CPU
 
-- [x] All 256 opcodes, addressing modes, emulation/native, M/X widths
+- [x] All 256 opcodes, addressing modes, emulation/native, M/X widths.
+      **gilyon's 65C816 test ROM passes all 1610 of its tests**, which it did
+      not this morning: it was stopping at test 27, and had been sitting in
+      the library recorded as "flat" the whole time, because a batch run that
+      presses no buttons never sees past a ROM's first screen.  Five defects
+      came out of it, four of them in emulation mode, where several
+      instructions stop behaving like the 6502 ones they resemble: the
+      pointer wrap of (dp,X) with a non-zero DL, the straight-through pointer
+      fetches of [dp] and PEI, the B flag COP pushes, and the whole family of
+      stack instructions the 65816 added, which work on all sixteen bits of S
+      while they run.  `tools/cputest.py` reads the verdict off the screen
 - [x] Decimal ADC/SBC, block moves, the idle-cycle rules
 - [x] **When an interrupt is taken**, which is not the same as what it does.
       The 65816 decides a cycle before an instruction ends and acts on the
