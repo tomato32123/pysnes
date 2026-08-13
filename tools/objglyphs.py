@@ -44,7 +44,27 @@ EXPECTED = {
         # The fully visible control, unflipped, all four rows.
         (64, 64, [[0x00, 0x01], [0x10, 0x11], [0x20, 0x21], [0x30, 0x31]]),
     ],
+    # Four 32x32 sprites, from oam-x8.asm: a control, one clipped by the
+    # right edge, one at X = -16 through the high table's X bit 8, and one
+    # at X = 256 which must not appear at all.  None means "nothing here".
+    "oam-x8": [
+        (32, 64, [[r * 16 + c for c in range(4)] for r in range(4)]),
+        # X = 240: only the left two tile columns are on screen.
+        (240, 64, [[r * 16 + c for c in range(2)] for r in range(4)]),
+        # X = -16: the left half is clipped, so the right two columns show
+        # at the very left edge of the screen.
+        (0, 128, [[r * 16 + c for c in (2, 3)] for r in range(4)]),
+        # X = 256: fully off-screen, and the sprite at -16 has already
+        # ended by x = 16, so this whole strip has to be empty.
+        (16, 128, [[None] * 8 for _ in range(4)]),
+    ],
 }
+
+# Overlapping sprites cannot be checked a tile at a time: two sprites drawn
+# from the same glyphs interleave their opaque pixels, so a block belongs to
+# neither of them.  These are checked pixel by pixel instead, by
+# check_priority below.
+PIXELWISE = ("obj-priority",)
 
 
 # The OBSEL size table, quoted from the SNESdev wiki's PPU registers page
@@ -113,34 +133,89 @@ def screen(machine):
     return at
 
 
+def palette_colours(machine):
+    """{rgb: palette} over the eight object palettes, CGRAM 128 upwards.
+
+    Sprites drawn from the same tiles can only be told apart by colour, so
+    a block's ink says which sprite won.  Colour 0 of each palette is
+    transparent and never reaches the screen, so it is not in here.
+    """
+    cgram = machine.ppu.cgram_list
+    out = {}
+    for i in range(128, 256):
+        if i % 16 == 0:
+            continue
+        word = cgram[i]
+        rgb = tuple(((word >> s) & 31) << 3 | ((word >> s) & 31) >> 2
+                    for s in (0, 5, 10))
+        out.setdefault(rgb, (i - 128) // 16)
+    return out
+
+
 def read_tiles(machine, x, y, cols, rows):
-    """Identify the cols x rows block of glyphs whose corner is at (x, y)."""
+    """Identify the cols x rows block of glyphs whose corner is at (x, y).
+
+    A cell is (tile, mirror, palette), or None where nothing was drawn.
+    """
     vram = bytes(machine.ppu.vram_bytes)
     masks = tile_masks(vram, obj_base_bytes(machine))
+    colours = palette_colours(machine)
     at = screen(machine)
     back = at(4, 4)
     out = []
     for r in range(rows):
         line = []
         for c in range(cols):
-            block = tuple(tuple(at(x + c * 8 + i, y + r * 8 + j) != back
-                                for i in range(8)) for j in range(8))
-            if not any(any(b) for b in block):
+            ink = None
+            block = []
+            for j in range(8):
+                row = []
+                for i in range(8):
+                    rgb = at(x + c * 8 + i, y + r * 8 + j)
+                    row.append(rgb != back)
+                    if rgb != back and ink is None:
+                        ink = rgb
+                block.append(tuple(row))
+            block = tuple(block)
+            if ink is None:
                 line.append(None)
-            else:
-                line.append(masks.get(block))
-            # An unmatched non-blank block stays None-with-a-marker below.
-            if line[-1] is None and any(any(b) for b in block):
-                line[-1] = ("?", "")
+                continue
+            found = masks.get(block)
+            tile, how = found if found else ("?", "")
+            line.append((tile, how, colours.get(ink, "?")))
         out.append(line)
     return out
 
 
 def show(cell):
     if cell is None:
-        return " --"
-    n, how = cell
-    return "%3s" % ("??" if n == "?" else "%02X%s" % (n, how))
+        return "  --"
+    tile, how, pal = cell
+    return "%4s" % (("??" if tile == "?" else "%02X" % tile) + how + str(pal))
+
+
+def matches(got, want):
+    """Does a cell match what was asked for?
+
+    A wanted cell is a tile number, or (tile, palette) where the palette
+    is what says which of two overlapping sprites won, or None for
+    nothing drawn.
+    """
+    if want is None:
+        return got is None
+    if got is None:
+        return False
+    if isinstance(want, tuple):
+        return (got[0], got[2]) == want
+    return got[0] == want
+
+
+def showwant(want):
+    if want is None:
+        return "  --"
+    if isinstance(want, tuple):
+        return "%4s" % ("%02X.%d" % want)
+    return "%4X" % want
 
 
 def check_size_grid(path, name, sel):
@@ -160,16 +235,17 @@ def check_size_grid(path, name, sel):
         cols, rows = w // 8, h // 8
         want = [[r * 16 + c for c in range(cols)] for r in range(rows)]
         got = read_tiles(machine, x, y, cols, rows)
-        flat_got = [None if c is None else c[0] for row in got for c in row]
+        flat_got = [c for row in got for c in row]
         flat_want = [t for row in want for t in row]
         below = read_tiles(machine, x, y + h, cols, 1)[0]
         right = [row[0] for row in read_tiles(machine, x + w, y, 1, rows)]
-        if flat_got == flat_want and not any(below) and not any(right):
+        if (all(matches(g, t) for g, t in zip(flat_got, flat_want))
+                and not any(below) and not any(right)):
             print("  %-18s %-5s %2dx%-2d ok" % (name, which, w, h))
             continue
         bad += 1
         print("  %-18s %-5s %2dx%-2d WRONG" % (name, which, w, h))
-        print("      want %s" % " ".join("%3X" % t for t in flat_want))
+        print("      want %s" % " ".join(showwant(t) for t in flat_want))
         print("      got  %s" % " ".join(show(c) for row in got for c in row))
         if any(below):
             print("      and it drew past the bottom edge: %s"
@@ -180,7 +256,110 @@ def check_size_grid(path, name, sel):
     return bad
 
 
+def sprites(machine):
+    """Every sprite OAM describes, as (index, x, y, tile, palette, w, h).
+
+    Read out of OAM rather than out of the ROM's source, so this says what
+    the console was told, not what someone meant to say.
+    """
+    oam = machine.ppu.oam_bytes
+    line = [l for l in machine.ppu.dump().splitlines() if l.startswith("OBSEL")][0]
+    sel = int(re.search(r"size=(\d)", line).group(1))
+    out = []
+    for s in range(128):
+        hi = oam[512 + (s >> 2)]
+        big = (hi >> (((s & 3) << 1) + 1)) & 1
+        w, h = SIZES[sel][big]
+        x = oam[s * 4]
+        if (hi >> ((s & 3) << 1)) & 1:
+            x -= 256
+        out.append((s, x, oam[s * 4 + 1], oam[s * 4 + 2],
+                    (oam[s * 4 + 3] >> 1) & 7, w, h))
+    return out
+
+
+def obj_pixel(vram, base, tile, palette, w, px, py):
+    """The CGRAM index a sprite puts at its own (px, py), or 0 for clear."""
+    n = (tile + (py >> 3) * 16 + (px >> 3)) & 0x1FF
+    off = (base + n * 32 + (py & 7) * 2) & 0xFFFF
+    bit = 7 - (px & 7)
+    colour = ((vram[off] >> bit) & 1) | (((vram[off + 1] >> bit) & 1) << 1) \
+        | (((vram[(off + 16) & 0xFFFF] >> bit) & 1) << 2) \
+        | (((vram[(off + 17) & 0xFFFF] >> bit) & 1) << 3)
+    return 0 if not colour else 128 + palette * 16 + colour
+
+
+def check_priority(path, name):
+    """Where two sprites are both opaque, the lower OAM index must win.
+
+    That is the whole claim of obj-priority.sfc, and it holds even when the
+    sprite behind asks for a higher OAM priority: those two bits choose
+    where the object layer sits against the backgrounds, not which object
+    is in front of which.
+
+    Nothing here is hardcoded from the ROM's source.  The sprites come out
+    of OAM, the pixels come out of VRAM, and the colour each sprite would
+    put at a pixel is worked out and compared against the screen -- so a
+    colour that two palettes happen to share cannot make a wrong answer
+    look right.
+    """
+    machine = System(path)
+    for _ in range(FRAMES):
+        machine.run_frame()
+    vram = bytes(machine.ppu.vram_bytes)
+    base = obj_base_bytes(machine)
+    cgram = machine.ppu.cgram_list
+    at = screen(machine)
+
+    def rgb(index):
+        word = cgram[index]
+        return tuple(((word >> s) & 31) << 3 | ((word >> s) & 31) >> 2
+                     for s in (0, 5, 10))
+
+    # A sprite's first scanline is the one after its OAM Y, and the screen
+    # row shown at scanline n is row n - 1, so a sprite's top screen row is
+    # exactly the Y in OAM.  Sprites that would wrap past the bottom are
+    # left out; obj-y-wrap covers those.
+    live = [s for s in sprites(machine)
+            if -64 < s[1] < 256 and s[2] + s[6] <= 224]
+    bad = pairs = 0
+    for a in range(len(live)):
+        for b in range(a + 1, len(live)):
+            ia, ax, ay, at_, apal, aw, ah = live[a]
+            ib, bx, by, bt, bpal, bw, bh = live[b]
+            hits = wrong = 0
+            for y in range(max(ay, by), min(ay + ah, by + bh)):
+                for x in range(max(ax, bx), min(ax + aw, bx + bw)):
+                    if not 0 <= x < 256:
+                        continue
+                    front = obj_pixel(vram, base, at_, apal, aw,
+                                      x - ax, y - ay)
+                    behind = obj_pixel(vram, base, bt, bpal, bw,
+                                       x - bx, y - by)
+                    if not front or not behind:
+                        continue
+                    hits += 1
+                    if at(x, y) != rgb(front):
+                        wrong += 1
+            if not hits:
+                continue
+            pairs += 1
+            if wrong:
+                bad += 1
+                print("  %-14s sprite %d is behind sprite %d at %d of %d "
+                      "shared pixels" % (name, ia, ib, wrong, hits))
+            else:
+                print("  %-14s sprite %d covers sprite %d, %d shared pixels"
+                      % (name, ia, ib, hits))
+    if not pairs:
+        print("  %-14s no sprites overlap: nothing was checked" % name)
+        return 1
+    return bad
+
+
 def check(path, name):
+    if name in PIXELWISE:
+        return check_priority(path, name)
     if name.startswith("obj-size-grid-"):
         return check_size_grid(path, name, int(name[-1]))
 
@@ -196,15 +375,15 @@ def check(path, name):
     bad = 0
     for x, y, want in wants:
         got = read_tiles(machine, x, y, len(want[0]), len(want))
-        flat_got = [None if c is None else c[0] for row in got for c in row]
+        flat_got = [c for row in got for c in row]
         flat_want = [t for row in want for t in row]
-        if flat_got == flat_want:
+        if all(matches(g, t) for g, t in zip(flat_got, flat_want)):
             print("  %-14s (%3d,%3d) ok    %s" % (
                 name, x, y, " ".join(show(c) for row in got for c in row)))
         else:
             bad += 1
             print("  %-14s (%3d,%3d) WRONG" % (name, x, y))
-            print("      want %s" % " ".join("%3X" % t for t in flat_want))
+            print("      want %s" % " ".join(showwant(t) for t in flat_want))
             print("      got  %s" % " ".join(show(c) for row in got for c in row))
     return bad
 
@@ -212,7 +391,8 @@ def check(path, name):
 def main():
     target = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DIR
     if os.path.isdir(target):
-        names = sorted(EXPECTED) + ["obj-size-grid-%d" % i for i in range(8)]
+        names = (sorted(EXPECTED) + list(PIXELWISE)
+                 + ["obj-size-grid-%d" % i for i in range(8)])
         roms = [(os.path.join(target, n + ".sfc"), n) for n in names]
     else:
         roms = [(target, os.path.splitext(os.path.basename(target))[0])]

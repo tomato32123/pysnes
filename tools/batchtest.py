@@ -136,6 +136,12 @@ def main():
     ap.add_argument("--frames", type=int, default=900)
     ap.add_argument("--shots", default=None)
     ap.add_argument("--filter", default=None, help="only ROMs whose path contains this")
+    # A run over a whole library takes hours, so one that is interrupted
+    # should not have to start again.  The order is the sorted path order,
+    # which does not change between runs, so a position taken from an
+    # earlier run's output means the same ROM here.
+    ap.add_argument("--start", type=int, default=1,
+                    help="skip to this position in the list (1-based)")
     args = ap.parse_args()
 
     roms = find_roms(args.romdir)
@@ -146,6 +152,8 @@ def main():
 
     results = []
     for i, path in enumerate(roms, 1):
+        if i < args.start:
+            continue
         res = run_one(path, args.frames, args.shots)
         results.append(res)
         chip = res.get("coproc") or ""
