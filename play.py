@@ -224,17 +224,29 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+_frame_surface = None
+_frame_height = None
+
+
 def blit(screen, surface, framebuffer, scale, height=224):
     """Draw the part of the buffer the PPU filled, scaled to the window.
 
     The buffer is always 512x478 because the PPU can emit two pixels per dot
     and two fields per frame.  How much of it is a picture depends on the
     mode, so only that much is taken and then stretched, which keeps the
-    aspect right whether the game drew 224 rows or 478."""
-    frame = pygame.image.frombuffer(bytes(framebuffer), (BUF_W, BUF_H), "BGRA")
-    if height < BUF_H:
-        frame = frame.subsurface((0, 0, BUF_W, height))
-    pygame.transform.scale(frame, screen.get_size(), screen)
+    aspect right whether the game drew 224 rows or 478.
+
+    The surface is made once and kept: `frombuffer` wraps the emulator's
+    framebuffer rather than copying it, so the PPU writing into that memory is
+    the same thing as the surface changing.  Rebuilding it per frame -- and
+    copying a megabyte with `bytes()` to do so -- was work for nothing.
+    """
+    global _frame_surface, _frame_height
+    if _frame_surface is None or _frame_height != height:
+        full = pygame.image.frombuffer(framebuffer, (BUF_W, BUF_H), "BGRA")
+        _frame_surface = full.subsurface((0, 0, BUF_W, height)) if height < BUF_H else full
+        _frame_height = height
+    pygame.transform.scale(_frame_surface, screen.get_size(), screen)
 
 
 def open_audio(machine):

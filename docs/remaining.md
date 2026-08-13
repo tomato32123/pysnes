@@ -766,6 +766,53 @@ that code but nothing could show it.
 a proven-broken image, needs firmware that is not here, or is doing what the
 hardware would do.
 
+## Speed, measured for the first time
+
+An emulator that is accurate and cannot run at sixty frames a second is not
+finished, and this had never been measured. It is now, and the first
+measurement was wrong in an instructive way: 46.8 fps, taken while a
+test-ROM suite was running in another window. On a quiet machine the same
+build did 88 fps. *Never benchmark against a busy machine* -- and the same
+discipline that applies to a frame budget applies to a stopwatch.
+
+The real numbers, Super Mario World, on this machine:
+
+| | before | after |
+|---|---|---|
+| emulator core | 11.4 ms/frame (88 fps) | **4.6 ms/frame (210 fps)** |
+| play loop total | 21.9 ms | 14.8 ms |
+| frames over the 16.67 ms budget | 94.6% | **15.4%** |
+
+Where the time went was measured rather than guessed, by removing one stage
+at a time and timing what was left:
+
+| stage removed | cost |
+|---|---|
+| composition | **63%** |
+| backgrounds | 24% |
+| sprite painting | 15% |
+| sprite evaluation | 1.5% |
+
+So composition was two thirds of everything, and the fix is the one bsnes
+uses: a table from brightness and fifteen-bit colour straight to the pixel
+that leaves the PPU. Two megabytes, built once, and it replaces three scaling
+lookups and three channel expansions per dot with one read. 88 fps to 210.
+
+Two things are worth taking from this beyond the number. The first is that
+*the optimisation was safe because the oracle existed*: krom's reference
+pictures still match on 34 of 35 demos, pixel for pixel, and the PPU suite's
+scene hash is unchanged. Without that, a 2.5x rewrite of the hot path would
+have been a leap of faith. The second is that a per-pixel tile cache -- the
+obvious optimisation, fetching the tilemap entry once per eight pixels
+instead of once per pixel -- measured *the same* and was reverted. VRAM is
+64 KB and never leaves cache; the branch cost as much as the reads saved.
+
+*What is left*: the display path. Blitting and flipping cost 7.0 ms of the
+14.8, which is now more than the emulator. It is `pygame.transform.scale`
+doing 2.2 million pixels in software; the fix is to let SDL scale on the GPU.
+That is not done here because this machine has no display to measure it on,
+and shipping an unmeasured optimisation is how the tile cache nearly got in.
+
 ## How to verify anything here
 
 ```

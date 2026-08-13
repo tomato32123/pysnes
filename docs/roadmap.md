@@ -232,6 +232,23 @@ The largest single gap. Everything below the first item depends on it.
       only route is reimplementing what the program does from its documented
       effects, which is a different and much weaker thing than emulating it
 
+## 5a. Speed
+
+- [x] **Measured, and then fixed.**  The core went from 11.4 ms a frame to
+      4.6 -- 88 fps to 210 on Super Mario World -- and the play loop from 94.6%
+      of frames over the 16.67 ms budget to 15.4%.
+      Composition was 63% of everything, measured by removing one stage at a
+      time rather than guessed at, and the fix is bsnes's: a table from
+      brightness and fifteen-bit colour straight to the finished pixel.  The
+      obvious optimisation -- caching the tilemap fetch across the eight pixels
+      of a tile -- measured the same and was reverted.
+      What made it safe to rewrite the hot path at all was the reference
+      pictures: 34 of 35 demos still match pixel for pixel afterwards
+- [ ] The display path.  Blit and flip are 7.0 ms of the remaining 14.8, which
+      is more than the emulator now costs.  It is a software scale of 2.2
+      million pixels; SDL can do it on the GPU.  Not done because there is no
+      display on this machine to measure it on
+
 ## 6. Verification
 
 This is the part that decides whether any of the above converges.

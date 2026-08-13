@@ -50,10 +50,24 @@ cdef class PPU:
         # INIDISP brightness is a 4-bit level where 0 is black and 15 is full,
         # so a channel scales by brightness/15 -- not by (brightness+1)/16,
         # which would leave level 0 showing a sixteenth of the colour.
-        cdef int level, value
+        cdef int level, value, r, g, b
+        cdef uint8_t rr, gg, bb
         for level in range(16):
             for value in range(32):
                 self.light[level][value] = <uint8_t>((value * level + 7) // 15)
+        # The same thing again, packed: for every brightness and every colour
+        # the chip can make, the pixel that leaves the PPU.  Composition reads
+        # this instead of scaling and expanding three channels a dot at a time.
+        for level in range(16):
+            for value in range(32768):
+                rr = self.light[level][value & 0x1F]
+                gg = self.light[level][(value >> 5) & 0x1F]
+                bb = self.light[level][(value >> 10) & 0x1F]
+                self.light_rgb[level][value] = (
+                    0xFF000000
+                    | (<uint32_t>((rr << 3) | (rr >> 2)) << 16)
+                    | (<uint32_t>((gg << 3) | (gg >> 2)) << 8)
+                    | <uint32_t>((bb << 3) | (bb >> 2)))
         self.framebuffer_obj = bytearray(OUT_W * OUT_H * 4)
         self.framebuffer = <uint32_t *><unsigned char *>self.framebuffer_obj
         self.reset()
@@ -780,8 +794,6 @@ cdef class PPU:
         cdef int words_per_tile = bpp * 4
         cdef int x, sx, tile_x, tile_y, screen, sub_x, sub_y
         cdef uint32_t map_addr, chr_addr
-        cdef uint32_t cached_map = 0xFFFFFFFF
-        cdef uint32_t cached_chr = 0xFFFFFFFF
         cdef uint16_t entry, plane0 = 0, plane1 = 0, plane2 = 0, plane3 = 0
         cdef int tile_num, tile_base = 0, palette = 0, prio = 0
         cdef int hflip = 0, vflip = 0, row_in, col, colour
@@ -803,20 +815,12 @@ cdef class PPU:
                 screen += 0x800 if self.bg_map_wide[bg] else 0x400
             map_addr = (map_base + screen + ((tile_y & 0x1F) << 5) + (tile_x & 0x1F)) & 0x7FFF
 
-            # Eight pixels in a row come out of one tilemap entry and one set
-            # of bitplanes, and VRAM cannot change inside a span -- a write
-            # during display is refused.  So both are fetched when the address
-            # moves and reused until it does.  That is the same fetch pattern
-            # the hardware has, and it is most of what this renderer costs:
-            # the reads were being done once per pixel.
-            if map_addr != cached_map:
-                cached_map = map_addr
-                entry = self.vram[map_addr]
-                tile_base = entry & 0x03FF
-                palette = (entry >> 10) & 7
-                prio = (entry >> 13) & 1
-                hflip = (entry >> 14) & 1
-                vflip = (entry >> 15) & 1
+            entry = self.vram[map_addr]
+            tile_base = entry & 0x03FF
+            palette = (entry >> 10) & 7
+            prio = (entry >> 13) & 1
+            hflip = (entry >> 14) & 1
+            vflip = (entry >> 15) & 1
 
             px_in_tile = sx & ((1 << tile_shift) - 1)
             py_in_tile = y & ((1 << tile_shift) - 1)
@@ -834,14 +838,12 @@ cdef class PPU:
             col = px_in_tile & 7
 
             chr_addr = (chr_base + tile_num * words_per_tile + row_in) & 0x7FFF
-            if chr_addr != cached_chr:
-                cached_chr = chr_addr
-                plane0 = self.vram[chr_addr]
-                if bpp >= 4:
-                    plane1 = self.vram[(chr_addr + 8) & 0x7FFF]
-                if bpp == 8:
-                    plane2 = self.vram[(chr_addr + 16) & 0x7FFF]
-                    plane3 = self.vram[(chr_addr + 24) & 0x7FFF]
+            plane0 = self.vram[chr_addr]
+            if bpp >= 4:
+                plane1 = self.vram[(chr_addr + 8) & 0x7FFF]
+            if bpp == 8:
+                plane2 = self.vram[(chr_addr + 16) & 0x7FFF]
+                plane3 = self.vram[(chr_addr + 24) & 0x7FFF]
 
             colour = ((plane0 >> (7 - col)) & 1) | (((plane0 >> (15 - col)) & 1) << 1)
             if bpp >= 4:
@@ -1127,6 +1129,28 @@ cdef class PPU:
         subtract = 1 if (self.cgadsub & 0x80) else 0
         sub_used = 1 if (self.cgwsel & 0x02) else 0
 
+        # Most dots of most frames have no colour math on them and no window
+        # blacking them out, and the answer for those is a table lookup: the
+        # brightness and the fifteen-bit colour give the pixel directly.  The
+        # rest of this loop is what the hardware does to the ones that are not
+        # ordinary, and it is worth keeping the two apart -- composition is
+        # nearly two thirds of what this emulator spends its time on.
+        cdef int may_black = 1 if (self.cgwsel >> 6) & 3 else 0
+        cdef int may_math = 1 if (self.cgadsub & 0x3F) else 0
+        cdef uint32_t *table = self.light_rgb[bright]
+
+        if not may_black and not may_math and not self.hires:
+            for x in range(x0, x1):
+                main_out = table[self.main_buf[x] & 0x7FFF]
+                row[x * 2] = main_out
+                row[x * 2 + 1] = main_out
+                self.prev_main = self.main_buf[x]
+                self.prev_blacked = 0
+                self.prev_math = 0
+                self.prev_halve = 0
+                self.prev_blend = sub_used
+            return
+
         for x in range(x0, x1):
             # A dot is two half-dots.  In modes 5 and 6 the layers really do
             # have a value for each, and the main screen takes the right one
@@ -1198,15 +1222,8 @@ cdef class PPU:
                 g = (main >> 5) & 0x1F
                 b = (main >> 10) & 0x1F
 
-            if bright != 15:
-                r = self.light[bright][r]
-                g = self.light[bright][g]
-                b = self.light[bright][b]
-
-            main_out = (0xFF000000
-                        | (<uint32_t>((r << 3) | (r >> 2)) << 16)
-                        | (<uint32_t>((g << 3) | (g >> 2)) << 8)
-                        | <uint32_t>((b << 3) | (b >> 2)))
+            # One lookup instead of three scalings and three expansions.
+            main_out = table[r | (g << 5) | (b << 10)]
 
             # Two pixels leave the PPU for every dot.  Normally they are the
             # same, which is what makes a 256-wide picture; in hires the left
@@ -1257,14 +1274,7 @@ cdef class PPU:
                     if r > 31: r = 31
                     if g > 31: g = 31
                     if b > 31: b = 31
-                if bright != 15:
-                    r = self.light[bright][r]
-                    g = self.light[bright][g]
-                    b = self.light[bright][b]
-                row[x * 2] = (0xFF000000
-                              | (<uint32_t>((r << 3) | (r >> 2)) << 16)
-                              | (<uint32_t>((g << 3) | (g >> 2)) << 8)
-                              | <uint32_t>((b << 3) | (b >> 2)))
+                row[x * 2] = table[r | (g << 5) | (b << 10)]
             else:
                 row[x * 2] = main_out
             row[x * 2 + 1] = main_out

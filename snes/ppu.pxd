@@ -118,6 +118,10 @@ cdef class PPU:
     cdef int bg_bpp[4]
     cdef int bg_pal_base[4]
     cdef uint8_t light[16][32]       # brightness level -> 5-bit channel
+    # brightness level and 15-bit colour -> the packed pixel it becomes.  Two
+    # megabytes to save ten operations per dot, which is the difference
+    # between fitting in a frame and not.
+    cdef uint32_t light_rgb[16][32768]
     cdef uint16_t bg_direct[256]     # direct-colour result for BG1
     cdef int direct_active           # is direct colour in force this span
     cdef int mosaic_start            # first line of the current block
