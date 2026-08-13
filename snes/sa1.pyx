@@ -51,15 +51,24 @@ cdef class SA1Space(AddressSpace):
         self.target = 0
         self.nmi_pending = 0
         self.irq_pending = 0
+        self.mdr = 0
 
     cdef uint8_t read8(self, uint32_t addr) noexcept:
-        return self.chip._read_common(addr, 1, 0)
+        # The SA-1 has a bus of its own, so it has an open-bus value of its
+        # own: what that bus last carried.  It was reading zero, which is a
+        # value nothing put there.  absindx's SA1VersionCodeTest reads every
+        # register from both sides and prints the two columns, which is what
+        # makes the difference visible at all.
+        self.mdr = self.chip._read_common(addr, 1, self.mdr)
+        return self.mdr
 
     cdef void write8(self, uint32_t addr, uint8_t value) noexcept:
+        self.mdr = value
         self.chip._write_common(addr, value, 1)
 
     cdef uint8_t read8_fast(self, uint32_t addr) noexcept:
-        return self.chip._read_common(addr, 1, 0)
+        self.mdr = self.chip._read_common(addr, 1, self.mdr)
+        return self.mdr
 
     cdef void tick(self, int cycles) noexcept:
         self.master_clock += cycles

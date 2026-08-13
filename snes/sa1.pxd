@@ -11,6 +11,9 @@ from snes.space cimport AddressSpace
 cdef class SA1Space(AddressSpace):
     cdef SA1 chip
     cdef int64_t target              # master clock to run up to
+    # What the SA-1's own bus last carried.  An address it does not decode
+    # reads this back, the same way the console's does on its side.
+    cdef uint8_t mdr
 
     cdef uint8_t read8(self, uint32_t addr) noexcept
     cdef void write8(self, uint32_t addr, uint8_t value) noexcept

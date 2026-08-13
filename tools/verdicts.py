@@ -61,6 +61,14 @@ def screen_text(machine):
         lines.append("".join(chars).rstrip())
     if printable < 12:
         return None
+    # A picture drawn out of tiles will have tile numbers that happen to be
+    # letters, and enough of them to look like writing.  Real writing has
+    # words in it: runs of letters with spaces around them.  Without this,
+    # a photograph of a mandrill reports a failure because three of its
+    # tiles spell one.
+    words = re.findall(r"(?<![A-Za-z])[A-Za-z]{3,}(?![A-Za-z])", " ".join(lines))
+    if len(words) < 3:
+        return None
     return [l for l in lines if l.strip()]
 
 
