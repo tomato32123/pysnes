@@ -337,6 +337,43 @@ done:
 
 # ------------------------------------------------------- WAI and STP ----
 
+def test_cli_lets_an_interrupt_in_one_instruction_late():
+    """An IRQ waiting while I is set is not taken the moment CLI clears it:
+    the decision for that boundary was already made, with the old flag, so
+    one more instruction runs first.
+
+    This is what Sour's dma_irq_test measures on hardware, and it is the
+    difference between its `IRQ - SEI+CLI+INC` reading $0001 and $0000.
+    """
+    r = run("""
+        sep #$20
+        rep #$10
+        stz $0100               ; the counter, in low WRAM where INC reaches it
+        lda #$02
+        sta $4209               ; V-IRQ on line 2
+        stz $420A
+        lda #$20
+        sta $4200
+        sei                     ; ...and keep it out until we are ready
+        ldx #$2000
+delay:  dex
+        bne delay               ; long enough for the line to go by
+        cli                     ; the IRQ is waiting; it may not be taken yet
+        inc $0100               ; this must still run
+        lda $0100
+        sta result+0
+        bra done
+irq:    sep #$20
+        lda $0100
+        sta result+1            ; what the counter had reached when it fired
+        lda $4211               ; acknowledge
+        rti
+done:
+    """, max_frames=8)
+    assert r.finished, "the program never finished"
+    check("the instruction after CLI ran before the IRQ", r[1], 0x01)
+
+
 def test_wai_wakes_on_nmi_and_takes_it():
     r = run("""
         sep #$20

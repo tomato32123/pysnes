@@ -151,6 +151,7 @@ cdef class Bus:
         self.irq_flag = 0
         self.timer_irq = 0
         self.irq_pending = 0
+        self.irq_lock = 3
         self.irq_line_done = 0
         self.nmi_count = 0
         self.irq_count = 0
@@ -618,6 +619,9 @@ cdef class Bus:
     # The per-line pass transfers for every channel first and only then
     # advances them, which is the order the hardware uses and which matters
     # because reloading reads more of the table.
+        # A transfer ends with the interrupt lines hidden from the CPU for the
+        # rest of this cycle and the next one.  See CPU.step.
+        self.irq_lock = 3
 
     cdef void _hdma_reload(self, int ch) noexcept:
         """Read the next line count, and an indirect address if the channel

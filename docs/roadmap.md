@@ -40,8 +40,17 @@ a suspicion into a located defect.
 
 - [x] All 256 opcodes, addressing modes, emulation/native, M/X widths
 - [x] Decimal ADC/SBC, block moves, the idle-cycle rules
-- [~] Interrupt sequence: correct effect, not yet cycle-by-cycle in which
-      cycle pushes what
+- [x] **When an interrupt is taken**, which is not the same as what it does.
+      The 65816 decides a cycle before an instruction ends and acts on the
+      decision at the boundary, so: CLI lets an interrupt in one instruction
+      late, SEI shuts it out one instruction late, and a DMA finishing inside
+      that window hides the lines for a further instruction.  This emulator
+      took interrupts at the next boundary, always.
+      Sour's `dma_irq_test` measures exactly this and publishes what a console
+      answers.  We went from **0 of 14** to **13 of 14**; the fourteenth is
+      the high byte of a location the test never initialises, whose low byte
+      we match.  `tools/dmairqtest.py` runs it
+- [~] Interrupt sequence: which cycle pushes what is still not modelled
 - [x] **WAI and STP**: WAI wakes on an NMI and takes it, wakes on a masked
       IRQ without taking it, and STP stays halted until reset
 - [x] **Open bus**: three latches, not one -- the CPU's, PPU1's and PPU2's.

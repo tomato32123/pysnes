@@ -13,6 +13,11 @@ cdef class AddressSpace:
     cdef readonly int64_t master_clock
     cdef public int nmi_pending      # edge latched for the CPU
     cdef public int irq_pending      # level held for the CPU
+    # Bus cycles during which an interrupt may not be latched.  The 65816
+    # decides whether to take one a cycle before an instruction ends, and a
+    # DMA finishing inside that window hides the decision until the
+    # instruction after next -- which is what Sour's dma_irq_test measures.
+    cdef public int irq_lock
 
     cdef uint8_t read8(self, uint32_t addr) noexcept
     cdef void write8(self, uint32_t addr, uint8_t value) noexcept

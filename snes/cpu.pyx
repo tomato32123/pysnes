@@ -69,6 +69,8 @@ cdef class CPU:
         self.p = FLAG_M | FLAG_X | FLAG_I
         self.e = 1
         self.stopped = 0
+        self.take_nmi = 0
+        self.take_irq = 0
         self.waiting = 0
         self.instructions = 0
         self.ea_wrap = 0
@@ -83,10 +85,14 @@ cdef class CPU:
 
     cdef inline void io(self) noexcept:
         self.bus.tick(6)
+        if self.bus.irq_lock:
+            self.bus.irq_lock -= 1
 
     cdef inline uint8_t read(self, uint32_t addr) noexcept:
         cdef uint8_t value
         self.bus.tick(<int>self.bus.speed(addr))
+        if self.bus.irq_lock:
+            self.bus.irq_lock -= 1
         value = self.bus.read8(addr)
         if self.tracing >= 2:
             self._log_bus(addr, value, 0)
@@ -94,6 +100,8 @@ cdef class CPU:
 
     cdef inline void write(self, uint32_t addr, uint8_t value) noexcept:
         self.bus.tick(<int>self.bus.speed(addr))
+        if self.bus.irq_lock:
+            self.bus.irq_lock -= 1
         self.bus.write8(addr, value)
         if self.tracing >= 2:
             self._log_bus(addr, value, 1)
@@ -588,6 +596,7 @@ cdef class CPU:
 
     cdef void step(self) noexcept:
         cdef uint8_t op
+        cdef int i_before
 
         if self.stopped:
             self.bus.tick(6)
@@ -595,13 +604,28 @@ cdef class CPU:
 
         if self.waiting:
             if self.bus.nmi_pending or self.bus.irq_pending:
+                # WAI has been standing still waiting for exactly this, so the
+                # decision the pipeline normally makes a cycle before an
+                # instruction ends is already made: the interrupt is serviced
+                # the moment the processor wakes, not an instruction later.
                 self.waiting = 0
+                if self.bus.nmi_pending:
+                    self.take_nmi = 1
+                if self.bus.irq_pending:
+                    self.take_irq = 1
                 self.io()
             else:
                 self.bus.tick(6)
                 return
 
-        if self.bus.nmi_pending:
+        # The 65816 does not look at the interrupt lines at an instruction
+        # boundary; it decides a cycle before the instruction ends and acts on
+        # that decision here.  The difference is invisible until a DMA lands
+        # inside that window, which is what Sour's dma_irq_test measures --
+        # and what this emulator got wrong in all fourteen of its cases.
+        if self.take_nmi:
+            self.take_nmi = 0
+            self.take_irq = 0
             self.bus.nmi_pending = 0
             if self.e:
                 self.interrupt(VEC_EMU_NMI, 0)
@@ -609,7 +633,8 @@ cdef class CPU:
                 self.interrupt(VEC_NATIVE_NMI, 0)
             return
 
-        if self.bus.irq_pending and not (self.p & FLAG_I):
+        if self.take_irq and not (self.p & FLAG_I):
+            self.take_irq = 0
             if self.e:
                 self.interrupt(VEC_EMU_IRQ, 0)
             else:
@@ -620,9 +645,24 @@ cdef class CPU:
             # State before the fetch, so a record describes the machine as the
             # instruction saw it.
             self._log_insn(self.bus.read8_fast((<uint32_t>self.pb << 16) | self.pc))
+        i_before = self.p & FLAG_I
         op = self.fetch()
         self.instructions += 1
         self.execute(op)
+
+        # ...and the decision for the next boundary is made now, unless a DMA
+        # has just run and is still hiding the lines.
+        #
+        # The mask is the one that was in force *before* this instruction, not
+        # after it.  That is what makes CLI take an instruction to let an
+        # interrupt in and SEI take one to shut it out: the decision was made
+        # while the old flag still stood.  The flag is tested again when the
+        # interrupt is actually taken, which is what stops SEI's own decision
+        # from letting one through.
+        if not self.bus.irq_lock:
+            if self.bus.nmi_pending:
+                self.take_nmi = 1
+            self.take_irq = 1 if (self.bus.irq_pending and not i_before) else 0
 
     # =====================================================================
     # instruction dispatch

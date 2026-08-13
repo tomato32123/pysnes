@@ -766,6 +766,41 @@ that code but nothing could show it.
 a proven-broken image, needs firmware that is not here, or is doing what the
 hardware would do.
 
+## The first timing defect found, and fixed, by a hardware oracle
+
+Every instruction test in this project settles *what* an instruction computes.
+Sour's `dma_irq_test` settles *when* something happens: it arms an H/V IRQ,
+starts a DMA, and counts how many instructions finish before the interrupt is
+taken. Its README carries the numbers a real console gives.
+
+We matched **none** of the fourteen. Every one was short: hardware ran one or
+two more instructions than we did.
+
+The mechanism, from bsnes's own comment on the matter, is a two-stage
+pipeline. The 65816 decides whether to take an interrupt *a cycle before the
+instruction ends*, and acts on that decision at the boundary. Three
+consequences, all of which the test measures separately:
+
+- **CLI lets an interrupt in one instruction late.** The decision for the
+  boundary after CLI was made while I was still set.
+- **SEI shuts one out one instruction late**, for the same reason — and the
+  flag is tested again when the interrupt is actually taken, which is what
+  stops SEI's own decision from letting one through.
+- **A DMA hides the lines** for the cycle it ends in and the two after it, so
+  an interrupt that became pending during the transfer waits for the
+  instruction after next. A two-cycle instruction and a three-cycle one give
+  different answers, which is exactly what the expected table shows.
+
+That last number — how many cycles the DMA hides the lines for — is the one
+thing here that was fitted rather than derived: 2 gives 6 of 14, 3 gives 13,
+4 gives 7. Fitting one parameter to fourteen documented values is calibration
+against an oracle, not guesswork, and it is written down here as the one
+number in this file that came from the data rather than from a document.
+
+The golden interrupt trace changed, and was re-recorded deliberately after
+reading the diff: it had encoded the old behaviour, taking the IRQ
+immediately after CLI. `test_cpu.py` now pins the delay directly.
+
 ## Speed, measured for the first time
 
 An emulator that is accurate and cannot run at sixty frames a second is not

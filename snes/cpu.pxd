@@ -25,6 +25,10 @@ cdef class CPU:
     cdef uint8_t db, pb, p
     cdef int e                       # emulation mode
 
+    # The decision to take an interrupt is made a cycle before an instruction
+    # ends, not at the boundary where it is acted on.  These hold it.
+    cdef int take_nmi
+    cdef int take_irq
     cdef int stopped                 # STP
     cdef int waiting                 # WAI
     cdef readonly int64_t instructions
