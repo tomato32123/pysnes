@@ -586,6 +586,15 @@ cdef class PPU:
         if row == 0 or self.mosaic_left == 0:
             self.mosaic_start = self.src_line
             self.mosaic_left = self.mosaic_size + 1
+            # A mosaic block is as tall as it is wide, and on an interlaced
+            # hires screen a dot is two lines tall -- so the block covers
+            # twice as many rendered rows.  krom's MosaicMode5 capture shows
+            # it directly: at size 8 its blocks are 16 rows of each field,
+            # not 8.  Each field still samples its own first line, so the
+            # two fields differ inside a block; only the height doubles.
+            if self.screen_interlace and (self.bg_mode == 5 or self.bg_mode == 6
+                                          or self.pseudo_hires):
+                self.mosaic_left *= 2
         self.mosaic_left -= 1
         # The first dot of a line has nothing to its left, and what comes out
         # of the left half of it is the sub screen with nothing done to it:
