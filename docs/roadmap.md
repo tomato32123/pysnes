@@ -233,9 +233,15 @@ The largest single gap. Everything below the first item depends on it.
       screen.
       Missing: the RTC at $4840-$4842, which only Far East of Eden Zero has
       and which nothing here can check
-- [ ] OBC1.  Glue logic with documented behaviour and no firmware of its own,
-      so it can be written; nothing in the local library needs it, so it would
-      be written blind
+- [x] **OBC1.**  Glue logic that builds an object table: a base, a sprite
+      index, four bytes a sprite and a two-bit field packed four to a byte,
+      with the chip doing the read-mask-shift-write the console would
+      otherwise do itself.  It has no program of its own, so nothing about it
+      is hidden.  It was written blind until Metal Combat: Falcon's Revenge --
+      the only game that has the chip -- arrived; the game now boots, and its
+      own use of the chip is the check: the index register moves as it works,
+      both bases are used as a double buffer, and the packed area fills with
+      coherent size and X-high pairs
 - [ ] DSP-1/2/3/4, CX4, ST010/011.  Each is a microcontroller running a
       program mask-ROMed into it, and that dump is not here.  Without it the
       only route is reimplementing what the program does from its documented
