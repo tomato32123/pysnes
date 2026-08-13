@@ -549,22 +549,40 @@ cdef class PPU:
         output row and takes its pixels from every other source row, so the
         two fields together carry twice the vertical detail.  The field left
         alone keeps last frame's pixels, which is what a real display does.
+
+        The row a background is *sampled* from is not the row it is drawn to.
+        Scanline 0 is never displayed, so the first row on screen is scanline
+        1, and a background with no scroll shows its second line there rather
+        than its first.  Games compensate by writing $FFFF to BGnVOFS when
+        they want the top of the map at the top of the screen -- which is
+        why the offset is easy to miss and easy to get wrong: with it missing
+        every layer is one line too high, and nothing looks broken.
         """
         cdef int i
         self.render_row = row
         self.rendered_x = 0
         if row < 0 or row >= SCREEN_H:
             return
-        if row == 0 or self.mosaic_left == 0:
-            self.mosaic_start = row
-            self.mosaic_left = self.mosaic_size + 1
-        self.mosaic_left -= 1
         if self.screen_interlace:
             self.out_row = row * 2 + self.field
-            self.src_line = row * 2 + self.field
+            self.src_line = (row + 1) * 2 + self.field
         else:
             self.out_row = row
-            self.src_line = row
+            self.src_line = row + 1
+        if row == 0 or self.mosaic_left == 0:
+            self.mosaic_start = self.src_line
+            self.mosaic_left = self.mosaic_size + 1
+        self.mosaic_left -= 1
+        # The first dot of a line has nothing to its left, and what comes out
+        # of the left half of it is the sub screen with nothing done to it:
+        # measured from krom's hires references, which show the picture there
+        # rather than the black bsnes emits (whose source says the value is
+        # not confirmed on hardware) or a blend with the line above.
+        self.prev_main = self.cgram[0]
+        self.prev_blacked = 0
+        self.prev_math = 0
+        self.prev_halve = 0
+        self.prev_blend = 0
         for i in range(SCREEN_W):
             self.obj_idx[i] = 0
             self.obj_pri[i] = 0xFF
@@ -874,10 +892,12 @@ cdef class PPU:
                 self._opt_offsets(bg, x >> 1, &opt_h, &opt_v)
                 hofs = opt_h
                 y = base_y + opt_v
+            # The scroll register counts dots, and a hires layer is drawn in
+            # half-dots, so it moves the layer twice as far here.
             if self.mosaic_enable[bg] and self.mosaic_size:
-                sx = self._mosaic_x(bg, x >> 1) * 2 + hofs
+                sx = self._mosaic_x(bg, x >> 1) * 2 + hofs * 2
             else:
-                sx = x + hofs
+                sx = x + hofs * 2
             tile_x = sx >> tile_shift
             tile_y = y >> tile_shift
 
@@ -1070,9 +1090,9 @@ cdef class PPU:
                     self.main_src[x] = layer
 
     cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept:
-        cdef int x, i, mi, si, sub_used, math_here, halve, subtract
+        cdef int x, i, mi, si, sub_used, math_here, halve, subtract, blacked
         cdef int r, g, b, sr, sg, sb
-        cdef uint16_t main, sub, fixed
+        cdef uint16_t main, main_raw, sub, fixed, fixed_or_main
         cdef uint32_t main_out
         cdef int bright = self.brightness
 
@@ -1092,13 +1112,15 @@ cdef class PPU:
                 mi = x
                 si = x
             main = self.main_buf[mi]
+            main_raw = main
 
             # $2130 bits 7-6 force the main screen to black over a region.
             # That changes the colour, not who produced it: colour math still
             # runs, and still asks whether the layer that would have been
             # showing has math switched on.  Skipping that question would let
             # the sub screen through in places the game meant to stay black.
-            if self._region_black(self.cgwsel >> 6, self.win_mask[5][x]):
+            blacked = self._region_black(self.cgwsel >> 6, self.win_mask[5][x])
+            if blacked:
                 main = 0
 
             math_here = self._region(self.cgwsel >> 4, self.win_mask[5][x])
@@ -1111,6 +1133,7 @@ cdef class PPU:
                 else:
                     math_here = 1 if (self.cgadsub & (1 << i)) else 0
 
+            halve = 0
             if math_here:
                 if sub_used:
                     sub = self.sub_buf[si]
@@ -1161,13 +1184,52 @@ cdef class PPU:
             # Two pixels leave the PPU for every dot.  Normally they are the
             # same, which is what makes a 256-wide picture; in hires the left
             # one comes from the sub screen instead, so the two screens end up
-            # interleaved along the row.  Colour math is a one-way operation
-            # onto the main screen, so the sub pixel is emitted as it is.
+            # interleaved along the row.
+            #
+            # The left half-dot is not the raw sub pixel.  It goes through the
+            # same output stage with the two screens exchanged: the sub colour
+            # is what colour math is applied *to*, and the operand is the main
+            # colour when $2130 bit 1 asks for it and the fixed colour when it
+            # does not.
+            #
+            # And it is a dot behind.  The output stage computes the left half
+            # before it has looked at this dot's main screen, so the operand,
+            # the windows and the halving all come from the dot to its left --
+            # which is why the first left half-dot of every line is black,
+            # there being no dot before it.  On a photograph the effect is one
+            # colour level here and there along a row, which is exactly what
+            # separates the reference pictures from an implementation that
+            # blends the two halves of the same dot.
             if self.hires:
                 sub = self.sub_buf[si]
+                if self.prev_blacked:
+                    sub = 0
                 r = sub & 0x1F
                 g = (sub >> 5) & 0x1F
                 b = (sub >> 10) & 0x1F
+                if self.prev_math:
+                    fixed_or_main = self.prev_main if self.prev_blend else fixed
+                    sr = fixed_or_main & 0x1F
+                    sg = (fixed_or_main >> 5) & 0x1F
+                    sb = (fixed_or_main >> 10) & 0x1F
+                    if subtract:
+                        r -= sr
+                        g -= sg
+                        b -= sb
+                        if r < 0: r = 0
+                        if g < 0: g = 0
+                        if b < 0: b = 0
+                    else:
+                        r += sr
+                        g += sg
+                        b += sb
+                    if self.prev_halve:
+                        r >>= 1
+                        g >>= 1
+                        b >>= 1
+                    if r > 31: r = 31
+                    if g > 31: g = 31
+                    if b > 31: b = 31
                 if bright != 15:
                     r = self.light[bright][r]
                     g = self.light[bright][g]
@@ -1179,6 +1241,13 @@ cdef class PPU:
             else:
                 row[x * 2] = main_out
             row[x * 2 + 1] = main_out
+
+            # What the next dot's left half will be blended with.
+            self.prev_main = main_raw
+            self.prev_blacked = blacked
+            self.prev_math = math_here
+            self.prev_halve = halve
+            self.prev_blend = sub_used
 
     cdef void _render_objects(self, int line) noexcept:
         """Evaluate and draw the sprites for one line.

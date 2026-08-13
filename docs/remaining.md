@@ -30,6 +30,14 @@ They say nothing about *when*, which is where the APU's nine defects lived, so
 what follows is still true of timing. But "no external authority" was only
 ever true of timing, and it took an afternoon to find that out.
 
+**And the PPU got one in the same afternoon.** krom's demos ship a screenshot
+each, and comparing against them pixel for pixel found three defects in the
+renderer — one of them in every frame this emulator has ever drawn. All three
+are described under "What the reference pictures found" below. The tests in
+this repository passed throughout, before and after, because they were written
+from the same understanding as the code: exactly the failure mode this section
+was written to warn about, demonstrated on the section that warned about it.
+
 There are now four things that partly substitute for a reference, and it is
 worth knowing which parts. blargg's SPC test ROMs are here (see item 10), and
 `tools/dspdiff.py` runs the DSP against blargg's own implementation sample by
@@ -119,6 +127,58 @@ out: **direct colour and the forced-black region have no working cartridge
 behind them either**, which puts them in the same class as the nine in bold.
 
 ---
+
+## What the reference pictures found
+
+`tools/ppucompare.py` runs krom's PPU demos and compares our output to the
+screenshot each ships, pixel for pixel. Three defects came out of it, and it
+is worth reading them as a set: none was a crash, none broke a game visibly,
+and every test in this repository passed with all three present.
+
+**Every background was drawn one line too high.** Scanline 0 is not displayed,
+so the first row on screen is scanline 1 — and a layer's vertical source is
+that scanline, not the zero-based row it lands on. Games write `$FFFF` to
+BGnVOFS when they want the top of the map at the top of the screen, and that
+convention is exactly why this can be wrong for years without looking wrong:
+every layer moves together, by one line, at the very top of the screen. Four
+static demos independently said +1, and bsnes samples `vcounter()`. The fix is
+one line in `begin_line`; the scene hash in `test_ppu.py` did not change,
+because the tests scroll by -1 like a real game and the two cancel.
+
+**The hires sub half-dot was emitted raw.** In hires the left half of every dot
+comes from the sub screen, and this emulator sent it straight to the
+framebuffer. Hardware puts it through the same output stage as the main half,
+with the two screens exchanged: the sub colour is what colour math is applied
+*to*, and the operand is the main colour or the fixed colour. Only the even
+columns were wrong, only in hires, and only when a game puts different pictures
+on the two screens — which is precisely what the "HiColor" demos do, and what
+they exist to demonstrate.
+
+**And that half-dot is a dot behind.** The output stage builds the left half
+before it has looked at the dot's own main screen, so the operand and all three
+colour-math switches come from the dot to its left. This is visible as a single
+colour level here and there along a row — it took a photograph to see it, and
+`lenna64PerTileRowHiRes` went from 76.68% to 99.80% exact when it was modelled.
+The remaining 0.2% was the first dot of each line, which has nothing to its
+left: bsnes emits black there and says in a comment that the value is not
+confirmed on hardware; the references show the sub screen untouched, which is
+what is implemented and what takes those demos to 100.00%.
+
+*Still open, from the same comparison*: three mode 5 interlace demos differ,
+and the differences are confined to a band at the top of the screen — 66 rows
+of 448 in `InterlaceFont`, with the other 382 exact. `InterlaceRPG` (34.65%)
+and `MosaicMode5` (68.17%) are worse and are the place to start. Six more
+references cannot be used at all, because they contain colours the SNES cannot
+produce; `RedSpace9BitHDMA` is the interesting one of those. It drives
+brightness through HDMA a line at a time, our output matches it exactly on
+every full-brightness line, and on the dimmed lines no arithmetic rule
+reproduces the reference — the closest of eight candidates gets 170 of 224
+lines. That is a capture of an analog dimming curve, not a rule to copy.
+
+*One change here rests on bsnes alone*: in hires the horizontal scroll counts
+dots and the layer is drawn in half-dots, so the scroll moves the layer twice
+as far. bsnes does this explicitly; no demo here scrolls a hires layer far
+enough to demonstrate it.
 
 ## The untouched items
 
@@ -703,6 +763,7 @@ python tools/difftrace.py check       # committed traces, cycle for cycle
 python tools/dspdiff.py <probe>       # this DSP against blargg's, sample by sample
 python tools/spc7110check.py <rom>    # the check program inside Momotarou Dentetsu Happy
 python tools/kromtests.py <dir>       # 66 instruction tests, verdict read from VRAM
+python tools/ppucompare.py <dir>      # PPU demos against their own screenshots
 ```
 
 Two habits worth keeping. `batchtest` judges on the best frame of a run, not

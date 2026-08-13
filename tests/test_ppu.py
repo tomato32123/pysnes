@@ -95,6 +95,14 @@ tilehi: lda #$0000
         stz $210B               ; BG1 character base $0000
         lda #$01
         sta $2105               ; mode 1, 8x8 tiles
+
+        ; Scroll up one line.  Scanline 0 is never displayed, so the first row
+        ; on screen is scanline 1 and a layer with no scroll shows its *second*
+        ; line there.  Real games write $FFFF here for exactly this reason, and
+        ; the tests below want the top-left tile at the top left of the screen.
+        lda #$FF
+        sta $210E
+        sta $210E               ; BG1VOFS = -1
 """
 
 SHOW = """
@@ -191,6 +199,31 @@ spin:   bra spin
     machine = run(source, max_frames=4).machine
     check("brightness 0 on the tile", pixel(machine, 0, 0), (0, 0, 0))
     check("brightness 0 on the backdrop", pixel(machine, 128, 100), (0, 0, 0))
+
+
+def test_a_layer_with_no_scroll_starts_one_line_down():
+    """The first row on screen is scanline 1, not scanline 0.
+
+    So a background scrolled to zero shows its *second* line at the top of the
+    screen, and its first line is never displayed at all.  Games write $FFFF to
+    BGnVOFS when they want the top of the map at the top of the screen, which
+    is why an emulator can have this wrong for a long time and have every game
+    still look almost right -- one line, at the very top.
+
+    Here the tilemap's first row is one tile, all colour 1, over a backdrop of
+    colour 0.  With no scroll the tile covers rows 0 to 6 of the screen and row
+    7 is already past it; with the -1 scroll the rest of this file uses, it
+    covers rows 0 to 7.
+    """
+    machine = scene("""
+        stz $210E
+        stz $210E               ; BG1VOFS = 0, undoing the setup's -1
+""")
+    red = (expand(31), 0, 0)
+    blue = (0, 0, expand(31))
+    check("top of the tile is on screen row 0", pixel(machine, 0, 0), red)
+    check("tile's last visible row is 6", pixel(machine, 0, 6), red)
+    check("row 7 is past the tile", pixel(machine, 0, 7), blue)
 
 
 def test_scroll_moves_the_layer():
@@ -441,6 +474,39 @@ def test_pseudo_hires_shows_the_sub_screen_between_the_main_pixels():
     check("right of dot 0 is the main screen", hipixel(machine, 1, 0), TILE)
     check("left of dot 3", hipixel(machine, 6, 0), BACKDROP)
     check("right of dot 3", hipixel(machine, 7, 0), TILE)
+
+
+def test_the_hires_left_half_dot_is_a_dot_behind():
+    """The sub half-dot goes through colour math against the dot to its *left*.
+
+    The output stage builds the left half of a dot before it has looked at
+    that dot's main screen, so the operand and the switches it uses are the
+    previous dot's.  Here BG1 covers dots 0 to 7 on both screens with colour
+    math adding the sub screen, and dot 8 is past it:
+
+      dot 8's right half   main screen is the backdrop, which has math off,
+                           so it comes out plain blue
+      dot 8's left  half   the sub screen is the backdrop too, but the switches
+                           are dot 7's, where BG1 had math on -- so it is
+                           blue plus dot 7's red
+
+    An implementation that blends the two halves of the same dot gives plain
+    blue here.  The whole of krom's hires references turn on this pixel.
+    """
+    machine = scene("""
+        lda #$01
+        sta $212D               ; BG1 on the sub screen as well
+        lda #$08
+        sta $2133               ; pseudo-hires
+        lda #$02
+        sta $2130               ; CGWSEL: the sub screen is the operand
+        lda #$01
+        sta $2131               ; CGADSUB: add, no halve, BG1 only
+""")
+    magenta = (expand(31), 0, expand(31))
+    check("left of dot 0 is the sub screen untouched", hipixel(machine, 0, 0), TILE)
+    check("right of dot 8 is the backdrop", hipixel(machine, 17, 0), BACKDROP)
+    check("left of dot 8 carries dot 7's red", hipixel(machine, 16, 0), magenta)
 
 
 def test_pseudo_hires_with_the_layer_on_both_screens_looks_normal():

@@ -123,6 +123,14 @@ cdef class PPU:
     cdef int mosaic_start            # first line of the current block
     cdef int mosaic_left             # lines the block still has to run
     cdef int hires                   # two pixels per dot this span
+    # The output stage is a dot behind on its left half, so the dot to the
+    # left has to be kept: its main colour, and the three decisions colour
+    # math took there.
+    cdef uint16_t prev_main
+    cdef int prev_blacked
+    cdef int prev_math
+    cdef int prev_halve
+    cdef int prev_blend
     cdef int out_row                 # framebuffer row the span lands on
     cdef int src_line                # PPU line the layers are sampled at
     cdef int render_row              # framebuffer row being drawn, -1 if none

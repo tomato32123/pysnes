@@ -279,6 +279,22 @@ This is the part that decides whether any of the above converges.
       What this is *not* is a timing authority.  These check what an
       instruction computes, not when -- so item 8 below is narrowed rather
       than answered
+- [x] **krom's PPU demos, against their own screenshots**: 43 demos ship a
+      picture of themselves, and `tools/ppucompare.py` compares ours to theirs
+      pixel for pixel, with no tolerance.  33 of the 37 comparable ones are
+      exact.
+      Getting a comparison worth trusting took three things.  The row offset:
+      224 rows of reference are scanlines 1 to 224.  The width: a non-hires
+      frame is in the 512-wide buffer twice over.  And which references can be
+      used at all -- a raw capture only contains colours the SNES can make, so
+      a reference with anything else on it has been through field blending or
+      an analog capture and cannot be compared exactly.  Six of krom's
+      pictures fail that test and are reported as unusable rather than as
+      failures.
+      It found three defects, none of which any test in this repository could
+      have: every background drawn one line too high, the hires sub half-dot
+      emitted raw instead of through colour math, and that half-dot taking its
+      operand from the wrong dot.  See `docs/remaining.md`
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images
