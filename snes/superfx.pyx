@@ -167,6 +167,27 @@ cdef class SuperFX(Board):
 
         return data
 
+    cdef uint8_t peek(self, uint32_t addr, uint8_t data) noexcept:
+        """Memory only, and without catching the chip up: the debugger asks
+        what is at an address, which must not move the machine on."""
+        cdef uint32_t bank = (addr >> 16) & 0xFF
+        cdef uint32_t off = addr & 0xFFFF
+        if (bank & 0x7F) < 0x40:
+            if 0x6000 <= off < 0x8000:
+                return self.ram[((bank & 0x3F) * 0x2000 + (off - 0x6000))
+                                & self.ram_mask]
+            if off >= 0x8000:
+                return self.rom[(((bank & 0x3F) << 15) | (off & 0x7FFF))
+                                & self.rom_mask]
+            return data
+        if 0x40 <= (bank & 0x7F) <= 0x5F:
+            return self.rom[(((bank & 0x7F) - 0x40) * 0x10000 + off)
+                            & self.rom_mask]
+        if 0x60 <= (bank & 0x7F) <= 0x7D:
+            return self.ram[(((bank & 0x7F) - 0x60) * 0x10000 + off)
+                            & self.ram_mask]
+        return data
+
     cdef void write(self, uint32_t addr, uint8_t value) noexcept:
         cdef uint32_t bank = (addr >> 16) & 0xFF
         cdef uint32_t off = addr & 0xFFFF

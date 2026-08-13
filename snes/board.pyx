@@ -41,6 +41,17 @@ cdef class Board:
         value, which is what an unclaimed address inside the range returns."""
         return data
 
+    cdef uint8_t peek(self, uint32_t addr, uint8_t data) noexcept:
+        """Answer a read that must not change anything.
+
+        The disassembler and the tracer read memory to describe it, and a
+        board that claims its ROM pages -- which the coprocessor boards all
+        do, because their maps move -- would otherwise show them open bus and
+        every instruction as BRK.  Answering memory but not registers is the
+        rule: a register read is often the thing the console asked for.
+        """
+        return data
+
     cdef void write(self, uint32_t addr, uint8_t value) noexcept:
         pass
 

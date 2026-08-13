@@ -274,6 +274,8 @@ cdef class Bus:
             return self.wram[(self.page_base[page] + off) & 0x1FFFF]
         if kind == PK_SRAM:
             return self.cart.sram[(self.page_base[page] + off) & self.cart.sram_mask]
+        if kind == PK_DEVICE:
+            return self.board.peek(addr, self.mdr)
         return self.mdr
 
     # =====================================================================

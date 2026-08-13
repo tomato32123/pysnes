@@ -159,6 +159,27 @@ cdef class SA1(Board):
         self.run_until(self.clock)
         return self._read_common(addr, 0, data)
 
+    cdef uint8_t peek(self, uint32_t addr, uint8_t data) noexcept:
+        """ROM and RAM, without running the SA-1 and without the registers.
+
+        The variable-length bit reader advances on a read of $230C, so a
+        debugger that dumped the register file would move the game on."""
+        cdef uint32_t bank = (addr >> 16) & 0xFF
+        cdef uint32_t off = addr & 0xFFFF
+        if (bank & 0x7F) < 0x40:
+            if off >= 0x8000:
+                return self.cart.rom[self._rom_offset(bank, off)]
+            if 0x3000 <= off < 0x3800:
+                return self.iram[(off - 0x3000) & 0x7FF]
+            if 0x6000 <= off < 0x8000 and self.cart.sram_size:
+                return self.bwram[self._bwram_window(0, off)]
+            return data
+        if bank >= 0xC0:
+            return self.cart.rom[self._rom_offset(bank, off)]
+        if 0x40 <= bank <= 0x4F and self.cart.sram_size:
+            return self.bwram[(((bank & 3) << 16) | off) & self.bwram_mask]
+        return data
+
     cdef void write(self, uint32_t addr, uint8_t value) noexcept:
         self.run_until(self.clock)
         self._write_common(addr, value, 0)

@@ -24,6 +24,7 @@ cdef class Board:
 
     cdef int classify(self, uint32_t bank, uint32_t addr, uint32_t *base) noexcept
     cdef uint8_t read(self, uint32_t addr, uint8_t data) noexcept
+    cdef uint8_t peek(self, uint32_t addr, uint8_t data) noexcept
     cdef void write(self, uint32_t addr, uint8_t value) noexcept
     cdef void reset_board(self) noexcept
     cdef void run_until(self, int64_t master_clock) noexcept

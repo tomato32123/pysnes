@@ -164,6 +164,14 @@ cdef class SDD1(Board):
             return data                      # $4802/$4803 read back open bus
         return data
 
+    cdef uint8_t peek(self, uint32_t addr, uint8_t data) noexcept:
+        """The mapped ROM, and never the decompressor: a debugger reading the
+        window during a claimed transfer would consume the output."""
+        cdef uint32_t bank = (addr >> 16) & 0xFF
+        if bank >= 0xC0:
+            return self.cart.rom[self.rom_offset(bank, addr & 0xFFFF)]
+        return data
+
     cdef void write(self, uint32_t addr, uint8_t value) noexcept:
         cdef uint32_t bank = (addr >> 16) & 0xFF
         cdef uint32_t off = addr & 0xFFFF
