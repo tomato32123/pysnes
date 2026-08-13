@@ -63,8 +63,12 @@ EXPECTED = {
 # Overlapping sprites cannot be checked a tile at a time: two sprites drawn
 # from the same glyphs interleave their opaque pixels, so a block belongs to
 # neither of them.  These are checked pixel by pixel instead, by
-# check_priority below.
-PIXELWISE = ("obj-priority",)
+# check_priority below.  The number is where priority evaluation starts:
+# normally sprite 0, but OAMADDH bit 7 moves it, and first-sprite-rotation
+# sets it to sprite 2 -- so there the pair 1 and 2 comes out the other way
+# round while the control pair 10 and 11 does not.  Both numbers are from
+# the ROMs' own sources.
+PIXELWISE = {"obj-priority": 0, "first-sprite-rotation": 2}
 
 
 # The OBSEL size table, quoted from the SNESdev wiki's PPU registers page
@@ -289,8 +293,12 @@ def obj_pixel(vram, base, tile, palette, w, px, py):
     return 0 if not colour else 128 + palette * 16 + colour
 
 
-def check_priority(path, name):
-    """Where two sprites are both opaque, the lower OAM index must win.
+def check_priority(path, name, first=0):
+    """Where two sprites are both opaque, the earlier one in the scan wins.
+
+    That is the lower OAM index, unless OAMADDH bit 7 has moved where the
+    scan starts, in which case it is the lower distance forwards from
+    there -- which is the whole of what priority rotation does.
 
     That is the whole claim of obj-priority.sfc, and it holds even when the
     sprite behind asks for a higher OAM priority: those two bits choose
@@ -327,6 +335,9 @@ def check_priority(path, name):
         for b in range(a + 1, len(live)):
             ia, ax, ay, at_, apal, aw, ah = live[a]
             ib, bx, by, bt, bpal, bw, bh = live[b]
+            if ((ib - first) & 0x7F) < ((ia - first) & 0x7F):
+                ia, ax, ay, at_, apal, aw, ah, ib, bx, by, bt, bpal, bw, bh = (
+                    ib, bx, by, bt, bpal, bw, bh, ia, ax, ay, at_, apal, aw, ah)
             hits = wrong = 0
             for y in range(max(ay, by), min(ay + ah, by + bh)):
                 for x in range(max(ax, bx), min(ax + aw, bx + bw)):
@@ -424,11 +435,57 @@ def check_bg_priority(path, name):
     return bad
 
 
+def check_colours(path, name):
+    """Every opaque pixel of every sprite, against the colour it asks for.
+
+    obj-palettes.sfc draws the same glyphs eight times through OBJ
+    palettes 0 to 7, so what is being read here is that the three palette
+    bits in OAM reach CGRAM at 128 + 16p and nowhere else.  Nothing
+    overlaps, so each pixel has exactly one right answer.
+    """
+    machine = System(path)
+    for _ in range(FRAMES):
+        machine.run_frame()
+    vram = bytes(machine.ppu.vram_bytes)
+    base = obj_base_bytes(machine)
+    cgram = machine.ppu.cgram_list
+    at = screen(machine)
+
+    bad = 0
+    for s, x, y, tile, palette, w, h in sprites(machine):
+        if not (0 <= x < 256 - w and y + h <= 224):
+            continue
+        drawn = wrong = 0
+        for py in range(h):
+            for px in range(w):
+                index = obj_pixel(vram, base, tile, palette, w, px, py)
+                if not index:
+                    continue
+                drawn += 1
+                word = cgram[index]
+                want = tuple(((word >> sh) & 31) << 3 | ((word >> sh) & 31) >> 2
+                             for sh in (0, 5, 10))
+                if at(x + px, y + py) != want:
+                    wrong += 1
+        if not drawn:
+            continue
+        if wrong:
+            bad += 1
+            print("  %-14s sprite %d, palette %d: %d of %d pixels are not the"
+                  " colour it asked for" % (name, s, palette, wrong, drawn))
+        else:
+            print("  %-14s sprite %d ok  palette %d, %d pixels"
+                  % (name, s, palette, drawn))
+    return bad
+
+
 def check(path, name):
+    if name == "obj-palettes":
+        return check_colours(path, name)
     if name == "obj-bg-priority":
         return check_bg_priority(path, name)
     if name in PIXELWISE:
-        return check_priority(path, name)
+        return check_priority(path, name, PIXELWISE[name])
     if name.startswith("obj-size-grid-"):
         return check_size_grid(path, name, int(name[-1]))
 
@@ -460,7 +517,8 @@ def check(path, name):
 def main():
     target = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DIR
     if os.path.isdir(target):
-        names = (sorted(EXPECTED) + list(PIXELWISE) + ["obj-bg-priority"]
+        names = (sorted(EXPECTED) + sorted(PIXELWISE)
+                 + ["obj-bg-priority", "obj-palettes"]
                  + ["obj-size-grid-%d" % i for i in range(8)])
         roms = [(os.path.join(target, n + ".sfc"), n) for n in names]
     else:
