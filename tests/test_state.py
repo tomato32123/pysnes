@@ -43,7 +43,7 @@ def main():
     # A state from another ROM must be rejected.
     # Same header, different content: the guard must use the real ROM contents.
     tampered = bytearray(s.cart.rom_data)
-    tampered[0x200000] ^= 0xFF
+    tampered[len(tampered) // 2] ^= 0xFF
     other = System(rom_data=bytes(tampered))
     try:
         bad = other.save_state()

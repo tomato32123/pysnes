@@ -127,7 +127,7 @@ cdef class System:
 
     def _state_dict(self):
         return {
-            "version": 2,
+            "version": 3,
             "title": self.cart.title,
             "checksum": self.cart.computed_checksum,
             "rom_size": self.cart.rom_size,
@@ -137,10 +137,27 @@ cdef class System:
             "apu": (self.apu.state_ints(), self.apu.state_blobs()),
             "dsp": (self.apu.dsp.state_ints(), self.apu.dsp.state_blobs()),
             "sram": bytes(self.cart.sram_data),
+            # The cartridge, if it has anything on it.  A state that leaves the
+            # board out restores the console around a coprocessor still doing
+            # whatever it had reached -- which is what rewind did in every SA-1
+            # and SuperFX game until this was added.  The board's name goes in
+            # so a state cannot be loaded into a different cartridge's chip.
+            "board": self._board_state(),
         }
 
+    def _board_state(self):
+        board = self.bus.board
+        if not hasattr(board, "state_ints"):
+            return None
+        out = {"name": board.name,
+               "ints": board.state_ints(),
+               "blobs": board.state_blobs()}
+        if hasattr(board, "extra_state"):
+            out["extra"] = board.extra_state()
+        return out
+
     def _apply_state(self, data):
-        if data.get("version") != 2:
+        if data.get("version") != 3:
             raise ValueError("unsupported save-state version")
         if (data.get("checksum") != self.cart.computed_checksum
                 or data.get("rom_size") != self.cart.rom_size):
@@ -154,6 +171,20 @@ cdef class System:
         sram = data["sram"]
         n = min(len(sram), len(self.cart.sram_data))
         self.cart.sram_data[:n] = sram[:n]
+
+        saved = data.get("board")
+        board = self.bus.board
+        if saved is not None:
+            if saved["name"] != board.name:
+                raise ValueError("save state is from a %s cartridge, this one is %s"
+                                 % (saved["name"], board.name))
+            board.load_ints(saved["ints"])
+            board.load_blobs(saved["blobs"])
+            if "extra" in saved:
+                board.load_extra(saved["extra"])
+        elif hasattr(board, "state_ints"):
+            raise ValueError("save state has no cartridge state, but this "
+                             "cartridge has a %s on it" % board.name)
         return True
 
     def save_state_raw(self):

@@ -29,7 +29,7 @@ SPECS = [
                  "vcount", "field", "frame",
                  "frame_ready", "ticking", "lines_per_frame", "vblank_start",
                  "nmi_enabled", "nmi_flag", "nmi_pending", "irq_mode", "irq_flag",
-                 "irq_pending", "irq_line_done", "in_vblank", "in_hblank",
+                 "irq_pending", "irq_line_done", "timer_irq", "in_vblank", "in_hblank",
                  "htime", "vtime", "fast_rom", "wrio", "mul_a", "mul_b", "div_a",
                  "div_b", "rd_div", "rd_mpy", "wram_addr", "auto_joypad",
                  "auto_joypad_busy", "joypad_busy_until", "pad_latched",
@@ -102,6 +102,38 @@ SPECS = [
                 ("t_main_out", 2), ("t_echo_out", 2), ("t_echo_in", 2)],
         arrays2=[("buf", 8, 24)],
         blobs=[("reg", "uint8_t", 128)],
+    ),
+    dict(
+        module='sa1', cls='SA1',
+        marker="    # -- introspection ---",
+        scalars=['bwram_mask', 'ccnt', 'scnt', 'sie', 'sic', 'cie', 'cic', 'crv', 'cnv', 'civ', 'snv', 'siv', 'sa1_irq', 'sa1_nmi', 'scpu_irq', 'dma_irq_scpu', 'dma_irq_sa1', 'timer_irq', 'stopped', 'bmaps', 'bmap', 'sbwe', 'cbwe', 'siwp', 'ciwp', 'math_ctl', 'math_a', 'math_b', 'math_result', 'math_overflow', 'vbd', 'vda', 'vbit', 'tmc', 'timer_h', 'timer_v', 'timer_base', 'timer_seen', 'dcnt', 'cdma', 'dsa', 'dda', 'dtc', 'cc_line', 'n_cc1', 'n_cc2', 'n_dma', 'n_math', 'n_varlen', 'n_timer_irq'],
+        arrays=[('mmc', 4), ('brf', 16)],
+        arrays2=[],
+        blobs=[('iram', 'uint8_t', 2048)],
+    ),
+    dict(
+        module='sdd1', cls='SDD1',
+        marker="    # -- introspection ---",
+        scalars=['dma_enable', 'dma_arm', 'out_len', 'out_pos', 'active', 'in_addr', 'in_stream', 'valid_bits', 'bitplane_type', 'high_context_bits', 'low_context_bits', 'dma_seen', 'dma_armed_seen', 'last_channel', 'last_enable', 'last_arm', 'last_addr', 'last_count'],
+        arrays=[('mmc', 4), ('bit_ctr', 8), ('context_state', 32), ('context_mps', 32), ('prev_bits', 8)],
+        arrays2=[],
+        blobs=[('out', 'uint8_t', 65536)],
+    ),
+    dict(
+        module='superfx', cls='SuperFX',
+        marker="    # -- introspection ---",
+        scalars=['r14_modified', 'r15_modified', 'sfr', 'pbr', 'rombr', 'rambr', 'cbr', 'scbr', 'colr', 'bramr', 'vcr', 'clsr', 'pipeline', 'ramaddr', 'scmr_ht', 'scmr_ron', 'scmr_ran', 'scmr_md', 'por_obj', 'por_freezehigh', 'por_highnibble', 'por_dither', 'por_transparent', 'cfgr_irq', 'cfgr_ms0', 'sreg', 'dreg', 'romcl', 'romdr', 'ramcl', 'ramar', 'ramdr', 'rom_mask', 'ram_mask', 'gsu_clock', 'target'],
+        arrays=[('r', 16), ('cache_buffer', 512), ('cache_valid', 32), ('pc_offset', 2), ('pc_bitpend', 2)],
+        arrays2=[('pc_data', 2, 8)],
+        blobs=[],
+    ),
+    dict(
+        module='spc7110', cls='SPC7110',
+        marker="    # -- introspection ---",
+        scalars=['prom_size', 'drom_base', 'drom_size', 'r4801', 'r4802', 'r4803', 'r4804', 'r4805', 'r4806', 'r4807', 'r4809', 'r480a', 'r480b', 'r480c', 'dcu_mode', 'dcu_address', 'dcu_offset', 'r4810', 'r4811', 'r4812', 'r4813', 'r4814', 'r4815', 'r4816', 'r4817', 'r4818', 'r481a', 'r4820', 'r4821', 'r4822', 'r4823', 'r4824', 'r4825', 'r4826', 'r4827', 'r4828', 'r4829', 'r482a', 'r482b', 'r482c', 'r482d', 'r482e', 'r482f', 'r4830', 'r4831', 'r4832', 'r4833', 'r4834', 'bpp', 'offset', 'bits', 'range_', 'input_', 'output', 'pixels', 'colormap', 'result'],
+        arrays=[('dcu_tile', 32)],
+        arrays2=[('ctx_prediction', 5, 15), ('ctx_swap', 5, 15)],
+        blobs=[],
     ),
 ]
 
@@ -188,7 +220,121 @@ def ensure_imports(text):
     return text
 
 
+# -- completeness ----------------------------------------------------------
+#
+# The reason this file exists is that a hand-written serialiser drifts from the
+# class it serialises.  A generated one drifts too, in a quieter way: a field
+# added to the .pxd and not to the spec above is simply left out of every save
+# state, and nothing complains.  That is exactly how the cartridge boards came
+# to be missing from save states entirely.
+#
+# So the specs are checked against the declarations.  Anything in a .pxd that
+# is not serialised has to be named here, with a reason.
+
+EXCLUDED = {
+    # Derived, constant, or scratch -- with the reason, because "it looked
+    # unimportant" is how a field goes missing for a year.
+    ("cpu", "CPU"): {
+        "bus",                                   # the object it runs on
+        "insn_log", "bus_log", "insn_cap", "bus_cap", "insn_len", "bus_len",
+        "tracing", "trace_wrap",                 # the tracer, not the machine
+    },
+    ("bus", "Bus"): {
+        "cart", "ppu", "apu", "board",           # the objects it drives
+        "page_kind", "page_base",                # rebuilt from cart and board
+        "pal",                                   # a property of the cartridge
+        "nmi_count", "irq_count",                # counters, for tools
+        "pad_state_next",
+    },
+    ("ppu", "PPU"): {
+        "framebuffer_obj",                       # the buffer behind framebuffer
+        "vdisp", "pal", "light",                 # constants
+        "dbg_lines", "dbg_lines_enabled", "dbg_lines_blank",
+        # Everything below is scratch for the line being drawn.  A state is
+        # taken between frames, when none of it is live.
+        "bg_idx", "bg_pri", "obj_idx", "obj_pri", "obj_pal", "win_mask",
+        "bg_idx_hi", "bg_pri_hi", "true_hires", "main_buf", "sub_buf",
+        "main_src", "sub_src", "bg_bpp", "bg_pal_base", "bg_direct",
+        "direct_active", "hires", "out_row", "src_line", "render_row",
+        "rendered_x",
+        "prev_main", "prev_blacked", "prev_math", "prev_halve", "prev_blend",
+    },
+    ("apu", "APU"): {
+        "dsp", "ipl",                            # the DSP has its own state
+        "master_hz",                             # a constant
+        "idle_tail", "log_on", "log_n", "log_kind", "log_addr",   # tooling
+    },
+    ("apu", "DSP"): {
+        "apu", "gauss",                          # parent, and a constant table
+        "solo", "echo_enabled",                  # debug switches
+        "kon_count",                             # a counter, for tools
+        "out_buf", "out_write", "out_read", "out_count",   # the audio ring
+    },
+    # Boards: pointers into the cartridge, and buffers handled by extra_state.
+    ("sa1", "SA1"): {"cart", "space", "cpu", "bwram", "name", "unsupported",
+                     "clock", "irq_line"},
+    ("sdd1", "SDD1"): {"cart", "name", "unsupported", "clock", "irq_line"},
+    ("superfx", "SuperFX"): {"cart", "rom", "ram", "ram_data", "name",
+                             "unsupported", "clock", "irq_line"},
+    ("spc7110", "SPC7110"): {"cart", "rom", "name", "unsupported", "clock",
+                             "irq_line"},
+}
+
+
+def declared_fields(module, cls):
+    """Every data member of a cdef class, from its .pxd."""
+    import re
+    text = open(os.path.join(ROOT, "snes", module + ".pxd")).read()
+    import re as _re
+    m = _re.search(r"^cdef class %s\s*[(:]" % _re.escape(cls), text, _re.M)
+    if not m:
+        return None
+    body = text[m.end():]
+    body = body.split("\ncdef class", 1)[0]
+    out = []
+    for line in body.splitlines():
+        line = line.split("#")[0].strip()
+        if not line.startswith("cdef ") or "(" in line:
+            continue
+        decl = line[5:].strip()
+        for kw in ("public ", "readonly "):
+            if decl.startswith(kw):
+                decl = decl[len(kw):]
+        m = re.match(r"((?:const |unsigned )*[\w]+)\s+(.*)$", decl)
+        if not m:
+            continue
+        for part in m.group(2).split(","):
+            part = part.strip().lstrip("*")
+            nm = re.match(r"(\w+)", part)
+            if nm:
+                out.append(nm.group(1))
+    return out
+
+
+def check_complete():
+    """Fail loudly if a declared field is neither serialised nor excused."""
+    problems = []
+    for spec in SPECS:
+        key = (spec["module"], spec["cls"])
+        declared = declared_fields(*key)
+        if declared is None:
+            continue
+        covered = set(spec["scalars"])
+        covered |= {n for n, _ in spec["arrays"]}
+        covered |= {n for n, _a, _b in spec["arrays2"]}
+        covered |= {n for n, _t, _c in spec["blobs"]}
+        covered |= EXCLUDED.get(key, set())
+        missing = [f for f in declared if f not in covered]
+        if missing:
+            problems.append("%s.%s: %s" % (key[0], key[1], ", ".join(missing)))
+    if problems:
+        raise SystemExit("fields declared but not saved (add them to SPECS, or "
+                         "to EXCLUDED with a reason):\n  " + "\n  ".join(problems))
+    print("all declared fields are accounted for")
+
+
 def main():
+    check_complete()
     by_module = {}
     for spec in SPECS:
         by_module.setdefault(spec["module"], []).append(spec)

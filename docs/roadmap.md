@@ -255,6 +255,17 @@ This is the part that decides whether any of the above converges.
       the comparison that would say the emulator is *right* rather than
       *unchanged* has not been run
 - [x] DMA and HDMA timing tests; PPU register timing still open
+- [x] **Save states carry the cartridge, and the generator checks itself**:
+      every board -- SA-1, S-DD1, SuperFX, SPC7110 -- is serialised, the state
+      records which board it came from, and `test_state.py` passes for all
+      four.  It failed for all four before, which is how the omission was
+      confirmed rather than assumed.
+      The lasting part is `check_complete()` in `tools/gen_state.py`: it parses
+      each `.pxd` and refuses to generate unless every declared field is either
+      saved or excused by name.  A generated serialiser drifts silently -- a
+      field added and not registered is simply absent from every state -- and
+      that is precisely how the boards went missing.  On its first run it
+      found the bus's `timer_irq` unsaved as well
 - [x] Open bus suite, and display-mode tests for overscan, hires,
       interlace, EXTBG, direct colour and mosaic
 - [x] **SPC700 and DSP test ROMs**: fetched, running, and all passing.  `tools/testroms.py`

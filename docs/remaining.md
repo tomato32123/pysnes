@@ -671,27 +671,43 @@ event scheduler in `snes/bus.pyx` rather than running one to catch up.
 Note this is the *only* SA-1 gap left: the timers and both kinds of character
 conversion are now implemented (though unexercised, per the table above).
 
-### A save state does not carry the cartridge
+### A save state now carries the cartridge — and how the omission happened
 
-*Where*: `tools/gen_state.py`, whose `SPECS` list names the CPU, the bus, the
-PPU and the APU — and no board.
+*Where*: `tools/gen_state.py`, `snes/system.pyx`, and an `extra_state` on two
+boards.
 
-Every board's state is left out: the SA-1's second processor and its I-RAM,
-the S-DD1's slot registers, the SuperFX's registers and pixel cache, the
-SPC7110's window registers and decompressor. Saving and loading in Star Fox
-restores the console around a GSU that is still wherever it had got to, which
-was measured rather than assumed:
+Every board's state used to be left out of a save state: the SA-1's second
+processor and its I-RAM, the S-DD1's slot registers, the SuperFX's registers
+and pixel cache, the SPC7110's windows and decompressor. A state loaded
+cleanly and the game misbehaved afterwards, and rewind — built on the same
+serialiser — was wrong in every game with a chip on the cartridge.
 
-    saved  r15=fbe6 pbr=06
-    loaded r15=b301 pbr=01
+`tests/test_state.py` catches it the moment it is pointed at one of those
+games, which is how this was confirmed before it was fixed: Star Fox's replay
+diverged at the third checkpoint. It now passes for all four families —
+Star Fox (SuperFX), Super Mario RPG (SA-1), Street Fighter Zero 2 (S-DD1) and
+Momotarou Dentetsu Happy (SPC7110).
 
-For the same reason rewind is wrong in any game with a chip on the cartridge —
-it is built on the same serialiser. Nothing warns; the state loads cleanly and
-the game misbehaves afterwards.
+Three things were needed beyond the mechanical part:
 
-The fix is mechanical: add the boards to `SPECS` and regenerate. It needs one
-decision first — a state has to record *which* board it was saved with, or a
-state from one cartridge will load into another.
+*The state says which board it was saved with*, so one cartridge's chip state
+cannot be loaded into another's. The version went to 3; older states are
+refused rather than half-loaded.
+
+*Two boards keep something the generator cannot emit.* Generated blobs are
+fixed-size `memcpy`s, and the SuperFX's work RAM is sized by the cartridge,
+while the SA-1 has a whole second CPU hanging off it. Both have a small
+hand-written `extra_state`/`load_extra` pair, and nothing else does.
+
+*The generator now checks itself.* This is the part worth keeping. A
+hand-written serialiser drifts from the class it serialises; a generated one
+drifts more quietly, because a field added to a `.pxd` and not to the spec is
+simply absent from every state and nothing complains. That is exactly how the
+boards went missing. `check_complete()` now parses each `.pxd` and fails the
+generator unless every declared field is either serialised or named in
+`EXCLUDED` with a reason. It found one on its first run: the bus's `timer_irq`
+— whether the H/V timer is asserting an interrupt — had never been saved, in
+code nobody suspected.
 
 ### Differential trace against a reference
 

@@ -928,7 +928,7 @@ cdef class Bus:
 
     def state_ints(self):
         cdef int i, j
-        v = [self.mdr, self.master_clock, self.hcount, self.line_start, self.next_event, self.vcount, self.field, self.frame, self.frame_ready, self.ticking, self.lines_per_frame, self.vblank_start, self.nmi_enabled, self.nmi_flag, self.nmi_pending, self.irq_mode, self.irq_flag, self.irq_pending, self.irq_line_done, self.in_vblank, self.in_hblank, self.htime, self.vtime, self.fast_rom, self.wrio, self.mul_a, self.mul_b, self.div_a, self.div_b, self.rd_div, self.rd_mpy, self.wram_addr, self.auto_joypad, self.auto_joypad_busy, self.joypad_busy_until, self.pad_latched, self.hdma_enabled, self.dma_enabled]
+        v = [self.mdr, self.master_clock, self.hcount, self.line_start, self.next_event, self.vcount, self.field, self.frame, self.frame_ready, self.ticking, self.lines_per_frame, self.vblank_start, self.nmi_enabled, self.nmi_flag, self.nmi_pending, self.irq_mode, self.irq_flag, self.irq_pending, self.irq_line_done, self.timer_irq, self.in_vblank, self.in_hblank, self.htime, self.vtime, self.fast_rom, self.wrio, self.mul_a, self.mul_b, self.div_a, self.div_b, self.rd_div, self.rd_mpy, self.wram_addr, self.auto_joypad, self.auto_joypad_busy, self.joypad_busy_until, self.pad_latched, self.hdma_enabled, self.dma_enabled]
         for i in range(6):
             v.append(self.ev_time[i])
         for i in range(4):
@@ -960,7 +960,7 @@ cdef class Bus:
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 38
+        cdef int i, j, k = 39
         self.mdr = v[0]
         self.master_clock = v[1]
         self.hcount = v[2]
@@ -980,25 +980,26 @@ cdef class Bus:
         self.irq_flag = v[16]
         self.irq_pending = v[17]
         self.irq_line_done = v[18]
-        self.in_vblank = v[19]
-        self.in_hblank = v[20]
-        self.htime = v[21]
-        self.vtime = v[22]
-        self.fast_rom = v[23]
-        self.wrio = v[24]
-        self.mul_a = v[25]
-        self.mul_b = v[26]
-        self.div_a = v[27]
-        self.div_b = v[28]
-        self.rd_div = v[29]
-        self.rd_mpy = v[30]
-        self.wram_addr = v[31]
-        self.auto_joypad = v[32]
-        self.auto_joypad_busy = v[33]
-        self.joypad_busy_until = v[34]
-        self.pad_latched = v[35]
-        self.hdma_enabled = v[36]
-        self.dma_enabled = v[37]
+        self.timer_irq = v[19]
+        self.in_vblank = v[20]
+        self.in_hblank = v[21]
+        self.htime = v[22]
+        self.vtime = v[23]
+        self.fast_rom = v[24]
+        self.wrio = v[25]
+        self.mul_a = v[26]
+        self.mul_b = v[27]
+        self.div_a = v[28]
+        self.div_b = v[29]
+        self.rd_div = v[30]
+        self.rd_mpy = v[31]
+        self.wram_addr = v[32]
+        self.auto_joypad = v[33]
+        self.auto_joypad_busy = v[34]
+        self.joypad_busy_until = v[35]
+        self.pad_latched = v[36]
+        self.hdma_enabled = v[37]
+        self.dma_enabled = v[38]
         for i in range(6):
             self.ev_time[i] = v[k + i]
         k += 6
