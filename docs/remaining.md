@@ -818,6 +818,36 @@ Eleven ROMs across 1, 2, 4 and 8 bpp, word and split modes: every group agrees
 on one picture, and the pictures are not blank. `tools/vmaintest.py` keeps it
 that way.
 
+## Sprites that name the tiles they came from
+
+neser's OBJ ROMs are drawn with undisbeliever's `hex8` glyphs, where every
+8x8 tile in VRAM is a picture of its own number. That turns a capture back
+into data: match each 8x8 block of the screen against the tile bitmaps
+sitting in VRAM and the picture says which tiles were fetched. A block is
+matched against the tile as stored and against its three mirrors, because a
+flipped sprite draws flipped glyphs — and which mirror matched is itself
+worth reporting.
+
+The answer that gives is one a person can argue with. "The V-flipped sprite
+fetched 30/31 above 20/21" is a claim about the hardware, published in
+neser's README and agreed by ares, higan, Snes9x and the SNESdev wiki (with
+Mesen2 dissenting at F0/F1 above E0/E1). "The screen hashes to a1b2c3" is a
+claim about nothing.
+
+It found a real defect. V-flip on the undocumented rectangular sizes does
+not mirror against the whole height: a 16x32 flips as two stacked 16x16
+squares, each turning over in place. We mirrored against the full height,
+so a flipped 16x32 read 10/11 above 00/01 instead of 30/31 above 20/21.
+
+`tools/objglyphs.py` now reads all eight OBSEL size selects off the screen —
+their tile rectangles and that nothing is drawn past the bottom or right
+edge — against the size table quoted from the SNESdev wiki's PPU registers
+page, plus the three y-wrap placements. Nineteen checks, all passing. It
+was made to fail on purpose first: widening size select 7's large sprite to
+32x64 in the renderer produced `and it drew past the bottom edge: 40 41 42
+43`, which is what a check has to be able to say before its silence means
+anything.
+
 ## Speed, measured for the first time
 
 An emulator that is accurate and cannot run at sixty frames a second is not
