@@ -63,6 +63,12 @@ cdef class CPU:
     cdef uint8_t pull(self) noexcept
     cdef void push16(self, uint16_t value) noexcept
     cdef uint16_t pull16(self) noexcept
+    # The same, for the instructions the 65816 added, which work on the
+    # whole stack pointer in emulation mode rather than on its low byte.
+    cdef void push_wide(self, uint8_t value) noexcept
+    cdef uint8_t pull_wide(self) noexcept
+    cdef void push16_wide(self, uint16_t value) noexcept
+    cdef uint16_t pull16_wide(self) noexcept
     cdef uint32_t nxt(self, uint32_t addr) noexcept
     cdef uint16_t load(self, uint32_t addr, int wide) noexcept
     cdef void store(self, uint32_t addr, uint16_t value, int wide) noexcept

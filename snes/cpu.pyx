@@ -165,6 +165,32 @@ cdef class CPU:
             self.s = (self.s + 1) & 0xFFFF
         return self.read(self.s)
 
+    cdef inline void push_wide(self, uint8_t value) noexcept:
+        """Push without confining the stack to page one.
+
+        In emulation mode the stack pointer lives in page $01, and the
+        instructions the 6502 had keep it there byte by byte.  The ones the
+        65816 added do the arithmetic on the whole sixteen bits instead, so
+        a push with S at $0100 carries down into $00FF, and the pointer is
+        put back into page one when the instruction finishes.  gilyon's
+        test 274 runs `jsl $FE8000` with S=$0100 and expects the three
+        bytes at $0100, $00FF and $00FE, ending with S=$01FD.
+        """
+        self.write(self.s, value)
+        self.s = (self.s - 1) & 0xFFFF
+
+    cdef inline uint8_t pull_wide(self) noexcept:
+        self.s = (self.s + 1) & 0xFFFF
+        return self.read(self.s)
+
+    cdef inline void push16_wide(self, uint16_t value) noexcept:
+        self.push_wide(<uint8_t>(value >> 8))
+        self.push_wide(<uint8_t>(value & 0xFF))
+
+    cdef inline uint16_t pull16_wide(self) noexcept:
+        cdef uint16_t lo = self.pull_wide()
+        return lo | (<uint16_t>self.pull_wide() << 8)
+
     cdef inline void push16(self, uint16_t value) noexcept:
         self.push(<uint8_t>(value >> 8))
         self.push(<uint8_t>(value & 0xFF))
@@ -686,6 +712,12 @@ cdef class CPU:
         op = self.fetch()
         self.instructions += 1
         self.execute(op)
+        # The stack pointer's high byte is $01 in emulation mode.  The
+        # instructions the 65816 added work on all sixteen bits while they
+        # run, so this is where one that carried out of page one is put
+        # back -- after the instruction, not during it.
+        if self.e:
+            self.s = 0x0100 | (self.s & 0xFF)
 
         # ...and the decision for the next boundary is made now, unless a DMA
         # has just run and is still hiding the lines.
@@ -1193,7 +1225,7 @@ cdef class CPU:
             self.pc = v16
         elif op == 0xFC:                                    # JSR (abs,X)
             v16 = self.fetch16()
-            self.push16(<uint16_t>((self.pc - 1) & 0xFFFF))
+            self.push16_wide(<uint16_t>((self.pc - 1) & 0xFFFF))
             self.io()
             ptr = (<uint32_t>self.pb << 16) | ((v16 + self.x) & 0xFFFF)
             self.pc = (<uint16_t>self.read(ptr)
@@ -1201,10 +1233,10 @@ cdef class CPU:
                                               | ((ptr + 1) & 0xFFFF)) << 8))
         elif op == 0x22:                                    # JSL long
             v16 = self.fetch16()
-            self.push(self.pb)
+            self.push_wide(self.pb)
             self.io()
             src_bank = self.fetch()
-            self.push16(<uint16_t>((self.pc - 1) & 0xFFFF))
+            self.push16_wide(<uint16_t>((self.pc - 1) & 0xFFFF))
             self.pb = src_bank
             self.pc = v16
         elif op == 0x60:                                    # RTS
@@ -1213,8 +1245,8 @@ cdef class CPU:
             self.io()
         elif op == 0x6B:                                    # RTL
             self.io(); self.io()
-            self.pc = <uint16_t>((self.pull16() + 1) & 0xFFFF)
-            self.pb = self.pull()
+            self.pc = <uint16_t>((self.pull16_wide() + 1) & 0xFFFF)
+            self.pb = self.pull_wide()
         elif op == 0x40:                                    # RTI
             self.io(); self.io()
             self.p = self.pull()
@@ -1273,30 +1305,35 @@ cdef class CPU:
             self.apply_index_width()
         elif op == 0x8B:                                    # PHB
             self.io()
-            self.push(self.db)
+            self.push_wide(self.db)
         elif op == 0xAB:                                    # PLB
             self.io(); self.io()
-            self.db = self.pull()
+            self.db = self.pull_wide()
             self.set_nz(self.db, 0)
         elif op == 0x0B:                                    # PHD
             self.io()
-            self.push16(self.d)
+            self.push16_wide(self.d)
         elif op == 0x2B:                                    # PLD
             self.io(); self.io()
-            self.d = self.pull16()
+            self.d = self.pull16_wide()
             self.set_nz(self.d, 1)
         elif op == 0x4B:                                    # PHK
             self.io()
-            self.push(self.pb)
+            self.push_wide(self.pb)
         elif op == 0xF4:                                    # PEA
-            self.push16(self.fetch16())
+            self.push16_wide(self.fetch16())
         elif op == 0xD4:                                    # PEI
+            # PEI is the 65816's, so its pointer is read straight through
+            # rather than wrapping inside the direct page the way the modes
+            # the 6502 had do.  Test 3c4 reads $02FF and $0300 with D=$0200.
             ea = self.am_dp()
-            self.push16(self.load(ea, 1))
+            if self.ea_wrap == 2:
+                self.ea_wrap = 1
+            self.push16_wide(self.load(ea, 1))
         elif op == 0x62:                                    # PER
             v16 = self.fetch16()
             self.io()
-            self.push16(<uint16_t>((self.pc + <int16_t>v16) & 0xFFFF))
+            self.push16_wide(<uint16_t>((self.pc + <int16_t>v16) & 0xFFFF))
 
         # ---- flags ---------------------------------------------------------------------
         elif op == 0x18:
