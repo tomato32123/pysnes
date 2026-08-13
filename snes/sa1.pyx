@@ -348,8 +348,13 @@ cdef class SA1(Board):
                 self._advance_varlen()
             return v
 
-        if a == 0x230E:
-            return 0x01                              # SA-1 revision
+        # $230E is where the development manual put a version code, and
+        # where cartridges turn out to have nothing: measurements on real
+        # boards read open bus there, which on the console's side is the
+        # address's own high byte.  absindx's SA1VersionCodeTest is about
+        # exactly this, and reported FAILED for as long as a revision
+        # number was invented for it.  So it is left to fall through to
+        # whatever the bus was holding.
 
         if 0x2240 <= a <= 0x224F:
             return self.brf[a & 0x0F]
