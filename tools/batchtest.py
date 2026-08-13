@@ -19,6 +19,10 @@ from tools.screenshot import write_png
 
 W, H = 512, 478
 
+# How many times the normal window a title that has drawn nothing is given
+# before its verdict is believed.  See run_one.
+PATIENCE = 9
+
 from snes.boards import CHIPSET as COPROCESSORS
 
 
@@ -84,6 +88,23 @@ def run_one(path, frames, shots_dir):
         result["detail"] = traceback.format_exc(limit=3).strip().splitlines()[-1]
         result["seconds"] = time.perf_counter() - t0
         return result
+    # A title that has not drawn anything yet may simply not have got there.
+    # Rudra no Hihou spends more than 900 frames on its sound upload and its
+    # opening fades, and reported "flat" here for months on end -- long enough
+    # that it was written up as an emulator defect and investigated as one.
+    # It renders its opening perfectly at frame 7200.  So a bad verdict is not
+    # a verdict until the title has been given several times as long.
+    if best[1] <= 2:
+        for i in range(frames, frames * PATIENCE):
+            machine.run_frame()
+            if (i + 1) % every == 0:
+                seen = analyse_frame(machine.framebuffer)
+                if seen > best:
+                    best = seen
+                    best_frame = i + 1
+            if best[1] > 2:
+                break
+        result["slow"] = best[1] > 2
     result["seconds"] = time.perf_counter() - t0
 
     nonblack, colours = best
@@ -128,12 +149,13 @@ def main():
         res = run_one(path, args.frames, args.shots)
         results.append(res)
         chip = res.get("coproc") or ""
-        print("%3d/%-3d %-9s %-46s %-8s $%02X %-8s %s"
+        print("%3d/%-3d %-9s %-46s %-8s $%02X %-8s %s%s"
               % (i, len(roms), res["status"], res["name"][:46],
                  res.get("map", "-"), res.get("chip", 0), chip,
                  res.get("detail", "nonblack=%s colours=%s @f%s" %
                          (res.get("nonblack"), res.get("colours"),
-                          res.get("best_frame")))),
+                          res.get("best_frame"))),
+                 "  (slow to start)" if res.get("slow") else ""),
               flush=True)
 
     print(flush=True)

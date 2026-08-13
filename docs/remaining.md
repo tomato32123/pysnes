@@ -5,14 +5,18 @@ thing still open, what it actually is, where in the code it goes, how you
 would know you got it right, and what — if anything — makes it impossible
 today. Written so it can be picked up cold.
 
-As of this writing: **42 done, 5 partial, 5 untouched** of 52 items. The
-66-ROM local library boots 63 titles; the three that do not are listed at the
-end. One wants a coprocessor whose firmware is not here, and two are
-defective ROM images — proved defective, not assumed so. No title in the
-library now fails for a reason inside this emulator.
+As of this writing the 68-ROM local library has **no unexplained failure**.
+Four titles do not draw a game, and each is accounted for: two are defective
+ROM images (proved defective, not assumed so), one wants a coprocessor whose
+firmware is not here, and one is a blank cartridge correctly booting the
+check program its own ROM carries. Everything else renders.
 
-The 63rd is Street Fighter Zero 2, which was a black screen until the S-DD1
-was written and now draws its Capcom logo and its title screen.
+That sentence is worth reading sceptically, because it was wrong twice this
+week in opposite directions. Rudra no Hihou was written up here as a defect
+and is not one — its opening simply takes longer than the tool allowed. And
+five defects were sitting in the PPU while every test in this repository
+passed. Neither the pass list nor the fail list is evidence on its own; what
+the emulator is checked *against* is.
 
 ---
 
@@ -695,7 +699,7 @@ Covered at the top. The tooling is done; the reference is not available.
 
 ---
 
-## The titles that do not render
+## The titles that do not render, and one that only looked like it
 
 | title | status | what is known |
 |---|---|---|
@@ -703,125 +707,48 @@ Covered at the top. The tooling is done; the reference is not available.
 | Momotarou Dentetsu Happy | flat | **Correct.** A blank cartridge boots its own check program; see item 7. |
 | `Mix.smc` | black | **The image is broken, not the emulator.** See below. |
 | `SMWREX.smc` | black | **The image is broken, not the emulator.** See below. |
-| Rudra no Hihou (J), and its three translations | flat | **A real defect.** The one open game-level bug. |
+| Rudra no Hihou (J), and its translations | ok | **Not a defect.** Its opening finishes at frame 7200; the tool gave it 900. |
 
 Both of the two black ones are Super Mario World hacks that destroy something
 the base game still needs, and both are proved so by running unmodified
 `Super Mario World (E)` down the same path and watching it work.
 
-### Rudra no Hihou — stuck in the sound driver's upload handshake
+### Rudra no Hihou — not a defect, and the write-up that said it was
 
-This one is ours, and the plain Japanese dump is the proof: its checksum is
-correct, `$4CE6` computed and stored, so it is not a bad image. It renders a
-flat screen with **one CGRAM entry of 256** — it never reaches the point of
-loading a palette.
+This section previously described Rudra no Hihou as the last game-level bug in
+the library, with a diagnosis: the main thread deadlocked waiting on a job
+queue nobody filled. Every observation in it was accurate and the conclusion
+was wrong. The game renders its opening perfectly — the four character
+portraits and the tower — at **frame 7200**, and `batchtest` was giving it 900.
 
-What it is doing, in order:
+What the wait loop at `$C0:04A8` actually is: the engine's idle state. Its work
+is posted from the NMI and the main thread spins between jobs, so catching it
+there proves nothing. `$00:063B` reading zero proves nothing either — it is
+zero whenever the queue happens to be empty. Two hours went into the APU
+handshake, which was working the whole time, echoing every byte of a
+forty-frame sound upload.
 
-- The main thread sits at `$C0:04A8` on `LDA $3B / BEQ`, waiting on a job
-  queue whose length is `$06:3B`. The queue is filled from banks `$E6`/`$E7`,
-  which are never executed, so it waits for ever. That is a symptom.
-- The cause is one level down: bank `$EB` is the sound driver's uploader, and
-  it runs the IPL-compatible block protocol — `$2141` the byte, `$2140` the
-  counter, `CMP $2140 / BNE` until the APU echoes. 44,202 port writes go out
-  over sixty frames, so the transfer is working, and it works right up to the
-  last block.
-- On the APU side the driver is alive: it runs its own code, reads port 0
-  (`$F4`) 4,549 times in 200,000 steps and reads both timers. But it never
-  *writes* port 0, which is what the CPU is waiting for.
-- Its main loop is at SPC `$03A5`: `MOV A,$F4 / BEQ +8`. It acts on a command
-  only when port 0 is non-zero, and the CPU's last write to `$2140` is `$00`.
-  So the driver has already left the upload handler it should still be inside.
+The lesson is worth more than the bug would have been:
 
-Where to pick it up: the handler is the `CALL $0CF5` at SPC `$03A7`. Find why
-it returns early — one value of the handshake seen twice, or one missed. The
-SPC-to-CPU clock ratio is *not* the cause: it is the nominal 1024000 /
-21477272, and the comment in `run_until` records that a 5% error there was
-found and fixed once already.
+*A verdict from a tool with a fixed window is a statement about the window.*
+`batchtest` runs 900 frames and reports the best one, which is right for
+catching fades and wrong for a game whose opening takes fifteen seconds. It
+now keeps running when a title has drawn nothing — `PATIENCE` times the
+normal window — and marks what it had to wait for as "slow to start". Rudra
+needed 1200 frames to show something and 7200 to finish.
 
-This is the same area as the open `$2140-$2143` timing item below, and it is
-the best lead this project has for it: a real game, a good dump, and a
-handshake that can be logged from both ends.
+*Ask "is it stuck, or is it slow" before asking why it is stuck.* One command
+answers it. The whole investigation below the first hour was spent on the
+second question without having answered the first.
 
-Kunio-kun no Dodge Ball was on this list as "flat, unexplained". It is not:
-it draws its title screen, takes START, and reaches the team menu. What was
-being measured was a run judged before the game had drawn anything. It is the
-second time a title has been libelled by the sampling and not by the
-emulation — the first was what made `batchtest` judge on the best frame
-rather than the last — so before chasing a title that renders nothing,
-confirm it with input rather than with a fixed frame count:
+What the investigation did leave behind is worth keeping: `tools/spcdisasm.py`
+exists now, so the APU can be read as well as heard, and it was needed for
+exactly the reason this project keeps rediscovering — the emulator could run
+that code but nothing could show it.
 
-```
-python tools/playtest.py <rom>          # scripted buttons, screenshot per step
-```
-
-### `Mix.smc` — a defective ROM image
-
-Worth writing down in full, because the shape of the argument is reusable.
-
-The image is a Super Mario World hack, and the hack's IPS patch sits beside
-it. `Mix.smc` is byte for byte `Super Mario World (E) (V1.1)` **with its
-512-byte copier header** plus `Mix.ips`, so it is what the author shipped,
-not a bad copy of it.
-
-What the patch does, among 4869 other records, is overwrite `$00:B992-$B9AA`
-with pointer-table data. In the base ROM those 15 bytes from `$00:B997` are
-the routine that reads the next byte of a compressed stream and carries the
-pointer over a bank boundary — and the decompressor at `$00:B8F1`, which the
-patch leaves alone, still calls it. Boot therefore runs into a table:
-
-```
-$00:9399  JSR $A99A         ; still stock
-$00:A9AD  JSL $00BA3C       ; still stock -- decompress GFX file $28
-$00:BA5B  JSR $B8F1         ; still stock
-$00:B8F6  JSR $B997         ; still stock -- and $B997 is now a pointer table
-```
-
-The tell is that unmodified `Super Mario World (E)` reaches `$00:B997`
-by the same four calls at instruction 949,669 of its own boot, one frame
-either side of where `Mix.smc` arrives. The path is the base game's, not
-something the emulation invented, so there is no emulator behaviour that
-could avoid it.
-
-`MixA.smc` — the same author's next release, ver 1.52 — boots and plays.
-
-### `SMWREX.smc` — the same verdict, by a different route
-
-Also a faithful patch of `Super Mario World (E) (V1.1)`, headered, this time
-expanded to 4 MB. The mapping is not the problem, despite the size: the hack
-puts its own code in the gap before the internal header at `$00:FFAD` and
-reaches it with a `JSL`, which only works if the banks land where it is
-putting them.
-
-It never leaves forced blank. The patched reset does `SEI / CLC / XCE / JML
-$80859A` — and `$00:859A`, which the patch does not touch, is the middle of a
-table of 24-bit pointers in the base game. The CPU chews through it as
-instructions (harmlessly: `TSB` and `ORA` on ROM addresses) and falls into
-real code at `$00:85D4`, which loads a pointer from `$00:84D0` and calls the
-VRAM upload routine at `$00:871E`. That routine walks a list of DMA
-descriptors, six bytes each, stopping at the first whose first byte has bit 7
-set. The list lives at `$7F:837D`, in WRAM.
-
-The measurement that settles it:
-
-| | reaches `$85D4` | `$7F:837D` at that moment |
-|---|---|---|
-| `Super Mario World (E)` | instruction 1,160,333, frame 70 | `$FF` — an empty list, so the routine returns at once |
-| `SMWREX.smc` | **instruction 24**, frame 0 | `$55` — untouched power-on fill |
-
-The hack's reset lands past the million-odd instructions of initialisation
-that put the `$FF` there, so the list never ends and the routine marches
-through WRAM for ever.
-
-The power-on fill is worth one paragraph, because it looks like it might be
-the lever and is not. Ours is `$55`, whose bit 7 is clear; a fill of `$AA`
-would satisfy the terminator by accident. Building with `$AA` was tried: the
-loop does exit, and the ROM then runs into a `BRK` at `$00:0000` and stays
-there. What is missing is the whole of initialisation, not one byte of it.
-`$55` stays, since a fill that makes a broken ROM appear to start is worse
-than one that does not.
-
----
+**The library now has no unexplained failure.** Every title either renders, is
+a proven-broken image, needs firmware that is not here, or is doing what the
+hardware would do.
 
 ## How to verify anything here
 
