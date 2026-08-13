@@ -825,6 +825,35 @@ old path, which is how the table above was measured. What cannot be checked
 here is whether a real GPU makes the presentation faster still — it can only
 help, and the CPU side of the saving is measured, not assumed.
 
+## The INIDISP glitch: measured, understood, and deliberately not modelled
+
+undisbeliever's 29 INIDISP ROMs come with **photographs of a real Super
+Famicom** running them, which makes them the closest thing here to hardware.
+They probe one behaviour: a write to `$2100` can be latched with bit 7 taken
+from the data bus rather than from the value written, so a write of `$0f`
+briefly forces blank, or a write of `$8f` briefly *un*-blanks — for about one
+dot.
+
+Our rendering of these ROMs matches the photographs in everything except the
+glitch. `inidisp_hammer_0f00` draws the same brick wall, the same "4 bpp"
+labels and the same OBJ sprite in the same places. What is missing is the
+one-dot artefact itself.
+
+It stays missing, on purpose:
+
+- It is **not deterministic**. The author's own note says the HDMA cases
+  "appear ~40% of the time on my console" and need a few resets.
+- It is **console-dependent**: his 3-chip machine glitches where a 1-chip one
+  does not, and vice versa for the inverse case.
+- It is an **analogue latching artefact** described in a forum post, not a
+  documented register behaviour, and no reference emulator models it.
+
+Modelling it would mean inventing a rule for something the hardware itself
+does inconsistently, and then having no way to tell whether the invention was
+right. Three of the ROMs are marked "(does not glitch)" and we agree with all
+three, because we never glitch — which is a defensible model of a 40%
+phenomenon, and an honest one as long as it is written down.
+
 ## How to verify anything here
 
 ```
