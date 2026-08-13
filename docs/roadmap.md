@@ -180,12 +180,13 @@ The largest single gap. Everything below the first item depends on it.
       including when that read is the console fetching its own instructions.
       A game's wait loop therefore cannot live in ROM, and Star Fox's does
       not: it runs from work RAM.
-      Star Fox draws its intro polygons and its title screen.  Two caveats.
-      The chip catches up to the console rather than the two sharing a
-      scheduler, so cycles are counted but contention is not, and some stray
-      black rectangles in Star Fox's intro are most likely that.  And there
-      is no hardware test ROM for the GSU here, so the instruction set rests
-      on one game and five unit tests
+      Star Fox draws its intro polygons and its title screen, and the
+      instruction set now answers to an outside authority: krom's 31 GSU
+      instruction tests all pass (see Verification below).
+      What they do not cover is time.  The chip catches up to the console
+      rather than the two sharing a scheduler, so cycles are counted but
+      contention is not, and the stray black rectangles in Star Fox's intro
+      are most likely that
 - [x] **S-DD1**: mapper and decompressor.  A 32 Mbit S-DD1 cartridge fits no
       standard map -- banks $C0-$FF are four 1 MB slots chosen by $4804-$4807
       -- and Street Fighter Zero 2 jumps into that window three instructions
@@ -264,6 +265,20 @@ This is the part that decides whether any of the above converges.
       had nothing to do with the SPC7110: an unwritten save RAM reads $FF, not
       $00.  A second hardware-authored oracle, arrived by accident, which is
       the argument for item 8 below made twice
+- [x] **krom's instruction test ROMs**: 66 of them, and all 66 pass.  One ROM
+      per instruction -- 23 for the 65816, 7 for the SPC700, 31 for the GSU,
+      5 for the bank mapping -- each walking every addressing mode and
+      checking the result and all four flags in 8- and 16-bit, binary and
+      decimal.  `tools/kromtests.py` boots them and reads each verdict out of
+      VRAM: the font is loaded so that tile number equals character code, so
+      the screen is text rather than pixels, and a failing test prints FAIL
+      and then branches to itself, so nothing can be missed by sampling.
+      The harness was checked the only way a harness can be: by breaking the
+      emulator on purpose.  One bit of ADC's carry (`> 0xFF` to `> 0x100`)
+      turns CPUADC red and names the addressing mode and the row.
+      What this is *not* is a timing authority.  These check what an
+      instruction computes, not when -- so item 8 below is narrowed rather
+      than answered
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images
@@ -278,18 +293,19 @@ This is the part that decides whether any of the above converges.
 6. ~~The tooling for differential tracing~~ done.
 7. ~~The DSP pipeline and SPC700 bus timing~~ done, and every hardware test
    ROM on this machine passes as a result.
-8. **Find the CPU and PPU an external authority.**  Everything left in
-   sections 1, 2 and 3 is waiting on one, and nothing else here is worth as
-   much.  The argument is no longer a hunch: one arrived for the APU and, in a
-   day, found nine defects in code this checklist called done -- a cycle table
-   two cycles out, a read-modify-write in the wrong order, registers handing
-   back what was written to them, a timer in the wrong phase, key-on a sample
-   late, six decibels of missing volume, and an interpolation table a unit
-   wide of the chip's.  The CPU and the PPU are today where the APU was that
-   morning.  Two ways in, cheapest first: the wider public test-ROM sets, run
-   the same way `tools/testroms.py` runs the SPC ones; and a reference
-   emulator for `tools/difftrace.py`, which has waited for one since it was
-   written.
+8. **Find the CPU and PPU an external authority.**  Half done, and the half
+   that is done cost an afternoon.  krom's 66 instruction tests are here and
+   all pass, which settles *what* the 65816, the SPC700 and the GSU compute --
+   every addressing mode, every flag, both widths, decimal and binary.
+   What is still unanswered is *when*.  Nothing here checks a cycle count, an
+   interrupt's exact arrival, or a PPU register written mid-scanline, and
+   those are where the APU's nine defects lived: a cycle table two cycles out,
+   a read-modify-write in the wrong order, registers handing back what was
+   written to them, a timer in the wrong phase, key-on a sample late, six
+   decibels of missing volume, and an interpolation table a unit wide.  The
+   remaining ways in: krom's PPU demos have reference screenshots to compare
+   against, and `tools/difftrace.py` has been waiting for a reference emulator
+   since it was written.
 9. SA-1 bus arbitration, and the SuperFX's contention -- both are the same
    problem, and both now have a game to answer to.
 10. ~~SPC7110~~ done, and its cartridge brought its own test program with it.

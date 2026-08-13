@@ -22,8 +22,16 @@ was written and now draws its Capcom logo and its title screen.
 Mesen. That single absence is why six items are "partial" rather than done,
 and it is worth understanding what it costs before reading the rest.
 
-There are now three things that partly substitute for it, and it is worth
-knowing which parts. blargg's SPC test ROMs are here (see item 10), and
+**The largest of them turned out to be a download away.** krom's per-instruction
+test ROMs — 66 of them, covering the 65816, the SPC700 and the GSU — are now
+here and all pass. They settle what every instruction computes in every
+addressing mode, with every flag, in both widths and both arithmetic modes.
+They say nothing about *when*, which is where the APU's nine defects lived, so
+what follows is still true of timing. But "no external authority" was only
+ever true of timing, and it took an afternoon to find that out.
+
+There are now four things that partly substitute for a reference, and it is
+worth knowing which parts. blargg's SPC test ROMs are here (see item 10), and
 `tools/dspdiff.py` runs the DSP against blargg's own implementation sample by
 sample: real external authority, but only over the APU. The third arrived by
 accident and covers one chip — Momotarou Dentetsu Happy carries the
@@ -430,12 +438,13 @@ does the one in `tests/test_superfx.py`. Getting this wrong looks like a
 correct emulator running a program that mysteriously loses its own stores —
 which is precisely how it presented while writing the tests.
 
-*What is unverified*: everything, in the sense that matters. There is no
-hardware test ROM for the GSU on this machine, so the evidence is one
-commercial game rendering correctly and five unit tests written against the
-same understanding as the code. That is the second and fourth rungs of the
-evidence ladder, not the first. Nine defects were found in the APU — which
-the roadmap called done — the day a test ROM was pointed at it.
+*What is verified*: the instruction set, by something written outside this
+project. krom's GSU tests — 31 ROMs, one per instruction, each walking the
+register operands and checking the result and all four flags — all pass.
+That paragraph replaces one written the day before, which said there was no
+hardware test ROM for the GSU on this machine and that the whole chip rested
+on one game and five unit tests. The tests existed; nobody had gone looking.
+The lesson is not about the SuperFX.
 
 *What is approximate*: the chip catches up to the console at each access and
 at the end of every scanline rather than the two sharing a scheduler, so
@@ -693,6 +702,7 @@ python tools/featureprobe.py <dir>    # which features anything actually uses
 python tools/difftrace.py check       # committed traces, cycle for cycle
 python tools/dspdiff.py <probe>       # this DSP against blargg's, sample by sample
 python tools/spc7110check.py <rom>    # the check program inside Momotarou Dentetsu Happy
+python tools/kromtests.py <dir>       # 66 instruction tests, verdict read from VRAM
 ```
 
 Two habits worth keeping. `batchtest` judges on the best frame of a run, not

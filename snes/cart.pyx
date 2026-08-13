@@ -157,7 +157,10 @@ cdef class Cart:
         else:
             self.had_copier_header = 0
 
-        if len(raw) < 0x10000:
+        # 32 KB is a real cartridge size -- the smallest the console shipped,
+        # one LoROM bank mirrored across the map -- and it is what most test
+        # ROMs are, so the floor is one bank rather than two.
+        if len(raw) < 0x8000:
             raise ValueError("ROM image too small: %d bytes" % len(raw))
 
         # Some dumps are block-interleaved.  Trust whichever arrangement makes
