@@ -200,9 +200,27 @@ The largest single gap. Everything below the first item depends on it.
       496.  The arming masks alone are not enough -- the game leaves them set
       and does its sprite DMA out of WRAM on the same channel.
       Street Fighter Zero 2 draws its Capcom logo and its title screen
-- [ ] SPC7110, OBC1, RTC.  Glue logic and decompressors with documented
-      behaviour and no firmware of their own, so they can be written; nothing
-      in the local library needs them, so they would be written blind
+- [x] **SPC7110**: four devices in one package -- the decompression unit, a
+      data port that walks the data ROM, a 16x16 multiplier and 32/16
+      divider, and the memory controller that decides which megabyte of the
+      data ROM each quarter of the address space shows.  A cartridge with
+      this chip carries two ROMs, and the second one the console cannot
+      address at all: every byte of it arrives through a port.
+      The compression is a binary arithmetic coder with a context model over
+      the pixels already decoded and a move-to-front colour list; its 53-state
+      probability ladder is transcribed hardware design data, from neviksti's
+      and talarubi's published implementation, not reasoned out here.
+      Verified by the cartridge itself.  Momotarou Dentetsu Happy carries an
+      SPC7110 CHECK PROGRAM in its ROM and runs it whenever the save RAM does
+      not hold "SPC7110 CHECK OK"; `tools/spc7110check.py` drives it and reads
+      the verdict out of the program's own result table.  All twelve of its
+      tests pass, it writes the signature, and the game boots to its title
+      screen.
+      Missing: the RTC at $4840-$4842, which only Far East of Eden Zero has
+      and which nothing here can check
+- [ ] OBC1.  Glue logic with documented behaviour and no firmware of its own,
+      so it can be written; nothing in the local library needs it, so it would
+      be written blind
 - [ ] DSP-1/2/3/4, CX4, ST010/011.  Each is a microcontroller running a
       program mask-ROMed into it, and that dump is not here.  Without it the
       only route is reimplementing what the program does from its documented
@@ -238,6 +256,14 @@ This is the part that decides whether any of the above converges.
       `spc_mem_access_times`, `spc_timer` and `spc_dsp6` **all pass**.
       The tests are the apparatus, not the fix; the remaining fix is the DSP
       pipeline above
+- [x] **The SPC7110's own check program**: Momotarou Dentetsu Happy carries
+      one in its ROM and boots into it whenever the save RAM does not say the
+      chip has been checked.  `tools/spc7110check.py` runs both its modes and
+      reads the verdict from the program's own result table rather than from
+      the screen.  It passes -- and on the way it found a bug of ours that
+      had nothing to do with the SPC7110: an unwritten save RAM reads $FF, not
+      $00.  A second hardware-authored oracle, arrived by accident, which is
+      the argument for item 8 below made twice
 - [x] **CI**: the suite runs on every push, on Linux and Windows.  The
       ROM-dependent modules skip themselves rather than fail, since no ROM
       belongs in the repository and the rest builds its own test images
@@ -266,7 +292,7 @@ This is the part that decides whether any of the above converges.
    written.
 9. SA-1 bus arbitration, and the SuperFX's contention -- both are the same
    problem, and both now have a game to answer to.
-10. SPC7110, for Momotarou Dentetsu Happy.
+10. ~~SPC7110~~ done, and its cartridge brought its own test program with it.
 
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and

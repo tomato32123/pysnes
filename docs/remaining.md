@@ -22,12 +22,21 @@ was written and now draws its Capcom logo and its title screen.
 Mesen. That single absence is why six items are "partial" rather than done,
 and it is worth understanding what it costs before reading the rest.
 
-There are now two things that partly substitute for it, and it is worth
+There are now three things that partly substitute for it, and it is worth
 knowing which parts. blargg's SPC test ROMs are here (see item 10), and
 `tools/dspdiff.py` runs the DSP against blargg's own implementation sample by
-sample. Both are real external authority — but only over the APU. Everything
-to do with the CPU's and the PPU's timing is still checked against nothing but
-this project's own reading of the documentation.
+sample: real external authority, but only over the APU. The third arrived by
+accident and covers one chip — Momotarou Dentetsu Happy carries the
+manufacturer's own SPC7110 check program in its ROM (item 7), and it audits
+the chip's registers, its arithmetic and its save RAM. Everything to do with
+the CPU's and the PPU's timing is still checked against nothing but this
+project's own reading of the documentation.
+
+That third one is worth a second look by anyone deciding what to do next. It
+was not sought, it cost nothing to run, and it immediately found a defect
+outside the chip it tests. It is worth asking which *other* cartridges in the
+library carry a self-test — Hudson put one in this cartridge, and Hudson made
+several of the others.
 
 That asymmetry is now measurable rather than theoretical. An external
 authority arrived for one subsystem and, within a day, found seven defects in
@@ -357,11 +366,45 @@ and their order are the same, and the console is halted throughout, so
 nothing can observe the difference — but a game that armed a channel and then
 did something other than a straight DMA would not be modelled.
 
-### 7. SPC7110, OBC1, RTC
+### 7. SPC7110 — done, and the cartridge tested it for us
 
-Same category as S-DD1 — documented behaviour, nothing hidden inside — but
-nothing in the local library needs them, so they would be written blind.
-Lower priority than S-DD1 for exactly that reason.
+*Where*: `snes/spc7110.pyx`, `tests/test_spc7110.py`, `tools/spc7110check.py`.
+
+Four devices in one package: the decompression unit, a data port that walks
+the data ROM, a multiplier and divider, and the memory controller. The
+decompressor is the only hard part — a binary arithmetic coder over a context
+model of the pixels already decoded, with a move-to-front colour list — and
+its 53-state probability ladder is transcribed rather than derived, for the
+same reason the S-DD1's tables are.
+
+Then the verification turned out to be sitting inside the cartridge.
+Momotarou Dentetsu Happy's boot code reads sixteen bytes of save RAM, and if
+they are not `SPC7110 CHECK OK` it jumps into an **SPC7110 CHECK PROGRAM
+V3.0** held in its own ROM: nine tests of the chip in mode 1, a battery-backup
+test in mode 2. That is rung one of the evidence ladder — a test written by
+the people who made the hardware, against the hardware — and it arrived
+without being asked for. All of it passes.
+
+It also found a bug that had nothing to do with the SPC7110. The backup test
+reads the whole save RAM and expects `$ff`, because a RAM cell that has never
+been written is undriven and reads as ones. This emulator filled save RAM with
+zeroes. Every other cartridge in the library either writes before it reads or
+keeps a checksum, so nothing had ever noticed; this one reports NG, declines
+to write the signature, and the game never starts. One line in `cart.pyx`.
+
+*What is missing*: the RTC at $4840-$4842. Only Far East of Eden Zero has one,
+it is not here, and a clock written blind is a clock that cannot be checked.
+
+*What is approximate*: the chip's work takes no time. A real transfer sets
+$480c bit 7 when it is ready and the ALU sets $482f bit 7 while it is busy;
+here both are true the instant the register is written. A game that used the
+delay to do something else would not be modelled — the same approximation the
+S-DD1 makes, for the same reason.
+
+### 7a. OBC1
+
+Documented behaviour, nothing hidden inside, and nothing in the local library
+needs it — so it would be written blind.
 
 ### 8. SuperFX — running, on one game and five tests
 
@@ -516,6 +559,28 @@ event scheduler in `snes/bus.pyx` rather than running one to catch up.
 Note this is the *only* SA-1 gap left: the timers and both kinds of character
 conversion are now implemented (though unexercised, per the table above).
 
+### A save state does not carry the cartridge
+
+*Where*: `tools/gen_state.py`, whose `SPECS` list names the CPU, the bus, the
+PPU and the APU — and no board.
+
+Every board's state is left out: the SA-1's second processor and its I-RAM,
+the S-DD1's slot registers, the SuperFX's registers and pixel cache, the
+SPC7110's window registers and decompressor. Saving and loading in Star Fox
+restores the console around a GSU that is still wherever it had got to, which
+was measured rather than assumed:
+
+    saved  r15=fbe6 pbr=06
+    loaded r15=b301 pbr=01
+
+For the same reason rewind is wrong in any game with a chip on the cartridge —
+it is built on the same serialiser. Nothing warns; the state loads cleanly and
+the game misbehaves afterwards.
+
+The fix is mechanical: add the boards to `SPECS` and regenerate. It needs one
+decision first — a state has to record *which* board it was saved with, or a
+state from one cartridge will load into another.
+
 ### Differential trace against a reference
 
 Covered at the top. The tooling is done; the reference is not available.
@@ -627,6 +692,7 @@ python tools/testroms.py <dir>        # hardware test ROMs, verdict per ROM
 python tools/featureprobe.py <dir>    # which features anything actually uses
 python tools/difftrace.py check       # committed traces, cycle for cycle
 python tools/dspdiff.py <probe>       # this DSP against blargg's, sample by sample
+python tools/spc7110check.py <rom>    # the check program inside Momotarou Dentetsu Happy
 ```
 
 Two habits worth keeping. `batchtest` judges on the best frame of a run, not

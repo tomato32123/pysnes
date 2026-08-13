@@ -236,7 +236,15 @@ cdef class Cart:
 
     def _alloc_sram(self):
         # Always keep a real buffer so the bus never has to null-check.
-        self.sram_data = bytearray(self.sram_size if self.sram_size else 1)
+        #
+        # A save RAM that has never been written reads $FF, not $00: the cell
+        # is undriven and the bus pulls up.  Momotarou Dentetsu Happy is where
+        # this stops being a detail -- its cartridge carries a check program,
+        # and that program's S-RAM BACKUP test reads the whole window and
+        # expects $FF.  Filled with zeroes it reports NG, refuses to write the
+        # "SPC7110 CHECK OK" signature the boot code looks for, and the game
+        # never starts.
+        self.sram_data = bytearray(b"\xFF" * (self.sram_size if self.sram_size else 1))
         self.sram = <uint8_t *>self.sram_data
         self.sram_mask = (self.sram_size - 1) if self.sram_size else 0
 

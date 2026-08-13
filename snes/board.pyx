@@ -147,6 +147,7 @@ def _load_boards():
     from snes import sa1                      # noqa: F401  (registers itself)
     from snes import sdd1                     # noqa: F401
     from snes import superfx                  # noqa: F401
+    from snes import spc7110                  # noqa: F401
 
 
 def make_board(Cart cart):

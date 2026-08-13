@@ -6,6 +6,9 @@ cdef enum MapMode:
     MAP_HIROM = 1
     MAP_EXHIROM = 2
 
+cdef uint32_t _mirror(uint32_t addr, uint32_t size) noexcept nogil
+
+
 cdef class Cart:
     cdef readonly bytes rom_data
     cdef readonly bytearray sram_data
