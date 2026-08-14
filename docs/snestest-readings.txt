@@ -128,3 +128,29 @@ Measured before and after the H-timer change of this session: $EA both
 times.  That change neither caused this nor fixed it, and saying so is the
 point of writing it down.  This is a single-instruction interrupt-latency
 question and it is still open.
+
+--------------------------------------------------------------------------------
+Measured while chasing the four red screens above, and recorded because the
+measurement is worth more than the conclusion I did not reach.
+
+test_irq's first gate wants the byte at the interrupted address to be $18,
+the CLC at $80E0.  This delivers $EA, the NOP one byte earlier.  Delaying
+the interrupt line by a swept constant moves it: at +24 master cycles --
+six dots, four processor cycles -- the byte becomes $18 and that gate
+passes.
+
+That is not the answer.  With +24 in place all four screens are still red,
+so the gates further on fail for their own reasons, and dma_irq_test reads
+19/19 at every offset from -24 to +40, so it does not constrain the
+constant at all.  A number that satisfies one reading out of six is not a
+measurement of anything; it is the shape of the first gate.
+
+The likelier story, untested: these cartridges align the processor with a
+cycle-counted delay at $02:807D before letting the interrupt in, so the
+same four cycles could be the delay running short rather than the
+interrupt arriving early.  That would put the fault in instruction timing,
+where the delay is, and not in the interrupt at all -- and it would explain
+why moving the interrupt fixes one gate and no others.
+
+Whoever picks this up: sweep the offset again after any instruction-timing
+change, and treat +24 as a symptom rather than a value to adopt.
