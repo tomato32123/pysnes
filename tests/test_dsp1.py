@@ -140,6 +140,51 @@ def test_without_firmware_the_board_still_answers_the_status_register():
           result.machine.cpu.instructions > 1000, True)
 
 
+HLE_MULTIPLY = """
+        sep #$20
+        lda #$8F
+        sta $2100
+
+        ; command $00 is the multiply: two signed words in, one out.
+w0:     lda $30C000
+        bpl w0
+        lda #$00
+        sta $308000
+        ; $4000 times $4000, low byte of each word first
+        lda #$00
+        sta $308000
+        lda #$40
+        sta $308000
+        lda #$00
+        sta $308000
+        lda #$40
+        sta $308000
+
+w1:     lda $30C000
+        bpl w1
+        lda $308000
+        sta $7E0020
+        lda $308000
+        sta $7E0021
+
+        lda #$0F
+        sta $2100
+spin:   bra spin
+"""
+
+
+def test_a_multiply_goes_through_the_console_and_comes_back():
+    """Without firmware the board answers the commands it can, and the
+    multiply is the one every DSP-1 game leans on.  Half times half is a
+    quarter: $4000 by $4000 gives $2000 once the product is taken from the
+    top fifteen bits."""
+    os.environ.pop("PYSNES_FIRMWARE", None)
+    from tools.testrom import run
+    machine = run(HLE_MULTIPLY, max_frames=8, chipset=0x03).machine
+    lo, hi = machine.bus.peek_range(0x7E0020, 2)
+    check("the product", lo | (hi << 8), 0x2000, "$%04X")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

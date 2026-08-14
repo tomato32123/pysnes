@@ -43,7 +43,6 @@ import os
 # are the ones higan and ares use: a program ROM of 24-bit words and a data
 # ROM of 16-bit ones, per chip.
 FIRMWARE_DIRS = [
-    os.environ.get("PYSNES_FIRMWARE", ""),
     "/home/moto/Projects/rom/firmware",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                  "firmware"),
@@ -61,9 +60,15 @@ PARTS = {
 
 
 def find_firmware(names):
-    """The first (program, data) pair present for any of these chips."""
+    """The first (program, data) pair present for any of these chips.
+
+    The environment is read here rather than when this module loads, so
+    that pointing PYSNES_FIRMWARE somewhere takes effect for the next
+    cartridge rather than only for a process that set it before importing.
+    """
+    places = [os.environ.get("PYSNES_FIRMWARE", "")] + FIRMWARE_DIRS
     for name in names:
-        for directory in FIRMWARE_DIRS:
+        for directory in places:
             if not directory:
                 continue
             prg = os.path.join(directory, name + ".program.rom")
