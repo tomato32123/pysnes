@@ -20,9 +20,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 
-ROOT = "/home/moto/Projects/rom/testroms/higan"
+ROOT = ROMS + "/testroms/higan"
 DEFAULT_DIR = ROOT + "/undisbeliever-ppu-bg"
 MODE7_DIR = ROOT + "/undisbeliever-ppu-mode7"
 FRAMES = 120

@@ -24,6 +24,22 @@ pip install cython setuptools
 That is the whole list. The build wants Cython and setuptools; the tests and
 the benchmark want nothing else. No numpy, no pygame.
 
+## Where the copy has to live
+
+**Not on the phone's shared storage.** Android's linker refuses to open a
+compiled library from `/storage` or `/sdcard`, so a build done there
+succeeds and then nothing can import it: every test fails at once, with a
+message about a "namespace" that reads like a porting fault and is not one.
+Data files are unaffected, which is why the ROM can stay wherever it is.
+
+```sh
+cp -r /storage/emulated/0/Download/pysnes ~/pysnes
+cd ~/pysnes
+```
+
+`tools/armcheck.sh` now refuses to start from shared storage and says this,
+and `tools/runtests.py` recognises the linker's own wording.
+
 ## Getting the code and a ROM across
 
 Either clone it, if the repository is reachable from the phone:

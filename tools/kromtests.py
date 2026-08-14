@@ -25,6 +25,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 
 COLS, ROWS = 32, 28
@@ -112,7 +113,7 @@ def verdict(path, verbose=False):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     verbose = "-v" in sys.argv
-    target = args[0] if args else "/home/moto/Projects/rom/testroms/krom"
+    target = args[0] if args else ROMS + "/testroms/krom"
 
     if os.path.isdir(target):
         roms = sorted(os.path.join(target, f) for f in os.listdir(target)

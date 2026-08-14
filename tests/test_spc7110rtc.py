@@ -17,9 +17,14 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from snes.system import System
+from tools.romarg import find_named, NO_ROM
 
-ROM = ("/home/moto/Projects/rom/snes/Tengai Makyou Zero (Japan)/"
-       "Tengai Makyou Zero (Japan).sfc")
+# This one cannot be assembled here: the readings come from the check
+# program the chip's makers put in the cartridge, so it has to be that
+# cartridge.  Set PYSNES_ROMS to a directory holding it, or drop it into
+# roms/ beside the project.
+ROM = find_named("Tengai Makyou Zero (Japan).sfc",
+                 "Tengai Makyou Zero (Japan).smc")
 
 FAILURES = []
 
@@ -132,6 +137,10 @@ def test_the_cartridges_own_check_program_gets_its_rollover():
 
 
 def main():
+    if ROM is None:
+        sys.stderr.write("Tengai Makyou Zero is not on this machine; set "
+                         "PYSNES_ROMS to where it is" + chr(10))
+        return NO_ROM
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
     for name, fn in tests:

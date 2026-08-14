@@ -22,9 +22,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 
-ROOT = "/home/moto/Projects/rom/testroms/higan/gilyon"
+ROOT = ROMS + "/testroms/higan/gilyon"
 DEFAULT_ROMS = [os.path.join(ROOT, "cputest.sfc"), os.path.join(ROOT, "spctest.sfc")]
 FRAMES = 4000
 

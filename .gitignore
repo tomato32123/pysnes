@@ -12,3 +12,4 @@ roms/
 pysnes-debug.spec
 *.state
 *.srm
+.romsdir

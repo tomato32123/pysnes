@@ -24,6 +24,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 from tools.screenshot import write_png
 
@@ -33,7 +34,7 @@ except ImportError:                     # pragma: no cover - optional tooling
     print("this tool needs numpy")
     raise SystemExit(2)
 
-DEFAULT_DIR = "/home/moto/Projects/rom/testroms/higan/jonasquinn-test-roms"
+DEFAULT_DIR = ROMS + "/testroms/higan/jonasquinn-test-roms"
 FRAMES = 1400                           # "Takes 15 seconds" is common; this is 23
 SETTLE = 300                            # frames of an unchanging screen to stop early
 # ...but not before this, because most of these ROMs print "Takes 15 seconds"

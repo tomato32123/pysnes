@@ -23,10 +23,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 from tools.cputest import screen_lines
 
-DIR = ("/home/moto/Projects/rom/testroms/higan/jonasquinn-test-roms/"
+DIR = (ROMS + "/testroms/higan/jonasquinn-test-roms/"
        "snestest_082506")
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "docs", "snestest-readings.txt")

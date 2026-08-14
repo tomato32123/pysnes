@@ -22,9 +22,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 
-DEFAULT_ROM = ("/home/moto/Projects/rom/testroms/higan/jonasquinn-test-roms/"
+DEFAULT_ROM = (ROMS + "/testroms/higan/jonasquinn-test-roms/"
                "color_halve_proof/demo.smc")
 FRAMES = 300
 

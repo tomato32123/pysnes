@@ -25,10 +25,12 @@ import os
 import struct
 import sys
 
+from tools.romarg import ROMS
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from snes.apu import APU
 
-DEFAULT_DIR = ("/home/moto/Projects/rom/testroms/higan/jonasquinn-test-roms/"
+DEFAULT_DIR = (ROMS + "/testroms/higan/jonasquinn-test-roms/"
                "spc_loader_tests")
 
 # The SPC file layout, which is published: a signature, the processor's

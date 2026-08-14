@@ -19,6 +19,8 @@ import os
 import subprocess
 import sys
 
+from tools.romarg import ROMS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
@@ -44,10 +46,10 @@ CHECKS = [
     # as above; without it this reports "could not run".
     ("a game's music, both chips",
      [sys.executable, "tools/apucompare.py",
-      "/home/moto/Projects/rom/snes/Super_Mario_World_(U)/MARIO.SMC"], True),
+      ROMS + "/snes/Super_Mario_World_(U)/MARIO.SMC"], True),
     ("SPC7110 cartridge self-test",
      [sys.executable, "tools/spc7110check.py",
-      "/home/moto/Projects/rom/snes/Momotarou Dentetsu Happy (Japan)/"
+      ROMS + "/snes/Momotarou Dentetsu Happy (Japan)/"
       "Momotarou Dentetsu Happy (Japan).sfc"], True),
 ]
 

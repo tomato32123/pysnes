@@ -42,8 +42,11 @@ import os
 # Where a firmware dump is looked for, and what it is called.  The names
 # are the ones higan and ares use: a program ROM of 24-bit words and a data
 # ROM of 16-bit ones, per chip.
+# $PYSNES_FIRMWARE is read on every call rather than once, so a dump that
+# appears while the program is running is picked up.  There was a path from
+# the machine this was written on in this list, which would have found
+# nothing on anyone else's and said nothing about why.
 FIRMWARE_DIRS = [
-    "/home/moto/Projects/rom/firmware",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                  "firmware"),
 ]

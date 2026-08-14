@@ -39,6 +39,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System, BUTTONS
 
 try:
@@ -48,7 +49,7 @@ except ImportError:                     # pragma: no cover - optional tooling
     print("this tool needs pillow and numpy")
     raise SystemExit(2)
 
-DEFAULT_DIR = "/home/moto/Projects/rom/testroms/krompp"
+DEFAULT_DIR = ROMS + "/testroms/krompp"
 FRAMES = 61                             # odd, so both interlace fields are drawn
 
 # Every colour the SNES can put on a wire: 5 bits a channel, expanded by

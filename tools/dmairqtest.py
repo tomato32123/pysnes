@@ -17,9 +17,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 
-DEFAULT_ROM = ("/home/moto/Projects/rom/testroms/higan/Sour/SnesTests/"
+DEFAULT_ROM = (ROMS + "/testroms/higan/Sour/SnesTests/"
                "dma_irq_test/dma_irq_test.sfc")
 
 # From dma_irq_test/README.md.  $FFFF is the test's way of saying the

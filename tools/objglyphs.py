@@ -26,9 +26,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.romarg import ROMS
 from snes.system import System
 
-DEFAULT_DIR = "/home/moto/Projects/rom/testroms/higan/neser-obj-tests"
+DEFAULT_DIR = ROMS + "/testroms/higan/neser-obj-tests"
 FRAMES = 30
 
 # Transcribed from neser-obj-tests/README.md.  Each entry is
