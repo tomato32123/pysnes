@@ -114,7 +114,20 @@ The largest single gap. Everything below the first item depends on it.
       which, so the two fields together draw it at its proper shape.  Left
       undone for a year for want of anything that turns the bit on; krom's
       InterlaceRPG turns it on, and goes from 34.65% to 100.00% exact against
-      its own screenshot with it implemented
+      its own screenshot with it implemented.
+      One thing about it is unsettled and worth writing down rather than
+      quietly deciding.  A note beside Jonas Quinn's `test_oam` tabulates
+      object sizes as (OBSEL select, size bit, interlace) and has the
+      interlace column change only the two rectangular selects -- 16x32
+      becoming 16x16 -- leaving squares and 32x64 alone.  The SNESdev wiki
+      says the opposite, that the bit halves every sprite's pixels, and that
+      is what is implemented here.  The one demo that turns the bit on uses
+      select 6 with the small size, which is the single case where the two
+      accounts agree, so the 100% match does not choose between them.  The
+      note is unattributed; the wiki is not; the behaviour that matches a
+      reference picture stays until something measures the other cases.
+      Its `<16x16x2>` annotation does independently corroborate the other
+      thing found today, that a 16x32 is two 16x16 squares stacked
 
 ## 4. APU
 
