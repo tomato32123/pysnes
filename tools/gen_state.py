@@ -115,7 +115,7 @@ SPECS = [
     dict(
         module='sa1', cls='SA1',
         marker="    # -- introspection ---",
-        scalars=['bwram_mask', 'ccnt', 'scnt', 'sie', 'sic', 'cie', 'cic', 'crv', 'cnv', 'civ', 'snv', 'siv', 'sa1_irq', 'sa1_nmi', 'scpu_irq', 'dma_irq_scpu', 'dma_irq_sa1', 'timer_irq', 'stopped', 'bmaps', 'bmap', 'sbwe', 'cbwe', 'siwp', 'ciwp', 'math_ctl', 'math_a', 'math_b', 'math_result', 'math_overflow', 'vbd', 'vda', 'vbit', 'tmc', 'timer_h', 'timer_v', 'timer_base', 'timer_seen', 'dcnt', 'cdma', 'dsa', 'dda', 'dtc', 'cc_line', 'n_cc1', 'n_cc2', 'n_dma', 'n_math', 'n_varlen', 'n_timer_irq'],
+        scalars=['bwram_mask', 'ccnt', 'scnt', 'sie', 'sic', 'cie', 'cic', 'crv', 'cnv', 'civ', 'snv', 'siv', 'sa1_irq', 'sa1_nmi', 'scpu_irq', 'dma_irq_scpu', 'dma_irq_sa1', 'timer_irq', 'stopped', 'bmaps', 'bmap', 'sbwe', 'cbwe', 'bwpa', 'siwp', 'ciwp', 'math_ctl', 'math_a', 'math_b', 'math_result', 'math_overflow', 'vbd', 'vda', 'vbit', 'tmc', 'timer_h', 'timer_v', 'timer_base', 'timer_seen', 'dcnt', 'cdma', 'dsa', 'dda', 'dtc', 'cc_line', 'n_cc1', 'n_cc2', 'n_dma', 'n_math', 'n_varlen', 'n_timer_irq'],
         arrays=[('mmc', 4), ('brf', 16)],
         arrays2=[],
         blobs=[('iram', 'uint8_t', 2048)],

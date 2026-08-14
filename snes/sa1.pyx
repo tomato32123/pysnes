@@ -120,6 +120,10 @@ cdef class SA1(Board):
         self.bmap = 0
         self.sbwe = 0
         self.cbwe = 0
+        # Everything is protected until a cartridge says otherwise: neither
+        # processor may write the battery RAM, and the protected area covers
+        # more of it than any cartridge has.
+        self.bwpa = 0x0F
         self.siwp = 0
         self.ciwp = 0
         self.math_ctl = 0
@@ -229,6 +233,32 @@ cdef class SA1(Board):
         cdef uint32_t block = (self.bmap if from_sa1 else self.bmaps) & 0x1F
         return ((block << 13) | (addr & 0x1FFF)) & self.bwram_mask
 
+    cdef int _bwram_writable(self, uint32_t raw) noexcept:
+        """Whether the battery RAM may be written at this address.
+
+        The two enable bits are not one each: either of them opens the memory
+        to both processors.  absindx's cartridge says so in as many words --
+        "if one side is write-enabled, the other can also be written to" --
+        and tests it from both directions, which is why it is worth having
+        rather than the obvious reading of two independent switches.
+
+        With neither open, the protected region is the front of the memory
+        and $2228 says how much: 256 bytes doubled once per step, so $00
+        protects $400000-$4000FF.
+
+        The address compared is the one the processor asked for, before it
+        wraps onto a smaller memory, and only its low eighteen bits -- the
+        most battery RAM an SA-1 cartridge can carry.  That is what the same
+        cartridge's readings say: with the area set to $09 a write at
+        $420000 lands, and with it set to $0A a write at $440000 does not,
+        although both wrap to the same byte.  Comparing the wrapped address
+        fails the first, comparing the full address fails the second, and
+        eighteen bits is the only width that passes both.
+        """
+        if (self.sbwe | self.cbwe) & 0x80:
+            return 1
+        return (raw & 0x3FFFF) >= (<uint32_t>256 << self.bwpa)
+
     cdef uint8_t _read_common(self, uint32_t addr, int from_sa1, uint8_t data) noexcept:
         cdef uint32_t bank = (addr >> 16) & 0xFF
         cdef uint32_t off = addr & 0xFFFF
@@ -264,19 +294,30 @@ cdef class SA1(Board):
                         if 0xFFEE <= off <= 0xFFEF:
                             return <uint8_t>(self.civ >> ((off & 1) * 8))
                     else:
+                        # $2209 is documented as "IS-Nmmmm": the IRQ vector is
+                        # chosen by bit 6 and the NMI vector by bit 4, with bit
+                        # 5 unused.  It was bit 5 here, so the console kept its
+                        # own IRQ vector however loudly the SA-1 asked, and no
+                        # cartridge that hands work back through that vector
+                        # could ever get an answer.
                         if (self.scnt & 0x10) and 0xFFEA <= off <= 0xFFEB:
                             return <uint8_t>(self.snv >> ((off & 1) * 8))
-                        if (self.scnt & 0x20) and 0xFFEE <= off <= 0xFFEF:
+                        if (self.scnt & 0x40) and 0xFFEE <= off <= 0xFFEF:
                             return <uint8_t>(self.siv >> ((off & 1) * 8))
                 return self.cart.rom[self._rom_offset(bank, off)]
             return data
 
-        if 0x40 <= bank < 0x50:                      # battery RAM, laid flat
+        # Battery RAM, laid flat -- but over a different span for each
+        # processor.  The console reaches it in $40-$4F and the SA-1 in
+        # $40-$5F, which absindx's cartridge shows by writing one byte and
+        # reporting which of eight windows changed with it: the console's
+        # reading omits $500000 and the SA-1's includes it.
+        if 0x40 <= bank < (0x60 if from_sa1 else 0x50):
             if self.bwram_mask == 0:
                 return data
             if not from_sa1 and (self.dcnt & 0xB0) == 0xA0:
-                return self._cc1_read((((bank & 0x0F) << 16) | off) & self.bwram_mask)
-            return self.bwram[(((bank & 0x0F) << 16) | off) & self.bwram_mask]
+                return self._cc1_read((((bank & 0x1F) << 16) | off) & self.bwram_mask)
+            return self.bwram[(((bank & 0x1F) << 16) | off) & self.bwram_mask]
 
         if bank >= 0xC0:
             return self.cart.rom[self._rom_offset(bank, off)]
@@ -285,27 +326,45 @@ cdef class SA1(Board):
     cdef void _write_common(self, uint32_t addr, uint8_t value, int from_sa1) noexcept:
         cdef uint32_t bank = (addr >> 16) & 0xFF
         cdef uint32_t off = addr & 0xFFFF
+        cdef uint32_t raw
 
         if bank < 0x40 or (0x80 <= bank < 0xC0):
             if 0x2200 <= off <= 0x23FF:
                 self._write_reg(off, value, from_sa1)
                 return
             if off < 0x0800:
-                if from_sa1:
+                # The SA-1's own view of I-RAM, governed by the same bit of
+                # $222A as the $3000 window onto the same 256 bytes.
+                if from_sa1 and ((self.ciwp >> (off >> 8)) & 1):
                     self.iram[off] = value
                 return
             if 0x3000 <= off < 0x3800:
-                self.iram[off & 0x7FF] = value
+                # I-RAM is protected in eight blocks of 256 bytes, one bit
+                # each: $2229 for the console, $222A for the SA-1, and a set
+                # bit means the write is allowed through.  Both registers
+                # start at zero, so a cartridge that has not asked yet cannot
+                # write here at all -- which is the state this was missing,
+                # and the reason a protection test found nothing to protect.
+                if from_sa1:
+                    if (self.ciwp >> ((off >> 8) & 7)) & 1:
+                        self.iram[off & 0x7FF] = value
+                elif (self.siwp >> ((off >> 8) & 7)) & 1:
+                    self.iram[off & 0x7FF] = value
                 return
             if 0x6000 <= off < 0x8000:
                 if self.bwram_mask:
-                    self.bwram[self._bwram_window(from_sa1, off)] = value
+                    raw = ((<uint32_t>((self.bmap if from_sa1 else self.bmaps)
+                                       & 0x1F) << 13) | (off & 0x1FFF))
+                    if self._bwram_writable(raw):
+                        self.bwram[raw & self.bwram_mask] = value
                 return
             return                                   # ROM swallows writes
 
-        if 0x40 <= bank < 0x50:
+        if 0x40 <= bank < (0x60 if from_sa1 else 0x50):
             if self.bwram_mask:
-                self.bwram[(((bank & 0x0F) << 16) | off) & self.bwram_mask] = value
+                raw = ((bank & 0x1F) << 16) | off
+                if self._bwram_writable(raw):
+                    self.bwram[raw & self.bwram_mask] = value
 
     # =====================================================================
     # registers
@@ -315,8 +374,13 @@ cdef class SA1(Board):
         cdef uint8_t v
 
         if a == 0x2300:                              # SFR, read by the S-CPU
+            # "IVDNmmmm": the two vector-select bits are read back where the
+            # SA-1 put them, bit 6 for the IRQ vector and bit 4 for the NMI
+            # vector.  Bit 5 belongs to the character-conversion DMA below and
+            # is not the SA-1's to set, so copying it here overwrote a flag
+            # with a bit that has no meaning.
             v = self.scnt & 0x0F
-            v |= (self.scnt & 0x30)                  # which vectors the SA-1 supplies
+            v |= (self.scnt & 0x50)                  # which vectors the SA-1 supplies
             if self.scpu_irq:
                 v |= 0x80
             if self.dma_irq_scpu:
@@ -370,7 +434,30 @@ cdef class SA1(Board):
 
         return data
 
+    cdef int _owns_reg(self, uint32_t a, int from_sa1) noexcept:
+        """Whether this processor is the one allowed to write this register.
+
+        Nearly every register belongs to one side or the other, and a write
+        from the wrong side does nothing at all -- the console cannot lift
+        the SA-1's own I-RAM protection by writing $222A, nor the SA-1 the
+        console's by writing $2229.  A cartridge that could would make the
+        protection pointless, and absindx's tests 191 to 194 check all four
+        directions.
+
+        The exception is the DMA's source and destination addresses, which
+        both processors set up, and which the manufacturer's own register
+        list marks "SNES/SA-1" where every other line names one.
+        """
+        if 0x2232 <= a <= 0x2237:
+            return 1
+        if a <= 0x2208 or (0x2220 <= a <= 0x2224) or a == 0x2226 \
+                or a == 0x2228 or a == 0x2229:
+            return not from_sa1
+        return from_sa1
+
     cdef void _write_reg(self, uint32_t a, uint8_t value, int from_sa1) noexcept:
+        if not self._owns_reg(a, from_sa1):
+            return
         if a == 0x2200:                              # CCNT: the console drives the SA-1
             self.ccnt = value
             if value & 0x80:
@@ -379,6 +466,13 @@ cdef class SA1(Board):
                 self.sa1_nmi = 1
             if value & 0x20:
                 self.stopped = 1
+                # Holding the SA-1 in reset clears its own I-RAM protection
+                # and nothing else: the console's $2229 survives a reboot and
+                # so does the SA-1's own $2227, which is why this is one line
+                # rather than a general clearing of the SA-1's registers.
+                # absindx observed it and wrote "reset? CIWP = $00" against
+                # the test, unsure of the reason but sure of the reading.
+                self.ciwp = 0
             elif self.stopped:
                 # Coming out of reset: start at the vector the console left
                 # in $2203, not at the cartridge's own reset vector.
@@ -493,8 +587,9 @@ cdef class SA1(Board):
         if a == 0x2227:
             self.cbwe = value
             return
-        if a == 0x2228:
-            return                                   # BWPA: write protect area
+        if a == 0x2228:                              # BWPA: how much is protected
+            self.bwpa = value & 0x0F
+            return
         if a == 0x2229:
             self.siwp = value
             return
@@ -884,7 +979,7 @@ cdef class SA1(Board):
 
     def state_ints(self):
         cdef int i, j
-        v = [self.bwram_mask, self.ccnt, self.scnt, self.sie, self.sic, self.cie, self.cic, self.crv, self.cnv, self.civ, self.snv, self.siv, self.sa1_irq, self.sa1_nmi, self.scpu_irq, self.dma_irq_scpu, self.dma_irq_sa1, self.timer_irq, self.stopped, self.bmaps, self.bmap, self.sbwe, self.cbwe, self.siwp, self.ciwp, self.math_ctl, self.math_a, self.math_b, self.math_result, self.math_overflow, self.vbd, self.vda, self.vbit, self.tmc, self.timer_h, self.timer_v, self.timer_base, self.timer_seen, self.dcnt, self.cdma, self.dsa, self.dda, self.dtc, self.cc_line, self.n_cc1, self.n_cc2, self.n_dma, self.n_math, self.n_varlen, self.n_timer_irq]
+        v = [self.bwram_mask, self.ccnt, self.scnt, self.sie, self.sic, self.cie, self.cic, self.crv, self.cnv, self.civ, self.snv, self.siv, self.sa1_irq, self.sa1_nmi, self.scpu_irq, self.dma_irq_scpu, self.dma_irq_sa1, self.timer_irq, self.stopped, self.bmaps, self.bmap, self.sbwe, self.cbwe, self.bwpa, self.siwp, self.ciwp, self.math_ctl, self.math_a, self.math_b, self.math_result, self.math_overflow, self.vbd, self.vda, self.vbit, self.tmc, self.timer_h, self.timer_v, self.timer_base, self.timer_seen, self.dcnt, self.cdma, self.dsa, self.dda, self.dtc, self.cc_line, self.n_cc1, self.n_cc2, self.n_dma, self.n_math, self.n_varlen, self.n_timer_irq]
         for i in range(4):
             v.append(self.mmc[i])
         for i in range(16):
@@ -892,7 +987,7 @@ cdef class SA1(Board):
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 50
+        cdef int i, j, k = 51
         self.bwram_mask = v[0]
         self.ccnt = v[1]
         self.scnt = v[2]
@@ -916,33 +1011,34 @@ cdef class SA1(Board):
         self.bmap = v[20]
         self.sbwe = v[21]
         self.cbwe = v[22]
-        self.siwp = v[23]
-        self.ciwp = v[24]
-        self.math_ctl = v[25]
-        self.math_a = v[26]
-        self.math_b = v[27]
-        self.math_result = v[28]
-        self.math_overflow = v[29]
-        self.vbd = v[30]
-        self.vda = v[31]
-        self.vbit = v[32]
-        self.tmc = v[33]
-        self.timer_h = v[34]
-        self.timer_v = v[35]
-        self.timer_base = v[36]
-        self.timer_seen = v[37]
-        self.dcnt = v[38]
-        self.cdma = v[39]
-        self.dsa = v[40]
-        self.dda = v[41]
-        self.dtc = v[42]
-        self.cc_line = v[43]
-        self.n_cc1 = v[44]
-        self.n_cc2 = v[45]
-        self.n_dma = v[46]
-        self.n_math = v[47]
-        self.n_varlen = v[48]
-        self.n_timer_irq = v[49]
+        self.bwpa = v[23]
+        self.siwp = v[24]
+        self.ciwp = v[25]
+        self.math_ctl = v[26]
+        self.math_a = v[27]
+        self.math_b = v[28]
+        self.math_result = v[29]
+        self.math_overflow = v[30]
+        self.vbd = v[31]
+        self.vda = v[32]
+        self.vbit = v[33]
+        self.tmc = v[34]
+        self.timer_h = v[35]
+        self.timer_v = v[36]
+        self.timer_base = v[37]
+        self.timer_seen = v[38]
+        self.dcnt = v[39]
+        self.cdma = v[40]
+        self.dsa = v[41]
+        self.dda = v[42]
+        self.dtc = v[43]
+        self.cc_line = v[44]
+        self.n_cc1 = v[45]
+        self.n_cc2 = v[46]
+        self.n_dma = v[47]
+        self.n_math = v[48]
+        self.n_varlen = v[49]
+        self.n_timer_irq = v[50]
         for i in range(4):
             self.mmc[i] = v[k + i]
         k += 4

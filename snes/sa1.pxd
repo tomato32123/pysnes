@@ -49,6 +49,7 @@ cdef class SA1(Board):
     cdef uint8_t bmaps               # $2224, the S-CPU's $6000 window
     cdef uint8_t bmap                # $2225, the SA-1's
     cdef uint8_t sbwe, cbwe          # write protection
+    cdef uint8_t bwpa                # $2228, how much of it is protected
     cdef uint8_t siwp, ciwp          # I-RAM write protection
 
     # -- arithmetic --------------------------------------------------------
@@ -82,6 +83,7 @@ cdef class SA1(Board):
     cdef uint8_t _read_common(self, uint32_t addr, int from_sa1, uint8_t data) noexcept
     cdef void _write_common(self, uint32_t addr, uint8_t value, int from_sa1) noexcept
     cdef uint8_t _read_reg(self, uint32_t a, int from_sa1, uint8_t data) noexcept
+    cdef int _owns_reg(self, uint32_t a, int from_sa1) noexcept
     cdef void _write_reg(self, uint32_t a, uint8_t value, int from_sa1) noexcept
     cdef void _refresh_interrupts(self) noexcept
     cdef void _start_math(self) noexcept
@@ -89,6 +91,7 @@ cdef class SA1(Board):
     cdef void _advance_varlen(self) noexcept
     cdef void _run_dma(self) noexcept
     cdef uint32_t _bwram_window(self, int from_sa1, uint32_t addr) noexcept
+    cdef int _bwram_writable(self, uint32_t raw) noexcept
     cdef int _hcount(self) noexcept
     cdef int _vcount(self) noexcept
     cdef void _check_timer(self) noexcept
