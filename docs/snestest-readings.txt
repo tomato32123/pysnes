@@ -98,3 +98,33 @@ its tests were changed after it was written; those two lines were not.
 Recorded because the next person to read that table will see two failures
 that are not there, and because it is worth having one case written down
 where the published answer was the thing that was wrong.
+
+================================================================================
+tukuyomi's bsnes tests -- test_irq.smc, test_irq4200.smc, test_nmi.smc,
+demo_irqtest.smc.  All four end red.  Red is failure: the last thing each of
+them does is
+
+    LDA $00 : CMP #$01 : BEQ pass : JMP fail
+    pass:  backdrop $7C00 (blue),  STP
+    fail:  backdrop $001F (red),   STP
+
+so the whole verdict is one byte against one, and the screen colour is the
+report.  Nothing in the collection says so; it was read out of the ROM.
+
+What the byte is: their interrupt handler is
+
+    PHA : PHY : LDA $4211 : LDY #$0000 : LDA ($05,S),Y : STA $00 : RTI
+
+-- it reaches past its own pushes into the frame the interrupt made, and
+records a byte from where the interrupt landed.  The cartridge then delays a
+cycle-counted amount through a routine at $02:807D and asks whether the
+interrupt arrived at the exact byte it aimed for.
+
+This records $EA, the NOP that fills the delay, where hardware records $01.
+The interrupt is arriving at a different instruction: not late by a line or
+by a frame, but by a byte or two within one.
+
+Measured before and after the H-timer change of this session: $EA both
+times.  That change neither caused this nor fixed it, and saying so is the
+point of writing it down.  This is a single-instruction interrupt-latency
+question and it is still open.
