@@ -1,51 +1,62 @@
 #!/bin/sh
 # Build the cores on this machine, prove they are correct, then time them.
 #
-# Written for a phone.  The question it answers is whether this emulator can
-# hold 60 frames a second on the hardware people actually own, and the answer
-# is a number rather than an opinion: a frame's budget is 16.67 ms.
+# Written for a phone, which means written for a person who cannot easily
+# copy forty lines of terminal output off it.  Everything goes into a file
+# on the shared storage, and what reaches the screen is a handful of lines
+# short enough to read out loud.
 #
-# It runs the tests before the benchmark on purpose.  Moving to a different
+# The tests run before the benchmark on purpose.  Moving to a different
 # processor is when latent faults surface -- an integer that was the right
-# width on x86, a shift whose sign was never in question, an access that
-# happened to be aligned.  Anything that fails here is a real defect, not an
-# Android problem, and it cannot be found on the machine this was written on.
+# width on x86, a `char` that was signed there and is not here, an access
+# that happened to be aligned.  Anything that fails is a real defect, not an
+# Android problem, and it cannot be found on a desktop.
 #
 #   sh tools/armcheck.sh /path/to/a/rom.smc
 
-set -e
 ROM="$1"
+OUT="$HOME/storage/shared/pysnes-armcheck.txt"
+[ -d "$HOME/storage/shared" ] || OUT="./pysnes-armcheck.txt"
 
 if [ -z "$ROM" ]; then
     echo "usage: sh tools/armcheck.sh <rom>"
-    echo "any commercial cartridge dump will do; the timing barely varies"
     exit 1
 fi
 
-echo "== 1. what this machine is"
-uname -m
-python -c "import sys; print('python', sys.version.split()[0])"
+{
+    echo "== machine"
+    uname -m
+    python -c "import sys; print('python', sys.version.split()[0])"
+    echo
+    echo "== build"
+    python build.py 2>&1
+    echo
+    echo "== tests"
+    python tools/runtests.py 2>&1
+    echo
+    echo "== speed"
+    python tools/bench.py "$ROM" 2>&1
+    python tools/bench.py "$ROM" 2>&1
+    python tools/bench.py "$ROM" 2>&1
+} > "$OUT" 2>&1
 
+# ---- what reaches the screen -------------------------------------------
 echo
-echo "== 2. building the cores"
-python build.py
+echo "---------------- read this out ----------------"
+sed -n 's/^\(.*\) FAIL.*$/FAILED: \1/p' "$OUT" | head -6
+FAILED=`grep -c "FAIL" "$OUT"`
+PASSED=`grep -c " ok$" "$OUT"`
+echo "tests: $PASSED ok, $FAILED failed"
 
-echo
-echo "== 3. is it still correct here?"
-python tools/runtests.py
+# The first thing that actually went wrong, in one line.  An exception's
+# last line names the fault; a test's own message names the expectation.
+grep -m1 -E "Error|error:|Traceback" "$OUT" | cut -c1-70
 
-echo
-echo "== 4. how fast is it?"
-echo "   a frame must finish inside 16.67 ms to hold 60 per second"
-python tools/bench.py "$ROM"
-python tools/bench.py "$ROM"
-python tools/bench.py "$ROM"
+grep -o "[0-9.]* fps" "$OUT" | sort -rn | head -1 | sed 's/^/best speed: /'
+grep -o "in [0-9.]*s" "$OUT" | head -1 > /dev/null
 
+echo "-----------------------------------------------"
 echo
-echo "Take the best of the three: a phone shares its cores with everything"
-echo "else running, and the slowest reading measures the neighbours."
-echo
-echo "  under 10 ms   room to spare -- the display, sound and touch controls"
-echo "                still have to fit alongside it"
-echo "  10 to 16 ms   tight; those three will probably push it over"
-echo "  over 16.67 ms optimisation comes before any app work"
+echo "full log: $OUT"
+echo "(that file is in the phone's own storage, so it can be sent"
+echo " by whatever is convenient -- no copying from the terminal)"
