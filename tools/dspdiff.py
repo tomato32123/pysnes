@@ -61,6 +61,19 @@ SCRIPTS = {
                           (30, ADSR0, 0x8F), (30, ADSR1, 0xFF)],
     "kon then koff":     [(0, GAIN, 0x7F), (0, ADSR0, 0x00), (1, KON, 0x01),
                           (40, KOFF, 0x01)],
+    # Everything above plays at 1:1, where the gaussian interpolation has
+    # nothing to interpolate.  A voice at any other rate lands between the
+    # decoded samples on almost every output, which is where the filter
+    # actually does its work -- and where two implementations can agree
+    # perfectly at 1:1 and still disagree.
+    "pitch half":        [(0, GAIN, 0x7F), (0, ADSR0, 0x00),
+                          (0, 0x02, 0x00), (0, 0x03, 0x08), (1, KON, 0x01)],
+    "pitch double":      [(0, GAIN, 0x7F), (0, ADSR0, 0x00),
+                          (0, 0x02, 0x00), (0, 0x03, 0x20), (1, KON, 0x01)],
+    "pitch a sixteenth": [(0, GAIN, 0x7F), (0, ADSR0, 0x00),
+                          (0, 0x02, 0x00), (0, 0x03, 0x01), (1, KON, 0x01)],
+    "pitch awkward":     [(0, GAIN, 0x7F), (0, ADSR0, 0x00),
+                          (0, 0x02, 0x34), (0, 0x03, 0x12), (1, KON, 0x01)],
 }
 
 # One BRR block that loops on itself, so a voice keyed on has something to play

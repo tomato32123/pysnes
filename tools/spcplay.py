@@ -61,8 +61,8 @@ def load(apu, data):
     # tests that check exactly this would then be measuring the loader.
     # $F0-$F3 are the test and control registers and the DSP address;
     # $F8 and $F9 are two spare registers that look like memory and are
-    # not; $FA-$FC are the timers' periods.  $FD-$FF are the timers' outputs and
-    # are read-only, so a dump's values there cannot be put back.
+    # not; $FA-$FC are the timers' periods.  $FD-$FF are the timers'
+    # outputs and are read-only, so a dump's values there cannot be put back.
     for addr in list(range(0xF0, 0xF4)) + [0xF8, 0xF9] + list(range(0xFA, 0xFD)):
         apu.poke_reg(addr, data[OFF_RAM + addr])
     for reg in range(128):
@@ -71,13 +71,21 @@ def load(apu, data):
     state = apu.state_ints()
     state[0], state[1], state[2], state[3], state[4], state[5] = pc, a, x, y, sp, psw
     # $F4-$F7 are two latches each, one per direction.  What a dump holds
-    # there is what the SPC700 reads -- the console's side of the pair --
-    # so it goes into the incoming latches.  Writing the addresses instead
-    # would set the outgoing ones, which is the other direction entirely,
-    # and one of these tests reads the ports before anything else runs.
+    # there is what the SPC700 reads -- the console's side of the pair.
     for i in range(4):
         state[21 + i] = data[OFF_RAM + 0xF4 + i]
     apu.load_ints(state)
+
+    # A limitation worth stating rather than papering over.  Restoring a
+    # dump through register writes cannot reproduce every end state: the
+    # write that starts the timers is also the write that empties the
+    # ports, and the timers' own dividers are not writable at all.  Three
+    # orderings were tried; each satisfied one of the published test dumps
+    # and broke another.  This one satisfies all three, and the cost is
+    # that a dump taken mid-song from a game whose driver waits on a timer
+    # can come up with that timer stopped.  Doing better means setting the
+    # chip's state directly rather than through its registers, which is a
+    # change to the APU rather than to this tool.
 
 
 def samples(apu, seconds):
