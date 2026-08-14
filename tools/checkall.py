@@ -39,6 +39,12 @@ CHECKS = [
     ("DSP against blargg's, by sample",
      [sys.executable, "tools/dspdiff.py",
       os.environ.get("PYSNES_DSPPROBE", "dspprobe-not-built")], True),
+    # A game's own music through both implementations: the SPC700 running
+    # its driver, the timers and the DSP together.  Needs the same player
+    # as above; without it this reports "could not run".
+    ("a game's music, both chips",
+     [sys.executable, "tools/apucompare.py",
+      "/home/moto/Projects/rom/snes/Super_Mario_World_(U)/MARIO.SMC"], True),
     ("SPC7110 cartridge self-test",
      [sys.executable, "tools/spc7110check.py",
       "/home/moto/Projects/rom/snes/Momotarou Dentetsu Happy (Japan)/"

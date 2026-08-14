@@ -63,7 +63,13 @@ def load(apu, data):
     # $F8 and $F9 are two spare registers that look like memory and are
     # not; $FA-$FC are the timers' periods.  $FD-$FF are the timers'
     # outputs and are read-only, so a dump's values there cannot be put back.
-    for addr in list(range(0xF0, 0xF4)) + [0xF8, 0xF9] + list(range(0xFA, 0xFD)):
+    # $F0 is deliberately not restored.  It is a write-only test register --
+    # nothing can read it back, so a dump's byte at that address is whatever
+    # happened to be in the RAM underneath rather than what the register
+    # held.  Writing it turned the timers off in every dump taken from a
+    # game, because that byte was zero and one of its bits has to be set for
+    # a timer to count at all.
+    for addr in list(range(0xF1, 0xF4)) + [0xF8, 0xF9] + list(range(0xFA, 0xFD)):
         apu.poke_reg(addr, data[OFF_RAM + addr])
     for reg in range(128):
         apu.dsp_write(reg, data[OFF_DSP + reg])
@@ -75,6 +81,14 @@ def load(apu, data):
     for i in range(4):
         state[21 + i] = data[OFF_RAM + 0xF4 + i]
     apu.load_ints(state)
+
+    # The timers last, and by setting their state rather than writing the
+    # register that would start them: that write also empties the ports,
+    # and the dividers cannot be written at any address.  Which timers run
+    # is the low three bits of the control register the dump recorded.
+    control = data[OFF_RAM + 0xF1]
+    for i in range(3):
+        apu.poke_timer(i, (control >> i) & 1, data[OFF_RAM + 0xFA + i])
 
     # A limitation worth stating rather than papering over.  Restoring a
     # dump through register writes cannot reproduce every end state: the

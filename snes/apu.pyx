@@ -2206,6 +2206,25 @@ cdef class APU:
         """
         self.write(<uint16_t>(addr & 0xFFFF), <uint8_t>(value & 0xFF))
 
+    def poke_timer(self, int which, int enabled, int target):
+        """Put a timer into the state it has just after being switched on.
+
+        Restoring a saved chip cannot go through its registers alone: the
+        write that starts the timers is the same write that empties the
+        ports, and a timer's divider is not writable at any address.  So
+        this sets the state instead of applying a stimulus -- enabled or
+        not, the period, and the divider and stage at the phase a fresh
+        start gives them.  It is what an SPC dump needs and what no
+        sequence of register writes can produce.
+        """
+        if which < 0 or which > 2:
+            return
+        self.timer_enabled[which] = 1 if enabled else 0
+        self.timer_target[which] = target & 0xFF
+        self.timer_div[which] = 0
+        self.timer_stage[which] = 0
+        self.timer_counter[which] = 0
+
     def dsp_write(self, int addr, int value):
         self.dsp.write_reg(<uint8_t>addr, <uint8_t>value)
 
