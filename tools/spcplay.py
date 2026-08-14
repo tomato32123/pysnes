@@ -60,9 +60,10 @@ def load(apu, data):
     # addresses would leave the timers stopped and the ports empty, and the
     # tests that check exactly this would then be measuring the loader.
     # $F0-$F3 are the test and control registers and the DSP address;
-    # $FA-$FC are the timers' periods.  $FD-$FF are the timers' outputs and
+    # $F8 and $F9 are two spare registers that look like memory and are
+    # not; $FA-$FC are the timers' periods.  $FD-$FF are the timers' outputs and
     # are read-only, so a dump's values there cannot be put back.
-    for addr in list(range(0xF0, 0xF4)) + list(range(0xFA, 0xFD)):
+    for addr in list(range(0xF0, 0xF4)) + [0xF8, 0xF9] + list(range(0xFA, 0xFD)):
         apu.poke_reg(addr, data[OFF_RAM + addr])
     for reg in range(128):
         apu.dsp_write(reg, data[OFF_DSP + reg])
@@ -121,7 +122,11 @@ def pitch(burst):
     return crossings * SAMPLE_RATE / (2.0 * max(1, len(burst)))
 
 
-def listen(path, seconds=3.0):
+def listen(path, seconds=8.0):
+    # Long enough for the one that fills every byte of RAM before it says
+    # anything: at three seconds it had not finished and looked silent,
+    # which is a good reminder that "said nothing" and "failed" are
+    # different answers.
     apu = APU()
     with open(path, "rb") as fh:
         data = fh.read()
