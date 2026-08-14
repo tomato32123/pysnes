@@ -30,6 +30,7 @@ map-21 one, with bit 7 of the status register saying a transfer may
 happen.
 """
 from libc.stdint cimport uint8_t, uint16_t, uint32_t, int64_t
+from libc.math cimport sin, cos, sqrt, atan2, M_PI
 from libc.string cimport memset
 
 from snes.board cimport Board, PK_OPENBUS, PK_ROM, PK_SRAM, PK_DEVICE
@@ -77,6 +78,76 @@ def find_firmware(names):
 cdef uint8_t SR_READY = 0x80
 
 
+# How many bytes each command takes and gives back.  The chip answers a
+# fixed shape per command -- so much written, so much read -- and getting
+# that shape right is what keeps a game in step even before the arithmetic
+# behind any of it is written.  The counts are from the dispatch table
+# Snes9x's DSP-1 emulation uses, which is the published account of what
+# these commands look like from the console's side.  Several numbers are
+# aliases of one command, which is why the table is listed out in full.
+cdef int CMD_PARAMS[256]
+cdef int CMD_RESULTS[256]
+
+
+cdef void _fill_commands() noexcept:
+    cdef int i
+    for i in range(256):
+        CMD_PARAMS[i] = -1
+        CMD_RESULTS[i] = 0
+
+
+def _describe():
+    """(command, name, parameters, results) for everything known."""
+    return [(c, n, CMD_PARAMS[c], CMD_RESULTS[c])
+            for c, n in sorted(_COMMANDS.items())]
+
+
+# command: (name, parameter bytes, result bytes)
+_COMMANDS = {
+    0x00: ("multiply", 4, 2),          0x20: ("multiply", 4, 2),
+    0x10: ("inverse", 4, 4),           0x30: ("inverse", 4, 4),
+    0x04: ("sin/cos", 4, 4),           0x24: ("sin/cos", 4, 4),
+    0x08: ("radius", 6, 4),
+    0x18: ("range", 8, 2),             0x38: ("range", 8, 2),
+    0x28: ("distance", 6, 2),
+    0x0C: ("rotate", 6, 4),            0x2C: ("rotate", 6, 4),
+    0x1C: ("polar rotate", 12, 6),     0x3C: ("polar rotate", 12, 6),
+    0x02: ("projection", 14, 8),       0x12: ("projection", 14, 8),
+    0x22: ("projection", 14, 8),       0x32: ("projection", 14, 8),
+    0x0A: ("raster", 2, 8),            0x1A: ("raster", 2, 8),
+    0x2A: ("raster", 2, 8),            0x3A: ("raster", 2, 8),
+    0x06: ("project object", 6, 6),    0x16: ("project object", 6, 6),
+    0x26: ("project object", 6, 6),    0x36: ("project object", 6, 6),
+    0x0E: ("target", 4, 4),            0x1E: ("target", 4, 4),
+    0x2E: ("target", 4, 4),            0x3E: ("target", 4, 4),
+    0x01: ("attitude a", 8, 0),        0x05: ("attitude a", 8, 0),
+    0x31: ("attitude a", 8, 0),        0x35: ("attitude a", 8, 0),
+    0x11: ("attitude b", 8, 0),        0x15: ("attitude b", 8, 0),
+    0x21: ("attitude c", 8, 0),        0x25: ("attitude c", 8, 0),
+    0x0D: ("objective a", 6, 6),       0x09: ("objective a", 6, 6),
+    0x39: ("objective a", 6, 6),       0x3D: ("objective a", 6, 6),
+    0x1D: ("objective b", 6, 6),       0x19: ("objective b", 6, 6),
+    0x2D: ("objective c", 6, 6),       0x29: ("objective c", 6, 6),
+    0x03: ("subjective a", 6, 6),      0x33: ("subjective a", 6, 6),
+    0x13: ("subjective b", 6, 6),
+    0x23: ("subjective c", 6, 6),
+    0x0B: ("dot product a", 6, 2),     0x3B: ("dot product a", 6, 2),
+    0x1B: ("dot product b", 6, 2),
+    0x2B: ("dot product c", 6, 2),
+    0x14: ("angle transform", 12, 6),  0x34: ("angle transform", 12, 6),
+    0x0F: ("ram test", 2, 2),          0x07: ("ram test", 2, 2),
+    0x2F: ("rom test", 2, 2),          0x27: ("rom test", 2, 2),
+    0x1F: ("rom dump", 2, 2048),
+    0x80: ("idle", 0, 0),
+}
+
+_fill_commands()
+for _c, (_n, _p, _r) in _COMMANDS.items():
+    CMD_PARAMS[_c] = _p
+    CMD_RESULTS[_c] = _r
+
+
+
 cdef class DSP1(Board):
 
     def __cinit__(self, Cart cart):
@@ -97,7 +168,7 @@ cdef class DSP1(Board):
             self.core = core
             self.name = u"DSP-1 (%s)" % name
         else:
-            self.name = u"DSP-1 (no firmware: answers nothing)"
+            self.name = u"DSP-1 (HLE, no firmware)"
         self.reset_board()
 
     cdef void reset_board(self) noexcept:
@@ -206,16 +277,28 @@ cdef class DSP1(Board):
         self._note(0, value)
         if not self.have_command:
             self.command = value
-            self.have_command = 1
+            self.param_want = CMD_PARAMS[value]
             self.param_len = 0
             self.result_len = 0
             self.result_pos = 0
-            self._dispatch()
+            if self.param_want <= 0:
+                # An unknown command has no shape to follow, so the
+                # exchange ends there and it is counted.  Guessing a length
+                # would put the console out of step with the chip, which is
+                # worse than answering nothing.
+                if self.param_want < 0:
+                    self.unknown_count += 1
+                else:
+                    self._dispatch()
+                return
+            self.have_command = 1
             return
         if self.param_len < 32:
             self.params[self.param_len] = value
-            self.param_len += 1
-        self._dispatch()
+        self.param_len += 1
+        if self.param_len >= self.param_want:
+            self.have_command = 0
+            self._dispatch()
 
     cdef void _note(self, uint8_t kind, uint8_t value) noexcept:
         if self.trace_len < 16384:
@@ -223,15 +306,71 @@ cdef class DSP1(Board):
             self.trace_value[self.trace_len] = value
             self.trace_len += 1
 
-    cdef void _dispatch(self) noexcept:
-        """Answer the command once its parameters have all arrived.
+    cdef int _p16(self, int i) noexcept:
+        """Parameter word i.  The console writes each word low byte first."""
+        cdef int v = self.params[i * 2] | (<int>self.params[i * 2 + 1] << 8)
+        return v - 0x10000 if v & 0x8000 else v
 
-        Nothing is implemented yet: every command is counted as unknown and
-        the exchange ends, so a game runs on and the trace says what it
-        wanted.  Commands are added here one at a time, each against its
-        published description.
+    cdef void _r16(self, int i, int value) noexcept:
+        self.result[i * 2] = <uint8_t>(value & 0xFF)
+        self.result[i * 2 + 1] = <uint8_t>((value >> 8) & 0xFF)
+
+    cdef void _dispatch(self) noexcept:
+        """Answer a command whose parameters have all arrived.
+
+        The shape is right -- the console writes what the command takes and
+        reads back what it gives -- so a game stays in step with the chip
+        even where the arithmetic behind a command is not written.  What it
+        reads is zero, which is wrong, and the count says how often.  A
+        wrong answer that keeps the protocol is a better place to build
+        from than a right-looking one that loses it.
         """
-        self.unknown_count += 1
+        cdef int i
+        cdef int cmd = self.command & 0x3F
+        cdef double angle, radius, x, y, z, length
+        cdef int want = CMD_RESULTS[self.command]
+        self.result_len = want if want <= 32 else 32
+        self.result_pos = 0
+        for i in range(self.result_len):
+            self.result[i] = 0
+
+        if cmd == 0x00 or cmd == 0x20:
+            # Two signed words multiplied, the product taken from the top:
+            # this is fixed point with fifteen bits after the point, which
+            # is the form everything else on this chip works in.
+            self._r16(0, (self._p16(0) * self._p16(1)) >> 15)
+        elif cmd == 0x0F or cmd == 0x07:
+            self._r16(0, 0)                  # the RAM is well: it always is
+        elif cmd == 0x27 or cmd == 0x2F:
+            self._r16(0, 0x0100)             # what the ROM check answers
+        elif cmd == 0x04 or cmd == 0x24:
+            # An angle and a radius in, the two components out.  A whole
+            # turn is 65536, and everything is fifteen bits after the point.
+            angle = self._p16(0) * 2.0 * M_PI / 65536.0
+            radius = self._p16(1)
+            self._r16(0, <int>(radius * sin(angle)))
+            self._r16(1, <int>(radius * cos(angle)))
+        elif cmd == 0x0C or cmd == 0x2C:
+            # Turn a point about the origin.
+            angle = self._p16(0) * 2.0 * M_PI / 65536.0
+            x = self._p16(1)
+            y = self._p16(2)
+            self._r16(0, <int>(x * cos(angle) - y * sin(angle)))
+            self._r16(1, <int>(x * sin(angle) + y * cos(angle)))
+        elif cmd == 0x08 or cmd == 0x28:
+            # The length of a three-dimensional vector.  Radius answers in
+            # two words and distance in one, but the sum is the same.
+            x = self._p16(0)
+            y = self._p16(1)
+            z = self._p16(2)
+            length = sqrt(x * x + y * y + z * z)
+            self._r16(0, <int>length)
+        elif cmd == 0x80:
+            pass                             # idle
+        else:
+            # The shape is right and the answer is not.  Counted, so that
+            # "it draws something" is never mistaken for "it is emulated".
+            self.uncomputed[self.command] += 1
         self.have_command = 0
 
     # =====================================================================
@@ -247,6 +386,11 @@ cdef class DSP1(Board):
     @property
     def unimplemented(self):
         return self.unknown_count
+
+    @property
+    def commands_used(self):
+        """{command byte: how often it was asked for and not computed}."""
+        return {c: self.uncomputed[c] for c in range(256) if self.uncomputed[c]}
 
     def state_ints(self):
         return [self.sr, self.command, self.have_command, self.param_len,

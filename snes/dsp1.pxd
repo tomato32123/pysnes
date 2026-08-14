@@ -39,7 +39,10 @@ cdef class DSP1(Board):
     cdef uint8_t trace_value[16384]
     cdef int trace_len
     cdef uint32_t unknown_count
+    cdef uint32_t uncomputed[256]   # per command, how often its answer was faked
 
+    cdef int _p16(self, int i) noexcept
+    cdef void _r16(self, int i, int value) noexcept
     cdef void _dispatch(self) noexcept
     cdef void _note(self, uint8_t kind, uint8_t value) noexcept
     cdef int _is_status(self, uint32_t addr) noexcept
