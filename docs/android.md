@@ -3,6 +3,29 @@
 Investigated, then shelved. Recording what was found so the next attempt does
 not have to rediscover it.
 
+## This file is partly about a machine that is no longer the one
+
+Everything under "The blocker" below describes a Windows machine whose WSL2
+would not start because VT-x was off in its firmware.  The project now lives
+on Linux, where python-for-android and Buildozer run directly, so **that
+blocker does not exist here**.  It is left in place because the machine may
+come back, but nobody should go hunting for a BIOS setting on this one.
+
+What is actually in the way now, in order:
+
+1. **Speed, and it is unmeasured.**  The core runs a frame in 4.70 ms here --
+   212 fps, three and a half times the budget -- on a desktop x86.  A phone's
+   single-core performance on this kind of work is commonly several times
+   lower, which would put a frame at 16-24 ms and the emulator at or below
+   the 60 Hz line.  Nothing about that is known: no ARM measurement has been
+   taken.  It should be the first thing done, because if the answer is bad
+   then optimisation comes before any app work, and packaging first would be
+   wasted.
+2. **There is no app.**  What exists is the emulator.  Display, sound, touch
+   controls, ROM handling, save-state UI and packaging are all absent.
+3. **Six coprocessors still want firmware**, so the DSP-series titles --
+   Super Mario Kart among them -- do not play correctly wherever this runs.
+
 ## The blocker
 
 Building for Android means cross-compiling the Cython cores for `arm64-v8a`,
