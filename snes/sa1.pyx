@@ -477,6 +477,14 @@ cdef class SA1(Board):
                 # Coming out of reset: start at the vector the console left
                 # in $2203, not at the cartridge's own reset vector.
                 self.stopped = 0
+                # The SA-1's stack pointer does not survive its reset.  Its
+                # cartridge sets a different one immediately before rebooting
+                # the chip and reads the same $01FC back afterwards as it did
+                # at power-up, which it could not if the old value were kept
+                # and merely lowered.  So the chip restores the top of the
+                # page, and the reset's three discarded reads take it from
+                # there.
+                self.cpu.s = 0x01FF
                 self.cpu.reset()
                 self.cpu.pc = self.crv
                 self.cpu.pb = 0

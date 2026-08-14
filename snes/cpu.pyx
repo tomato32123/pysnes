@@ -62,7 +62,14 @@ cdef class CPU:
         self.a = 0
         self.x = 0
         self.y = 0
-        self.s = 0x01FF
+        # Reset reads three bytes off the stack and throws them away, so the
+        # pointer comes out three lower than it went in, in the first page.
+        # absindx's cartridge samples it before touching the stack at all and
+        # its Super Famicom reads $01FD, which is what a pointer of zero
+        # becomes.  Its SA-1 reads $01FC, one lower, because that processor
+        # had a different value in it before the console reset it -- power-up
+        # state, not a rule, so it is not reproduced here.
+        self.s = 0x0100 | ((self.s - 3) & 0xFF)
         self.d = 0
         self.db = 0
         self.pb = 0
