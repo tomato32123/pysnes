@@ -936,6 +936,61 @@ right. Three of the ROMs are marked "(does not glitch)" and we agree with all
 three, because we never glitch — which is a defensible model of a 40%
 phenomenon, and an honest one as long as it is written down.
 
+## The day the library was read
+
+Twelve defects were found and fixed in one day, and not one of them was
+found by fetching something new.  Every one came from something already
+on this machine that had been saying the same thing for months.
+
+  * A 65C816 test ROM in the library prints "Running tests... Failed" and
+    a number.  It said 27.  It had been recorded as "flat" by the batch
+    runner -- which is what white text on black looks like when you count
+    colours -- and never read.  Five defects came out of it, four in
+    emulation mode: the pointer wrap of (dp,X) with a non-zero DL, the
+    straight-through pointer fetches of [dp] and PEI, the B flag COP
+    pushes, and the family of stack instructions the 65816 added, which
+    work on all sixteen bits of S while they run.  It now prints Success,
+    all 1610 tests.
+  * The same author's SPC700 ROM sat beside it, equally unread, failing
+    on a divide by zero.  DIV was special-casing a zero divisor; the
+    hardware has no such case.  1319 tests, all passing now.
+  * Tengai Makyou Zero carries a self-test written by whoever built the
+    cartridge, reachable past the corrupt-save prompt the library run had
+    been recording as "flat".  It printed `RTC TIME  NG`.  Reading the
+    exchange it performs said why: it writes 23:59:59 on 31 December '99
+    with weekday 6 and wants the roll across midnight, month, year and
+    century back with the weekday carried by one.  Three separate
+    mistakes, each of a different kind.  It prints `ALL OK` now.
+  * Jonas Quinn's mul_behavior said the multiplier was not a multiplier:
+    it is a shift-and-add over eight steps, a write during a run clears
+    what has accumulated, and the second operand ends up in the division
+    registers.  His notes beside the ROM contain the algorithm.
+  * A proof about colour maths, measured on a console with a copier, sat
+    beside its own answer and two captures.  We are on the right side of
+    it; nobody had checked.
+  * absindx's SA-1 register dump showed $230E answering an invented
+    revision number where a cartridge reads open bus.
+
+What the day cost, in the end, was not documentation and not technique.
+It was the habit of reading what is already answering.  Three tools came
+out of that: `verdicts.py`, which boots every test ROM, presses a button
+in case it is waiting for one, and reads its screen back as text --
+reporting "nothing readable" rather than "fine" for a screen it cannot
+turn into words; `cputest.py`, which keeps the two instruction-set ROMs
+read; and `checkall.py`, which runs every oracle here in one command and
+keeps three outcomes apart rather than two: passed, failed, and could not
+run.  The third is not a pass.
+
+One thing was also *not* done, twice, and that matters as much.  The
+mode 7 commands of the DSP-1 are answered by geometry worked out here
+because their scaling is not published, and three attempts produced three
+different wrong pictures; iterating until one looked like a road would
+have been fitting a guess to a screenshot.  And an unattributed note
+disagrees with the SNESdev wiki about what the object interlace bit does
+to sprite sizes, in cases no reference picture covers; the behaviour that
+matches a reference stayed, and the disagreement was written down instead
+of decided.
+
 ## How to verify anything here
 
 ```
