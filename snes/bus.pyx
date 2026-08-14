@@ -957,6 +957,14 @@ cdef class Bus:
             at = line_start
         elif self.irq_mode == 1:                     # H match, every line
             at = line_start + <int64_t>self.htime * 4
+            # A dot already gone does not come back on this line.  The compare
+            # runs with the counter, so a program that asks for dot 85 while
+            # the beam is at dot 140 is answered at dot 85 of the next line,
+            # not at once.  Firing at once put the handler 180 dots from where
+            # it expected to be, which is fatal to a program whose method is
+            # to read the counter and index a jump table with it.
+            if at < self.master_clock:
+                at += self._line_length()
         else:                                        # H and V
             if self.vcount != self.vtime:
                 return
