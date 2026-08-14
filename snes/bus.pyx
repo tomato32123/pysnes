@@ -168,6 +168,9 @@ cdef class Bus:
         self.div_b = 0xFF
         self.rd_div = 0
         self.rd_mpy = 0
+        self.mul_shifter = 0
+        self.mul_steps = 0
+        self.mul_clock = 0
         self.wram_addr = 0
 
         self.auto_joypad = 0
@@ -201,6 +204,36 @@ cdef class Bus:
     # =====================================================================
     # access speed
     # =====================================================================
+
+    cdef void mul_catch_up(self) noexcept:
+        """Run the multiplier forward to now.
+
+        It is a shift-and-add over eight steps rather than a product that
+        appears at once: each step adds the shifted second operand if the
+        low bit of the first is set, then moves both along.  Jonas Quinn's
+        notes for these test ROMs describe it that way, and the arithmetic
+        agrees -- $A3 times $81 comes out $5223 step by step, and a run cut
+        short after the fourth step leaves $50A0, which is what his test 7
+        asks for.
+        """
+        cdef int64_t elapsed
+        cdef int steps
+        if not self.mul_steps:
+            return
+        elapsed = self.master_clock - self.mul_clock
+        steps = <int>(elapsed / 6)
+        if steps <= 0:
+            return
+        if steps > self.mul_steps:
+            steps = self.mul_steps
+        self.mul_clock += <int64_t>steps * 6
+        while steps > 0:
+            if self.rd_div & 1:
+                self.rd_mpy = <uint16_t>(self.rd_mpy + self.mul_shifter)
+            self.mul_shifter = <uint16_t>(self.mul_shifter << 1)
+            self.rd_div = self.rd_div >> 1
+            self.mul_steps -= 1
+            steps -= 1
 
     cdef uint32_t speed(self, uint32_t addr) noexcept:
         cdef uint32_t bank = (addr >> 16) & 0xFF
@@ -339,12 +372,16 @@ cdef class Bus:
         if a == 0x4213:
             return self.wrio
         if a == 0x4214:
+            self.mul_catch_up()
             return <uint8_t>(self.rd_div & 0xFF)
         if a == 0x4215:
+            self.mul_catch_up()
             return <uint8_t>(self.rd_div >> 8)
         if a == 0x4216:
+            self.mul_catch_up()
             return <uint8_t>(self.rd_mpy & 0xFF)
         if a == 0x4217:
+            self.mul_catch_up()
             return <uint8_t>(self.rd_mpy >> 8)
         if 0x4218 <= a <= 0x421F:
             ch = (a - 0x4218) >> 1
@@ -457,8 +494,26 @@ cdef class Bus:
             self.mul_a = value
             return
         if a == 0x4203:
+            self.mul_catch_up()
             self.mul_b = value
-            self.rd_mpy = <uint16_t>(<uint32_t>self.mul_a * <uint32_t>value)
+            if self.mul_steps:
+                # A write while one is running clears what has been
+                # accumulated and is otherwise ignored -- the value written
+                # does not become an operand and the run carries on.  What
+                # comes out is the second half of the sum on its own, which
+                # is how mul_behavior's tests 7 and 8 tell the difference.
+                self.rd_mpy = 0
+                return
+            # One unit does both sums, and starting a multiply loads the
+            # division's registers with the operands: A where a quotient's
+            # low byte goes and B where its high byte does.  Eight steps
+            # later the shifting has moved B down into the low byte, which
+            # is what "RDDIVL should hold RDMPYB after multiply" means.
+            self.rd_div = (<uint16_t>value << 8) | self.mul_a
+            self.mul_shifter = value
+            self.rd_mpy = 0
+            self.mul_steps = 8
+            self.mul_clock = self.master_clock
             return
         if a == 0x4204:
             self.div_a = (self.div_a & 0xFF00) | value
@@ -467,6 +522,7 @@ cdef class Bus:
             self.div_a = (self.div_a & 0x00FF) | (<uint16_t>value << 8)
             return
         if a == 0x4206:
+            self.mul_steps = 0            # a divide takes the unit over
             self.div_b = value
             if value == 0:
                 self.rd_div = 0xFFFF

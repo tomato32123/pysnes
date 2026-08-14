@@ -57,6 +57,13 @@ cdef class Bus(AddressSpace):
     cdef uint16_t div_a
     cdef uint8_t div_b
     cdef uint16_t rd_div, rd_mpy
+    # The multiplier is a shift-and-add that takes eight steps rather than
+    # happening at once, and a game can look at it or disturb it part way.
+    cdef uint16_t mul_shifter
+    cdef int mul_steps               # steps still to run
+    cdef int64_t mul_clock           # master clock the last step ran at
+
+    cdef void mul_catch_up(self) noexcept
     cdef uint32_t wram_addr          # $2181-$2183 port
 
     # -- joypads -----------------------------------------------------------
