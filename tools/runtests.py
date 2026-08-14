@@ -41,6 +41,13 @@ CAUSES = [
      "the compiled cores are missing -- run: python build.py"),
     (r"No module named '(\w+)'",
      "a package is not installed here: %s"),
+    (r"not accessible for the namespace",
+     "Android refuses to load a compiled library from shared storage.\n"
+     "         The build worked; the .so simply cannot be opened from where it\n"
+     "         is.  Copy the project into Termux's own home and run it there:\n"
+     "           cp -r . ~/pysnes && cd ~/pysnes && python tools/runtests.py\n"
+     "         The ROM can stay where it is -- only compiled libraries are\n"
+     "         refused, not data."),
     (r"undefined symbol|cannot open shared object|wrong ELF class",
      "the built cores do not match this Python -- delete snes/*.so and rebuild"),
     (r"No such file or directory: .*\.(smc|sfc|bin|rom)",

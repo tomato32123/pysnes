@@ -23,6 +23,27 @@ if [ -z "$ROM" ]; then
     exit 1
 fi
 
+# Android will not open a compiled library that lives on shared storage, so
+# a build done there succeeds and then nothing can import it -- ten minutes
+# of compiling followed by every test failing for a reason that has nothing
+# to do with the emulator.  Said here, before the ten minutes.
+case "`pwd`" in
+    /storage/*|/sdcard/*|/mnt/*)
+        echo "This copy is on shared storage.  Android will not load a"
+        echo "compiled library from here: the build would work and every"
+        echo "test would then fail to import it."
+        echo
+        echo "Move it to Termux's own home first, which has no such rule:"
+        echo
+        echo "    cp -r \"`pwd`\" ~/pysnes"
+        echo "    cd ~/pysnes"
+        echo "    sh tools/armcheck.sh $ROM"
+        echo
+        echo "The ROM can stay where it is -- only compiled libraries are"
+        echo "refused, not data files."
+        exit 1 ;;
+esac
+
 {
     echo "== machine"
     uname -m
