@@ -40,9 +40,18 @@ cdef class DSP1(Board):
     cdef int trace_len
     cdef uint32_t unknown_count
     cdef uint32_t uncomputed[256]   # per command, how often its answer was faked
+    cdef uint32_t approximated[256] # per command, how often it was answered by guesswork
+
+    # The view the projection commands work in, set by command $02.
+    cdef double view_fx, view_fy, view_fz
+    cdef double view_lfe, view_les
+    cdef double view_aas, view_azs
+    cdef double view_vof, view_vva
+    cdef int raster_line
 
     cdef int _p16(self, int i) noexcept
     cdef void _r16(self, int i, int value) noexcept
+    cdef void _raster_row(self) noexcept
     cdef void _dispatch(self) noexcept
     cdef void _note(self, uint8_t kind, uint8_t value) noexcept
     cdef int _is_status(self, uint32_t addr) noexcept

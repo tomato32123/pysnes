@@ -181,6 +181,16 @@ cdef class DSP1(Board):
         self.result_pos = 0
         self.trace_len = 0
         self.unknown_count = 0
+        self.view_fx = 0.0
+        self.view_fy = 0.0
+        self.view_fz = 0.0
+        self.view_lfe = 0.0
+        self.view_les = 0.0
+        self.view_aas = 0.0
+        self.view_azs = 0.0
+        self.view_vof = 0.0
+        self.view_vva = 1.0
+        self.raster_line = 0
 
     # =====================================================================
     # the map
@@ -315,6 +325,31 @@ cdef class DSP1(Board):
         self.result[i * 2] = <uint8_t>(value & 0xFF)
         self.result[i * 2 + 1] = <uint8_t>((value >> 8) & 0xFF)
 
+    cdef void _raster_row(self) noexcept:
+        """The four mode 7 coefficients for the line the counter is on.
+
+        The published fragments of this one give its shape: the line is
+        taken through the tilt and added to the horizon to get a divisor,
+        the reciprocal of that is taken with seven bits of headroom, and
+        the heading turns the result.  A ground plane seen in perspective
+        scales by how far the line is from the horizon, which is what the
+        reciprocal is doing.
+        """
+        cdef double divisor = (self.raster_line * sin(self.view_azs)) + self.view_vof
+        cdef double scale
+        if divisor > -1.0 and divisor < 1.0:
+            divisor = 1.0
+        scale = (self.view_vva * 128.0) / divisor
+        if scale > 32767.0:
+            scale = 32767.0
+        elif scale < -32768.0:
+            scale = -32768.0
+        self._r16(0, <int>(scale * cos(self.view_aas)))
+        self._r16(1, <int>(scale * sin(self.view_aas)))
+        self._r16(2, <int>(-scale * sin(self.view_aas)))
+        self._r16(3, <int>(scale * cos(self.view_aas)))
+        self.raster_line += 1
+
     cdef void _dispatch(self) noexcept:
         """Answer a command whose parameters have all arrived.
 
@@ -365,6 +400,58 @@ cdef class DSP1(Board):
             z = self._p16(2)
             length = sqrt(x * x + y * y + z * z)
             self._r16(0, <int>length)
+        elif cmd == 0x02 or cmd == 0x12 or cmd == 0x22 or cmd == 0x32:
+            # Set up the view the other two work in.  What the parameters
+            # are is published -- the focal point, the distance to the
+            # projection plane, the distance to the centre of the screen,
+            # and the two angles -- and what comes back is the raster the
+            # centre falls on, a vertical scale, and the centre in the
+            # world.  How those are scaled is not published, and what is
+            # written here is a perspective worked out from the geometry
+            # rather than a measurement of the chip.  See the note on
+            # `approximated`.
+            self.view_fx = self._p16(0)
+            self.view_fy = self._p16(1)
+            self.view_fz = self._p16(2)
+            self.view_lfe = self._p16(3)
+            self.view_les = self._p16(4)
+            self.view_aas = self._p16(5) * 2.0 * M_PI / 65536.0
+            self.view_azs = self._p16(6) * 2.0 * M_PI / 65536.0
+            # Everything on this chip is a signed sixteen-bit fraction with
+            # fifteen bits after the point, and every product is taken back
+            # to that form by dropping fifteen bits.  The distance to the
+            # centre of the screen through the tilt is what sets where the
+            # horizon lands.
+            self.view_vof = (self.view_les * cos(self.view_azs))
+            self.view_vva = self.view_lfe
+            self._r16(0, <int>self.view_vof)
+            self._r16(1, <int>self.view_vva)
+            self._r16(2, <int>self.view_fx)
+            self._r16(3, <int>self.view_fy)
+            self.raster_line = 0
+            self.approximated[self.command] += 1
+        elif cmd == 0x0A or cmd == 0x1A or cmd == 0x2A or cmd == 0x3A:
+            # One scanline's worth of the mode 7 matrix, and the line
+            # counts on by itself so a game can read the whole screen out
+            # in one exchange.
+            if self.param_len >= 2:
+                self.raster_line = self._p16(0)
+            self._raster_row()
+            self.approximated[self.command] += 1
+        elif cmd == 0x06 or cmd == 0x16 or cmd == 0x26 or cmd == 0x36:
+            # A point in the world to a place on the screen, with how big
+            # it should be drawn.
+            x = self._p16(0) - self.view_fx
+            y = self._p16(1) - self.view_fy
+            z = self._p16(2) - self.view_fz
+            length = x * sin(-self.view_aas) + y * cos(-self.view_aas)
+            angle = x * cos(-self.view_aas) - y * sin(-self.view_aas)
+            if length < 1.0:
+                length = 1.0
+            self._r16(0, <int>(angle * self.view_lfe / length))
+            self._r16(1, <int>(self.view_vof + z * self.view_lfe / length))
+            self._r16(2, <int>(self.view_lfe * 128.0 / length))
+            self.approximated[self.command] += 1
         elif cmd == 0x80:
             pass                             # idle
         else:
@@ -386,6 +473,18 @@ cdef class DSP1(Board):
     @property
     def unimplemented(self):
         return self.unknown_count
+
+    @property
+    def commands_guessed(self):
+        """{command: how often it was answered by geometry rather than by
+        the chip's own arithmetic}.
+
+        These are the ones where the published account says what goes in
+        and what comes out but not how it is scaled, so what is here is a
+        perspective worked out from the shape of the problem.  A picture
+        drawn from them is not evidence that they are right.
+        """
+        return {c: self.approximated[c] for c in range(256) if self.approximated[c]}
 
     @property
     def commands_used(self):
