@@ -33,6 +33,12 @@ CHECKS = [
     ("VRAM address remapping", [sys.executable, "tools/vmaintest.py"], True),
     ("SPC dumps, by ear", [sys.executable, "tools/spcplay.py"], True),
     ("interrupt timing after DMA", [sys.executable, "tools/dmairqtest.py"], True),
+    # The DSP against blargg's own implementation, sample by sample.  The
+    # probe is built from his library rather than kept here; without it this
+    # reports "could not run", which is not a pass.
+    ("DSP against blargg's, by sample",
+     [sys.executable, "tools/dspdiff.py",
+      os.environ.get("PYSNES_DSPPROBE", "dspprobe-not-built")], True),
     ("SPC7110 cartridge self-test",
      [sys.executable, "tools/spc7110check.py",
       "/home/moto/Projects/rom/snes/Momotarou Dentetsu Happy (Japan)/"
