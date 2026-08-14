@@ -2195,6 +2195,17 @@ cdef class APU:
         for i in range(len(data)):
             self.ram[(addr + i) & 0xFFFF] = data[i]
 
+    def poke_reg(self, int addr, int value):
+        """Write an address the way the processor itself would.
+
+        $F0-$FF are registers rather than memory -- the timers, the test
+        register, the port latches -- so restoring a saved state into them
+        means writing them, not filling RAM at those addresses.  Tooling
+        that loads an SPC dump needs this; poking RAM there would leave the
+        timers stopped and the ports empty.
+        """
+        self.write(<uint16_t>(addr & 0xFFFF), <uint8_t>(value & 0xFF))
+
     def dsp_write(self, int addr, int value):
         self.dsp.write_reg(<uint8_t>addr, <uint8_t>value)
 
