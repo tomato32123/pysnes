@@ -1536,11 +1536,11 @@ cdef class CPU:
 
     def state_ints(self):
         cdef int i, j
-        v = [self.a, self.x, self.y, self.s, self.d, self.pc, self.db, self.pb, self.p, self.e, self.stopped, self.waiting, self.ea_wrap, self.instructions]
+        v = [self.a, self.x, self.y, self.s, self.d, self.pc, self.db, self.pb, self.p, self.e, self.stopped, self.waiting, self.ea_wrap, self.instructions, self.take_nmi, self.take_irq]
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 14
+        cdef int i, j, k = 16
         self.a = v[0]
         self.x = v[1]
         self.y = v[2]
@@ -1555,6 +1555,8 @@ cdef class CPU:
         self.waiting = v[11]
         self.ea_wrap = v[12]
         self.instructions = v[13]
+        self.take_nmi = v[14]
+        self.take_irq = v[15]
 
     def state_blobs(self):
         return []

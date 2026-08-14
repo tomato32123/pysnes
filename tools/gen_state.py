@@ -18,7 +18,11 @@ SPECS = [
         marker="    # =====================================================================\n"
                "    # python interface",
         scalars=["a", "x", "y", "s", "d", "pc", "db", "pb", "p", "e",
-                 "stopped", "waiting", "ea_wrap", "instructions"],
+                 "stopped", "waiting", "ea_wrap", "instructions",
+                 # The interrupt decision is latched a cycle before an
+                 # instruction ends, so a state saved between the latch and
+                 # the boundary has to carry it or the interrupt is lost.
+                 "take_nmi", "take_irq"],
         arrays=[], arrays2=[], blobs=[],
     ),
     dict(
@@ -26,6 +30,9 @@ SPECS = [
         marker="    # =====================================================================\n"
                "    # python interface",
         scalars=["mdr", "master_clock", "hcount", "line_start", "next_event",
+                 # A multiply takes eight steps, so a state saved during one
+                 # must carry how far it got.
+                 "mul_shifter", "mul_steps", "mul_clock",
                  "vcount", "field", "frame",
                  "frame_ready", "ticking", "lines_per_frame", "vblank_start",
                  "nmi_enabled", "nmi_flag", "nmi_pending", "irq_mode", "irq_flag",
@@ -132,8 +139,11 @@ SPECS = [
     dict(
         module='spc7110', cls='SPC7110',
         marker="    # -- introspection ---",
-        scalars=['prom_size', 'drom_base', 'drom_size', 'r4801', 'r4802', 'r4803', 'r4804', 'r4805', 'r4806', 'r4807', 'r4809', 'r480a', 'r480b', 'r480c', 'dcu_mode', 'dcu_address', 'dcu_offset', 'r4810', 'r4811', 'r4812', 'r4813', 'r4814', 'r4815', 'r4816', 'r4817', 'r4818', 'r481a', 'r4820', 'r4821', 'r4822', 'r4823', 'r4824', 'r4825', 'r4826', 'r4827', 'r4828', 'r4829', 'r482a', 'r482b', 'r482c', 'r482d', 'r482e', 'r482f', 'r4830', 'r4831', 'r4832', 'r4833', 'r4834', 'bpp', 'offset', 'bits', 'range_', 'input_', 'output', 'pixels', 'colormap', 'result'],
-        arrays=[('dcu_tile', 32)],
+        scalars=['prom_size', 'drom_base', 'drom_size', 'r4801', 'r4802', 'r4803', 'r4804', 'r4805', 'r4806', 'r4807', 'r4809', 'r480a', 'r480b', 'r480c', 'dcu_mode', 'dcu_address', 'dcu_offset', 'r4810', 'r4811', 'r4812', 'r4813', 'r4814', 'r4815', 'r4816', 'r4817', 'r4818', 'r481a', 'r4820', 'r4821', 'r4822', 'r4823', 'r4824', 'r4825', 'r4826', 'r4827', 'r4828', 'r4829', 'r482a', 'r482b', 'r482c', 'r482d', 'r482e', 'r482f', 'r4830', 'r4831', 'r4832', 'r4833', 'r4834', 'bpp', 'offset', 'bits', 'range_', 'input_', 'output', 'pixels', 'colormap', 'result',
+                 # The clock keeps its own time and its own exchange state.
+                 'rtc_state', 'rtc_reading', 'rtc_index', 'rtc_reads',
+                 'rtc_touches', 'rtc_seconds', 'rtc_last_clock', 'rtc_dirty'],
+        arrays=[('dcu_tile', 32), ('rtc', 16)],
         arrays2=[('ctx_prediction', 5, 15), ('ctx_swap', 5, 15)],
         blobs=[],
     ),
@@ -249,6 +259,7 @@ EXCLUDED = {
         "pad_state_next",
     },
     ("ppu", "PPU"): {
+        "light_rgb",                         # a table rebuilt from brightness
         "framebuffer_obj",                       # the buffer behind framebuffer
         "vdisp", "pal", "light",                 # constants
         "dbg_lines", "dbg_lines_enabled", "dbg_lines_blank",
@@ -279,7 +290,9 @@ EXCLUDED = {
     ("superfx", "SuperFX"): {"cart", "rom", "ram", "ram_data", "name",
                              "unsupported", "clock", "irq_line"},
     ("spc7110", "SPC7110"): {"cart", "rom", "name", "unsupported", "clock",
-                             "irq_line"},
+                             "irq_line",
+                             "has_rtc",          # read from the cartridge header
+                             "rtc_trace", "rtc_trace_len"},  # a trace for tools
 }
 
 

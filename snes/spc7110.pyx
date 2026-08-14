@@ -925,9 +925,11 @@ cdef class SPC7110(Board):
 
     def state_ints(self):
         cdef int i, j
-        v = [self.prom_size, self.drom_base, self.drom_size, self.r4801, self.r4802, self.r4803, self.r4804, self.r4805, self.r4806, self.r4807, self.r4809, self.r480a, self.r480b, self.r480c, self.dcu_mode, self.dcu_address, self.dcu_offset, self.r4810, self.r4811, self.r4812, self.r4813, self.r4814, self.r4815, self.r4816, self.r4817, self.r4818, self.r481a, self.r4820, self.r4821, self.r4822, self.r4823, self.r4824, self.r4825, self.r4826, self.r4827, self.r4828, self.r4829, self.r482a, self.r482b, self.r482c, self.r482d, self.r482e, self.r482f, self.r4830, self.r4831, self.r4832, self.r4833, self.r4834, self.bpp, self.offset, self.bits, self.range_, self.input_, self.output, self.pixels, self.colormap, self.result]
+        v = [self.prom_size, self.drom_base, self.drom_size, self.r4801, self.r4802, self.r4803, self.r4804, self.r4805, self.r4806, self.r4807, self.r4809, self.r480a, self.r480b, self.r480c, self.dcu_mode, self.dcu_address, self.dcu_offset, self.r4810, self.r4811, self.r4812, self.r4813, self.r4814, self.r4815, self.r4816, self.r4817, self.r4818, self.r481a, self.r4820, self.r4821, self.r4822, self.r4823, self.r4824, self.r4825, self.r4826, self.r4827, self.r4828, self.r4829, self.r482a, self.r482b, self.r482c, self.r482d, self.r482e, self.r482f, self.r4830, self.r4831, self.r4832, self.r4833, self.r4834, self.bpp, self.offset, self.bits, self.range_, self.input_, self.output, self.pixels, self.colormap, self.result, self.rtc_state, self.rtc_reading, self.rtc_index, self.rtc_reads, self.rtc_touches, self.rtc_seconds, self.rtc_last_clock, self.rtc_dirty]
         for i in range(32):
             v.append(self.dcu_tile[i])
+        for i in range(16):
+            v.append(self.rtc[i])
         for i in range(5):
             for j in range(15):
                 v.append(self.ctx_prediction[i][j])
@@ -937,7 +939,7 @@ cdef class SPC7110(Board):
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 57
+        cdef int i, j, k = 65
         self.prom_size = v[0]
         self.drom_base = v[1]
         self.drom_size = v[2]
@@ -995,9 +997,20 @@ cdef class SPC7110(Board):
         self.pixels = v[54]
         self.colormap = v[55]
         self.result = v[56]
+        self.rtc_state = v[57]
+        self.rtc_reading = v[58]
+        self.rtc_index = v[59]
+        self.rtc_reads = v[60]
+        self.rtc_touches = v[61]
+        self.rtc_seconds = v[62]
+        self.rtc_last_clock = v[63]
+        self.rtc_dirty = v[64]
         for i in range(32):
             self.dcu_tile[i] = v[k + i]
         k += 32
+        for i in range(16):
+            self.rtc[i] = v[k + i]
+        k += 16
         for i in range(5):
             for j in range(15):
                 self.ctx_prediction[i][j] = v[k + i * 15 + j]
