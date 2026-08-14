@@ -22,7 +22,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from snes.system import System
 
-DEFAULT_DIR = "/home/moto/Projects/rom/testroms/higan/undisbeliever-ppu-bg"
+ROOT = "/home/moto/Projects/rom/testroms/higan"
+DEFAULT_DIR = ROOT + "/undisbeliever-ppu-bg"
+MODE7_DIR = ROOT + "/undisbeliever-ppu-mode7"
 FRAMES = 120
 
 # Each group must render identically, whatever it renders.
@@ -33,6 +35,18 @@ PAIRS = [
     ("4bpp", ["vmain-4bpp-no-remapping", "vmain-4bpp-with-remapping",
               "vmain-4bpp-no-remapping-word", "vmain-4bpp-with-remapping-word"]),
     ("8bpp", ["vmain-8bpp-no-remapping", "vmain-8bpp-with-remapping"]),
+]
+
+# Mode 7 keeps its tiles and its tilemap interleaved in one place, so the
+# remapping has more to get wrong there than anywhere else.  Four ROMs
+# write the same picture four ways -- plainly, tilemap first, and through
+# the eight- and ten-bit remappings -- and the collection's own README
+# says all four show the same image when VMAIN is right.
+MODE7 = [
+    ("mode 7", ["vmain-mode7-image-no-remapping",
+                "vmain-mode7-image-tilemap",
+                "vmain-mode7-image-with-8bit-remapping",
+                "vmain-mode7-image-with-10bit-remapping"]),
 ]
 
 
@@ -47,8 +61,11 @@ def render(path):
 
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DIR
+    groups = [(l, root, n) for l, n in PAIRS]
+    if len(sys.argv) <= 1:
+        groups += [(l, MODE7_DIR, n) for l, n in MODE7]
     bad = 0
-    for label, names in PAIRS:
+    for label, root, names in groups:
         digests = {}
         blank = []
         for name in names:
