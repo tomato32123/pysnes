@@ -41,20 +41,18 @@ fi
 } > "$OUT" 2>&1
 
 # ---- what reaches the screen -------------------------------------------
+#
+# The test runner already works out whether the failures are one fault or
+# several and says so in plain words, so the summary here is its verdict
+# verbatim -- everything from the end of the module list up to the first
+# full transcript -- rather than a second, worse diagnosis grepped out of
+# the same file.
 echo
 echo "---------------- read this out ----------------"
-sed -n 's/^\(.*\) FAIL.*$/FAILED: \1/p' "$OUT" | head -6
-FAILED=`grep -c "FAIL" "$OUT"`
-PASSED=`grep -c " ok$" "$OUT"`
-echo "tests: $PASSED ok, $FAILED failed"
+sed -n '/^== tests/,/^=== /p' "$OUT" | grep -v "PASS$" | grep -v "^=== " | \
+    grep -v "^== tests" | sed '/^$/d' | head -14
 
-# The first thing that actually went wrong, in one line.  An exception's
-# last line names the fault; a test's own message names the expectation.
-grep -m1 -E "Error|error:|Traceback" "$OUT" | cut -c1-70
-
-grep -o "[0-9.]* fps" "$OUT" | sort -rn | head -1 | sed 's/^/best speed: /'
-grep -o "in [0-9.]*s" "$OUT" | head -1 > /dev/null
-
+grep -o "[0-9.]* ms/frame" "$OUT" | sort -n | head -1 | sed 's/^/fastest frame: /'
 echo "-----------------------------------------------"
 echo
 echo "full log: $OUT"
