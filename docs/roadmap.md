@@ -303,6 +303,15 @@ The largest single gap. Everything below the first item depends on it.
       brightness and fifteen-bit colour straight to the finished pixel.  The
       obvious optimisation -- caching the tilemap fetch across the eight pixels
       of a tile -- measured the same and was reverted.
+      **Re-measured after the day's changes** -- the multiplier turned into
+      eight stepped shifts with a catch-up on every read of $4214-$4217, the
+      mosaic and sprite work in the PPU, and a DSP-1 board -- and it is
+      unchanged: 4.70 ms a frame, 212.7 fps on the same game.  Three runs
+      were taken rather than one, and the middle of them read 165 fps
+      because a single other process was still busy; a reading taken while
+      the machine was loaded had said 9.33 ms and was thrown away rather
+      than acted on, which was the right call.  One measurement is not a
+      measurement.
       What made it safe to rewrite the hot path at all was the reference
       pictures: 34 of 35 demos still match pixel for pixel afterwards
 - [x] **The display path**: 8.20 ms to draw and present a frame, against
