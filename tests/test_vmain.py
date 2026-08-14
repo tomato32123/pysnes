@@ -25,6 +25,16 @@ from snes.system import System
 FRAMES = 200
 FAILURES = []
 
+# Mode 7 interleaves its tilemap and its tiles in one VRAM word, so the
+# remapping has more to get wrong there than anywhere else.  The suite's
+# own README says all four of these "display the same static Mode 7 image
+# when VMAIN is emulated correctly", which makes them a four-way answer
+# rather than a pair.
+MODE7 = ["vmain-mode7-image-no-remapping",
+         "vmain-mode7-image-tilemap",
+         "vmain-mode7-image-with-8bit-remapping",
+         "vmain-mode7-image-with-10bit-remapping"]
+
 PAIRS = [
     ("vmain-1bpp-no-remapping", "vmain-1bpp-with-remapping"),
     ("vmain-2bpp-no-remapping", "vmain-2bpp-with-remapping"),
@@ -47,8 +57,27 @@ def picture(path):
                  for y in range(height) for x in range(256) for c in (0, 1, 2))
 
 
+def not_blank(picture, name):
+    """Two blank screens match, and prove nothing by it.
+
+    This is the failure mode of judging cartridges against each other, and
+    it is silent: every comparison passes and none of them means anything.
+    So each picture has to have something in it before its agreement with
+    another counts.
+    """
+    lit = sum(1 for i in range(0, len(picture), 3)
+              if picture[i] or picture[i + 1] or picture[i + 2])
+    if lit < 1000:
+        FAILURES.append("%s drew almost nothing (%d lit pixels), so agreeing "
+                        "with anything says nothing" % (name, lit))
+        return False
+    return True
+
+
 def main():
     paths = {}
+    for name in MODE7:
+        paths[name] = find_named(name + ".sfc")
     for a, b in PAIRS:
         for name in (a, b):
             if name not in paths:
@@ -58,8 +87,20 @@ def main():
                          "machine; set PYSNES_ROMS to where they are" + chr(10))
         return NO_ROM
 
+    base = picture(paths[MODE7[0]])
+    not_blank(base, MODE7[0])
+    for name in MODE7[1:]:
+        other = picture(paths[name])
+        differing = sum(1 for x, y in zip(base, other) if x != y)
+        print("  %-30s = %-32s %s"
+              % (MODE7[0][6:], name[6:], "ok" if differing == 0 else "DIFFERS"))
+        if differing:
+            FAILURES.append("%s and %s differ in %d of %d bytes"
+                            % (MODE7[0], name, differing, len(base)))
+
     for a, b in PAIRS:
         pa, pb = picture(paths[a]), picture(paths[b])
+        not_blank(pa, a)
         differing = sum(1 for x, y in zip(pa, pb) if x != y)
         print("  %-30s = %-32s %s"
               % (a, b, "ok" if differing == 0 else "DIFFERS"))
