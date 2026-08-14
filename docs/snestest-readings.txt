@@ -154,3 +154,36 @@ why moving the interrupt fixes one gate and no others.
 
 Whoever picks this up: sweep the offset again after any instruction-timing
 change, and treat +24 as a symptom rather than a value to adopt.
+
+================================================================================
+Super Mario Kart -- the flat track, and what it is not.
+
+The course renders as two plain slabs of colour, grey over tan, with the
+sky, the karts, the HUD and every menu correct around them.  I have been
+saying the DSP-1's guessed geometry was behind it.  It is not.
+
+Driven into a race and measured there:
+
+  * the Mode 7 matrix is zero.  A=B=C=D=0 for the whole frame, which maps
+    every screen pixel to one place in VRAM -- exactly one flat colour per
+    region, which is what the picture shows.
+  * nothing writes $211B-$211E.  Not the processor, in a whole frame of
+    bus records, and not any HDMA channel.
+  * the DSP-1 is barely involved.  Over a race it is asked for command $06
+    (project an object) 10,244 times and command $0A (the raster
+    coefficients) twice.  Its guessed geometry cannot be drawing the road
+    because the game is not asking it to.  $06 is how the other karts are
+    placed on screen, and they are placed correctly.
+  * HDMA is enabled with $FE -- channels 1 to 7 -- and every one of those
+    channels reads back as mode 4, four bytes to $210C.  All seven the
+    same, none of them the matrix.  The channel registers were checked
+    against a test program first: they read back independently and
+    correctly, so that is the machine's real state and not a bad reading.
+
+So the fault is in front of the DSP-1, in how those channels come to be
+set up, and the next question is where the game writes them -- a frame of
+bus records shows writes to channel 0 alone, 11,894 of them, for the OAM
+upload.  Channels 1 to 7 are configured somewhere outside that window.
+
+Written down because the wrong explanation for this was in my head for
+days, and the measurement that displaced it took an hour.
