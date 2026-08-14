@@ -132,6 +132,31 @@ behind them either**, which puts them in the same class as the nine in bold.
 
 ---
 
+### Re-run over a bigger library, and unchanged where it matters
+
+The table above was taken over 66 cartridges.  The library is 74 now, and
+the probe was run again: **the nine features nothing exercises are still
+the same nine**.  Not one of mode 6, interlace, object interlace,
+pseudo-hires, EXTBG, the SA-1's timers, either of its character
+conversions or its DMA has been switched on by any real software here.
+
+What did move: colour math 41 to 46 titles, the sub screen as an operand
+36 to 38, overscan 7 to 8, and sprite time-over now has eight titles
+behind it.  One entry changed in kind rather than degree -- the forced
+black main screen had only `Mix.smc` behind it, which is a defective
+image wandering into settings no game chose, and now has Exhaust Heat II
+as well.  That is its first honest witness.  Direct colour and mosaic
+still rest mainly on `Mix.smc`, so they stay in the unexercised class in
+everything but name.
+
+The value of this run is in what did not change.  Nine features are
+implemented and tested, and their tests were written from the same
+reading of the documentation as the code.  Today's two interlace defects
+-- a rectangular sprite's V-flip and the height of a mosaic block on an
+interlaced hires screen -- were found by a reference picture while every
+test here passed, which is exactly the failure this list predicts for the
+other nine.
+
 ## What the reference pictures found
 
 `tools/ppucompare.py` runs krom's PPU demos and compares our output to the
