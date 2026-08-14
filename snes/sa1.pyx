@@ -421,13 +421,29 @@ cdef class SA1(Board):
                 self._advance_varlen()
             return v
 
-        # $230E is where the development manual put a version code, and
-        # where cartridges turn out to have nothing: measurements on real
-        # boards read open bus there, which on the console's side is the
-        # address's own high byte.  absindx's SA1VersionCodeTest is about
-        # exactly this, and reported FAILED for as long as a revision
-        # number was invented for it.  So it is left to fall through to
-        # whatever the bus was holding.
+        # $230E is the version code register, and nothing here decides what
+        # it holds, because nothing available can.
+        #
+        # absindx's SA1VersionCodeTest looks like the answer and is not one.
+        # Its check routine is:
+        #
+        #     LDA $301C : STA $01 : LDA $301C : STA $02 : BRA failed
+        #
+        # -- the same byte read twice into the two slots its screen prints as
+        # "got / expected", and an unconditional branch to the failing path
+        # with the passing one unreachable.  It reports FAILED whatever this
+        # returns, and its two numbers agree because they are one number.  It
+        # is a display: it shows what every register at $23xx reads as from
+        # each processor, for someone holding a real machine to compare.
+        #
+        # An earlier session read that FAILED as a verdict and concluded the
+        # register was open bus.  It is not evidence either way.  snes9x
+        # returns $23, which is also exactly what open bus gives here -- the
+        # high byte of the address the instruction just fetched -- so that
+        # may be a measurement of open bus written down as a register.
+        #
+        # So it falls through, and stays a known unknown rather than a
+        # guess wearing a comment.
 
         if 0x2240 <= a <= 0x224F:
             return self.brf[a & 0x0F]
