@@ -77,3 +77,24 @@ every difference being a located defect rather than a suspicion.
      R4:00000,0000  R5:00000,0000
      R6:00000,0000  R7:00000,0000
 
+
+================================================================================
+Sour's dma_irq_test -- how many instructions run after a DMA before the
+interrupt is taken.  19 readings, all of which this emulator now matches.
+
+Two of them appear not to.  Its README gives $FFFF for both "SEI+INC" rows
+and this reads $00FF.  The cartridge's own source settles it:
+
+    setaxy8
+    lda valueOnIrq          ; the byte the test left, $FF
+    sta testResults, x      ; low byte
+    inx
+    stz testResults, x      ; high byte, zeroed on purpose
+
+The high byte is written as zero every time, so the built cartridge cannot
+print $FFFF for any emulator or for hardware.  The README's changelog says
+its tests were changed after it was written; those two lines were not.
+
+Recorded because the next person to read that table will see two failures
+that are not there, and because it is worth having one case written down
+where the published answer was the thing that was wrong.
