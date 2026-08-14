@@ -174,16 +174,37 @@ Driven into a race and measured there:
     coefficients) twice.  Its guessed geometry cannot be drawing the road
     because the game is not asking it to.  $06 is how the other karts are
     placed on screen, and they are placed correctly.
-  * HDMA is enabled with $FE -- channels 1 to 7 -- and every one of those
-    channels reads back as mode 4, four bytes to $210C.  All seven the
-    same, none of them the matrix.  The channel registers were checked
-    against a test program first: they read back independently and
-    correctly, so that is the machine's real state and not a bad reading.
+  * HDMA is enabled with $FE -- channels 1 to 7 -- and channels 1 to 4 are
+    configured exactly as they should be: indirect, two bytes to one
+    register, feeding $211B, $211C, $211D and $211E.  Channel 5 drives
+    $2105 for the mid-screen mode change and channel 7 the window.  The
+    transfers run: the line counters advance through the frame.
 
-So the fault is in front of the DSP-1, in how those channels come to be
-set up, and the next question is where the game writes them -- a frame of
-bus records shows writes to channel 0 alone, 11,894 of them, for the OAM
-upload.  Channels 1 to 7 are configured somewhere outside that window.
+  * the data they fetch is not there.  Each channel's table in WRAM is
+    well formed and its pointers are followed correctly -- $4000 plus two
+    bytes a line reaches $40A2 exactly as it should -- but the buffers
+    those pointers name, $7E:4000, $7E:D000, $7E:6FE2, $7E:A0A2, read
+    $FF from end to end.  Nothing writes them: zero writes into
+    $7E:4000-$4FFF across five frames of bus records.
 
-Written down because the wrong explanation for this was in my head for
-days, and the measurement that displaced it took an hour.
+So the chain is: the game never fills its per-line matrix buffers, so
+HDMA faithfully delivers unwritten memory, so the matrix is $FFFF or
+zero, so every pixel of the road samples one place and the road is a
+slab.  The question is what should be filling those buffers and why it
+is not reached, and it is not the DSP-1: the raster command that would
+be the obvious candidate is asked for twice in a whole race.
+
+CORRECTION.  An earlier version of this entry said all seven channels
+pointed at $210C.  That was wrong, and wrong in an instructive way: I
+read the channel registers through Bus.read(), which resolves by page
+kind, and the register file is not a page -- so every one of those reads
+returned whatever the bus last carried, which was $0C, for all eight
+channels alike.  A convincing, uniform, entirely fictitious answer.  I
+had even "checked" it with a test program, which read the same registers
+through the processor, where they work correctly -- so the check passed
+and told me nothing about the reading I had actually taken.
+
+There is a Bus.dma_channel() now that reads the file directly, and it
+was written for exactly this reason.  The lesson worth keeping is
+narrower than "verify your readings": it is that verifying a *different*
+path than the one you used is not verification at all.

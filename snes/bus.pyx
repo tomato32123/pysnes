@@ -1182,5 +1182,30 @@ cdef class Bus:
     def read(self, addr):
         return self.read8_fast(addr)
 
+    def dma_channel(self, int ch):
+        """One transfer channel's settings, for looking rather than running.
+
+        Not reachable through read(): that goes by page kind, and the
+        register file is not a page -- an address in it reads back whatever
+        the bus last carried.  Which is a perfectly good answer to give a
+        program and a completely misleading one to give a person, as it was
+        when it made all eight channels look identically configured because
+        they were all reporting the same stale byte.
+        """
+        cdef int i = ch & 7
+        return {
+            "params": self.dma_param[i],
+            "bbus": self.dma_bbus[i],
+            "abus": self.dma_abus[i],
+            "size": self.dma_size[i],
+            "ind_bank": self.dma_indirect_bank[i],
+            "do_transfer": self.hdma_do_transfer[i],
+            "table": self.hdma_table[i],
+            "line": self.hdma_line[i],
+            "active": self.hdma_active[i],
+            "hdma_on": bool(self.hdma_enabled & (1 << i)),
+            "dma_on": bool(self.dma_enabled & (1 << i)),
+        }
+
     def peek_range(self, addr, n):
         return bytes(bytearray([self.read8_fast((addr + i) & 0xFFFFFF) for i in range(n)]))
