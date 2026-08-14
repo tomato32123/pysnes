@@ -1,0 +1,79 @@
+These are this emulator's own readings of byuu's SNES Test
+Programs.  They are NOT verified against anything: no expected
+values ship with these ROMs and there is no reference emulator
+on this machine.  They are recorded so that the day there is
+one, the same ROMs can be run there and the tables diffed --
+every difference being a located defect rather than a suspicion.
+
+== test_dma.smc
+   screen could not be read as text
+
+== test_dot_timing.smc
+     SNES Test Program ~byuu
+     Dot Timing Test
+                       CTR0:00000
+                       CTR1:00000
+                       CTR2:00000
+                       CTR3:00000
+                       CTR4:00000
+                       CTR5:00000
+                       CTR6:00000
+                       CTR7:00000
+             Result Counter:00001
+     OPVCT:004 OPHCT:158 STA78:43
+     R0:00000,0000  R1:00000,0000
+     R2:00000,0000  R3:00000,0000
+     R4:00000,0000  R5:00000,0000
+     R6:00000,0000  R7:00000,0000
+
+== test_hdma.smc
+   screen could not be read as text
+
+== test_irq.smc
+   screen could not be read as text
+
+== test_nmi.smc
+   screen could not be read as text
+
+== test_oam.smc
+     SNES Test Program ~byuu
+     OAM Size Test
+                       Base:00000
+                       Size:00000
+                       Char:00000
+                      VFlip:00000
+                      HFlip:00000
+                       2105:00000
+                       2133:00000
+                           :00000
+             Result Counter:00001
+     OPVCT:226 OPHCT:040 STA78:43
+     R0:00000,0000  R1:00000,0000
+     R2:00000,0000  R3:00000,0000
+     R4:00000,0000  R5:00000,0000
+     R6:00000,0000  R7:00000,0000
+
+== test_opt.smc
+                   x
+
+== test_vram.smc
+   screen could not be read as text
+
+== test_vram_timing.smc
+     SNES Test Program ~byuu
+     VRAM Timing Test
+                       CTR0:00000
+                       CTR1:00000
+                       CTR2:00000
+                       CTR3:00000
+                       CTR4:00000
+                       CTR5:00000
+                       CTR6:00000
+                       CTR7:00000
+             Result Counter:00001
+     OPVCT:225 OPHCT:120 STA78:e3
+     R0:00230,00e6  R1:00044,002c
+     R2:00170,00aa  R3:00170,00aa
+     R4:00000,0000  R5:00000,0000
+     R6:00000,0000  R7:00000,0000
+
