@@ -72,6 +72,25 @@ def screen_text(machine):
     return [l for l in lines if l.strip()]
 
 
+def dominant_colour(machine):
+    """The colour most of the screen is, and how much of it that is.
+
+    A screen that cannot be read as text may still be saying something:
+    several of these suites answer in colour, green for a pass and red for
+    a failure.  That is a triage signal rather than a verdict -- a red
+    screen is worth looking at, not proof of anything -- so it is reported
+    as what it is.
+    """
+    fb = bytes(machine.framebuffer)
+    counts = {}
+    for i in range(0, len(fb), 4 * 101):
+        rgb = (fb[i + 2], fb[i + 1], fb[i])
+        counts[rgb] = counts.get(rgb, 0) + 1
+    total = sum(counts.values()) or 1
+    rgb, n = max(counts.items(), key=lambda kv: kv[1])
+    return rgb, n / float(total)
+
+
 def look(path):
     machine = System(path)
     for i in range(FRAMES):
@@ -86,7 +105,7 @@ def look(path):
         elif i == 710:
             machine.set_pad(0, 0)
         machine.run_frame()
-    return screen_text(machine)
+    return screen_text(machine), dominant_colour(machine)
 
 
 def main():
@@ -98,15 +117,19 @@ def main():
                 roms.append(os.path.join(dirpath, name))
     roms.sort()
 
-    failing, passing, quiet, broken = [], [], [], []
+    failing, passing, quiet, broken, reddish = [], [], [], [], []
     for path in roms:
         name = os.path.relpath(path, root)
         try:
-            lines = look(path)
+            lines, (rgb, share) = look(path)
         except Exception as exc:
             broken.append((name, "%s: %s" % (type(exc).__name__, exc)))
             continue
         if lines is None:
+            # Mostly red, and not by a little: worth a look even though the
+            # screen cannot be read.
+            if share > 0.6 and rgb[0] > 120 and rgb[1] < 80 and rgb[2] < 80:
+                reddish.append((name, rgb, share))
             quiet.append(name)
             continue
         text = " ".join(lines)
@@ -123,6 +146,11 @@ def main():
             print("  %s" % name)
             for line in lines[:8]:
                 print("      %s" % line)
+        print()
+    if reddish:
+        print("== screens that cannot be read but are mostly red ==")
+        for name, rgb, share in reddish:
+            print("  %-52s %3d%% of %s" % (name[:52], int(share * 100), rgb))
         print()
     print("== screens that report success ==")
     for name, lines in passing:
