@@ -36,22 +36,30 @@ ROM_SUFFIXES = (".smc", ".sfc", ".swc", ".fig")
 PICTURE_W, PICTURE_H = 512, 478          # what the PPU hands over
 VISIBLE_W = 256                          # dots across, before doubling
 
-# The pad, as a fraction of the screen so it lands in the same place on any
-# glass.  Each entry is (name, centre x, centre y, radius), x and y from 0 to
-# 1.  The thumbs rest at the lower corners, so everything is pulled down.
-PAD = [
-    ("UP",     0.115, 0.545, 0.052),
-    ("DOWN",   0.115, 0.795, 0.052),
-    ("LEFT",   0.045, 0.670, 0.052),
-    ("RIGHT",  0.185, 0.670, 0.052),
-    ("Y",      0.845, 0.670, 0.050),
-    ("X",      0.905, 0.520, 0.050),
-    ("B",      0.905, 0.820, 0.050),
-    ("A",      0.965, 0.670, 0.050),
-    ("L",      0.055, 0.135, 0.055),
-    ("R",      0.945, 0.135, 0.055),
-    ("SELECT", 0.425, 0.905, 0.045),
-    ("START",  0.575, 0.905, 0.045),
+# The pad is laid out inside whatever the picture leaves free, not across the
+# whole screen.  A 4:3 frame fitted to the height of a long phone leaves a
+# band down each side; putting a thumb there costs nothing, while putting it
+# over the picture costs the picture.  Positions are worked out per screen in
+# Screen.layout(), from the band's own width -- a wider phone gets bigger
+# buttons rather than buttons further from the glass edge.
+#
+# Each entry is (name, x, y, r) with x and y as fractions of the band and of
+# the screen height, so the arrangement holds its shape on any phone.
+LEFT_BAND = [
+    ("UP",     0.50, 0.470, 0.055),
+    ("DOWN",   0.50, 0.760, 0.055),
+    ("LEFT",   0.22, 0.615, 0.055),
+    ("RIGHT",  0.78, 0.615, 0.055),
+    ("L",      0.35, 0.150, 0.058),
+    ("SELECT", 0.50, 0.930, 0.042),
+]
+RIGHT_BAND = [
+    ("Y",      0.22, 0.615, 0.053),
+    ("X",      0.50, 0.470, 0.053),
+    ("B",      0.50, 0.760, 0.053),
+    ("A",      0.78, 0.615, 0.053),
+    ("R",      0.65, 0.150, 0.058),
+    ("START",  0.50, 0.930, 0.042),
 ]
 
 FACE = {"A": (208, 92, 92), "B": (214, 190, 96), "X": (96, 132, 208),
@@ -77,8 +85,9 @@ class Touch:
     being lifted, which is how a physical pad behaves too.
     """
 
-    def __init__(self, width, height):
+    def __init__(self, width, height, layout):
         self.size = (width, height)
+        self.layout = layout
         self.fingers = {}
 
     def resize(self, width, height):
@@ -100,15 +109,18 @@ class Touch:
             self.fingers.pop("mouse", None)
 
     def held(self):
+        """The buttons under the fingers, in pixels rather than fractions.
+
+        The layout is worked out once per screen and handed here, so a
+        finger's position is compared against where the buttons actually
+        are rather than against a second copy of the arithmetic.
+        """
         width, height = self.size
-        aspect = width / float(height) if height else 1.0
         bits = 0
-        for x, y in self.fingers.values():
-            for name, cx, cy, r in PAD:
-                # The radius is a fraction of the height, so a button stays
-                # round rather than becoming an ellipse on a long screen.
-                dx = (x - cx) * aspect
-                dy = y - cy
+        for fx, fy in self.fingers.values():
+            x, y = fx * width, fy * height
+            for name, cx, cy, r in self.layout:
+                dx, dy = x - cx, y - cy
                 if dx * dx + dy * dy <= r * r:
                     bits |= BUTTONS[name]
         return bits
@@ -122,14 +134,20 @@ class Screen:
     the stretching -- the same reason the desktop front end works this way.
     """
 
-    def __init__(self):
+    def __init__(self, size=None):
+        """`size` forces a screen shape, so a phone's layout can be drawn and
+        looked at on a machine that is not a phone."""
         pygame.display.init()
-        info = pygame.display.Info()
-        self.window = pygame.display.set_mode((info.current_w, info.current_h),
-                                              pygame.FULLSCREEN)
+        if size is None:
+            info = pygame.display.Info()
+            size = (info.current_w, info.current_h)
+            self.window = pygame.display.set_mode(size, pygame.FULLSCREEN)
+        else:
+            self.window = pygame.display.set_mode(size)
         self.width, self.height = self.window.get_size()
         self.frame = pygame.Surface((VISIBLE_W, 224))
         self.buffer = pygame.Surface((PICTURE_W, PICTURE_H))
+        self.layout = self.pad_layout()
 
     def show(self, framebuffer, visible_height):
         # The PPU writes two columns a dot so hires modes have somewhere to
@@ -154,16 +172,34 @@ class Screen:
             height = int(width / wanted)
         return (width, height)
 
+    def pad_layout(self):
+        """Where each button sits, in pixels, given this screen.
+
+        The bands are what the picture does not cover.  If a screen is so
+        square that there is nothing spare -- a tablet at 4:3 -- the buttons
+        fall back to a strip over the lowest part of the picture, which is
+        the least bad place for them.
+        """
+        picture_w, _ = self.fit(224)
+        band = max(0, (self.width - picture_w) // 2)
+        overlay = band < self.height * 0.16
+        if overlay:
+            band = int(self.height * 0.16)
+        out = []
+        for entries, origin in ((LEFT_BAND, 0), (RIGHT_BAND, self.width - band)):
+            for name, fx, fy, r in entries:
+                out.append((name,
+                            origin + fx * band,
+                            fy * self.height,
+                            max(14.0, r * self.height)))
+        return out
+
     def draw_pad(self, held):
-        aspect = self.width / float(self.height)
-        for name, cx, cy, r in PAD:
-            x = int(cx * self.width)
-            y = int(cy * self.height)
-            radius = max(12, int(r * self.height))
+        for name, cx, cy, r in self.layout:
             down = bool(held & BUTTONS[name])
             colour = FACE.get(name, (150, 150, 158))
-            pygame.draw.circle(self.window, colour, (x, y), radius,
-                               0 if down else 3)
+            pygame.draw.circle(self.window, colour, (int(cx), int(cy)),
+                               int(r), 0 if down else 3)
 
     def flip(self):
         pygame.display.flip()
@@ -193,7 +229,7 @@ def main():
             pygame.time.wait(200)
 
     machine = System(rom)
-    touch = Touch(screen.width, screen.height)
+    touch = Touch(screen.width, screen.height, screen.layout)
 
     audio = None
     try:
