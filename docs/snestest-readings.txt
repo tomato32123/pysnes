@@ -305,3 +305,33 @@ it recorded these two as a pair of static screens.
 Worth remembering next time something is classified rather than read: the
 classification was accurate -- two hundred lit pixels, no movement -- and
 what it was accurate about was a cartridge waiting to be asked.
+
+================================================================================
+blargg's SPC700 and DSP tests -- all eight pass.
+
+  spc_smp                PASSED TESTS   (CPU instructions, timing, timers)
+  spc_timer              PASSED TESTS
+  spc_mem_access_times   PASSED TESTS
+  spc_dsp6               PASSED TESTS   -- about sixty checks: Misc/, Order/,
+                                           Random/ and Timing/Voice/
+  gilyon's spctest       Success, test number 0527
+
+spc_dsp6 wants about ten thousand frames.  At two thousand it is still
+working through the Order/ group on a black screen with no verdict, which
+is what a run that stops looks like, and I read it as one twice: first
+from a contact sheet taken at 2,400 frames, then from tools/verdicts.py,
+which cannot read this cartridge's font and returned the same unreadable
+line at every frame I sampled -- so the screen "did not change" between
+frame 2,000 and frame 20,000 and I believed it.
+
+Along the way the diagnosis was wrong in an interesting direction.  The
+SPC700 sits in a nine-address loop calling a five-NOP delay and waiting
+for the word at direct page $00 to reach zero, and nothing in that loop
+writes it.  Nothing in the SPC700 can: the only thing outside it that
+writes its RAM is the DSP's echo buffer, and the FLG value the test wrote
+first, $1F, is what enables echo writes.  So the cartridge is waiting for
+the DSP to overwrite its own counter, which is a fine thing to test and
+looks exactly like a hang.  It reaches zero at frame 2,619.
+
+Recorded so the next person to see a black screen there gives it ten
+thousand frames before concluding anything.
