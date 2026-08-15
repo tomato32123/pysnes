@@ -15,3 +15,4 @@ pysnes-debug.spec
 .romsdir
 android/.buildozer/
 android/bin/
+.library-baseline

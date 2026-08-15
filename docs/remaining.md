@@ -1217,3 +1217,34 @@ across two runs of the experiment even though the absolute times nearly
 doubled between them.  Rebuilding between measurements does not just cost a
 minute; it puts each build in its own stretch of time, which is exactly the
 thing that has to be controlled for.
+
+## The library as a regression detector
+
+`batchtest.py` already said, in a comment, that its worth is in comparing
+one run to the next.  There was nothing to compare against: the only
+fingerprint it computed used `hash()`, which CPython randomises per process,
+so it could count how often a picture changed inside one run and could not
+say whether today's picture was yesterday's.
+
+It now takes a digest of the final frame that does not move between runs,
+and `--baseline FILE` writes that file if it is absent and compares against
+it if it is there -- reporting what changed, what is new and what has gone,
+and exiting non-zero if anything did.
+
+    python tools/batchtest.py <romdir> --baseline .library-baseline
+
+The baseline is not in the repository and `.gitignore` keeps it out.  It is
+a list of one machine's game library, and a collection that exists here does
+not belong in a tree anyone else will clone -- the same reason the ROM path
+lives in `.romsdir`.
+
+Two things it refuses.  A baseline taken over a different number of frames
+is an error rather than a comparison, because the frame count decides the
+picture.  And `--play` cannot be compared at all: pressing buttons makes a
+run depend on when the presses land, which is exactly the thing a regression
+detector must not have.
+
+Why this and why now: a whole day of changes to HDMA channel gating, to when
+the processor looks for an interrupt, and to two renderer paths went in
+against a library check that was read by eye, twice, twenty-five minutes at
+a time -- and one of those readings was wrong because a flag was left off.

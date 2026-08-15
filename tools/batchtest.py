@@ -8,6 +8,7 @@ a whole library can be seen at a glance.
 """
 import argparse
 import collections
+import hashlib
 import os
 import sys
 import time
@@ -18,6 +19,8 @@ from snes.system import System
 from tools.screenshot import write_png
 
 W, H = 512, 478
+NL = chr(10)
+TAB = chr(9)
 
 # How many times the normal window a title that has drawn nothing is given
 # before its verdict is believed.  See run_one.
@@ -50,6 +53,18 @@ def frame_signature(fb):
     and it is much less than these ROMs can be asked.
     """
     return hash(bytes(fb[::4 * 397]))
+
+
+def frame_digest(fb):
+    """A stable fingerprint of a frame, for comparing one run to the next.
+
+    frame_signature above uses hash(), which CPython randomises per process:
+    fine for counting how often the picture changed inside one run, useless
+    for saying whether today's picture is yesterday's.  This one is a digest
+    of every pixel and does not move between runs, machines or Python
+    versions.
+    """
+    return hashlib.sha1(bytes(fb)).hexdigest()[:16]
 
 
 def analyse_frame(fb):
@@ -158,6 +173,8 @@ def run_one(path, frames, shots_dir, play=False):
     else:
         result["status"] = "ok"
 
+    result["digest"] = frame_digest(machine.framebuffer)
+
     if shots_dir:
         os.makedirs(shots_dir, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in result["name"])
@@ -190,10 +207,37 @@ def main():
     # This report is a regression detector, and its worth is in comparing
     # one run to the next.  Pressing buttons makes a run depend on when the
     # presses land, which costs the comparison more than it pays.
+    # Where the last run's answers are kept.  Deliberately not in the
+    # repository: it is a list of one machine's game library, and a path or a
+    # collection that exists here does not belong in a tree anyone else will
+    # clone.  Without one this writes it; with one it compares and says what
+    # moved.
+    ap.add_argument("--baseline", default=None,
+                    help="compare each ROM's final frame against this file, "
+                         "or write it if it does not exist")
     ap.add_argument("--play", action="store_true",
                     help="press start and A while it runs, and report how "
                          "much of the run was not a still picture")
     args = ap.parse_args()
+
+    base = {}
+    base_frames = None
+    if args.baseline and os.path.exists(args.baseline):
+        with open(args.baseline) as fh:
+            for line in fh:
+                if line.startswith("#"):
+                    if "frames=" in line:
+                        base_frames = int(line.split("frames=")[1].split()[0])
+                    continue
+                parts = line.rstrip(chr(10)).split(chr(9))
+                if len(parts) == 3:
+                    base[parts[0]] = (parts[1], parts[2])
+        if base_frames is not None and base_frames != args.frames:
+            raise SystemExit("baseline was taken over %d frames, this run is %d"
+                             % (base_frames, args.frames))
+        if args.play:
+            raise SystemExit("--play makes a run depend on when the presses "
+                             "land; it cannot be compared against a baseline")
 
     roms = find_roms(args.romdir)
     if args.filter:
@@ -221,8 +265,45 @@ def main():
     print(flush=True)
     by_status = collections.Counter(r["status"] for r in results)
     print("summary:", dict(by_status), flush=True)
-    return results
+
+    if args.baseline:
+        if base:
+            changed, missing, added = [], [], []
+            for r in results:
+                was = base.get(r["name"])
+                if was is None:
+                    added.append(r["name"])
+                elif was != (r["status"], r.get("digest", "")):
+                    changed.append((r["name"], was, (r["status"], r.get("digest", ""))))
+            seen = {r["name"] for r in results}
+            missing = [n for n in base if n not in seen]
+            if changed:
+                print(flush=True)
+                print("== different from the baseline ==", flush=True)
+                for name, was, now in changed:
+                    print("  %-46s %s %s  ->  %s %s"
+                          % (name[:46], was[0], was[1], now[0], now[1]), flush=True)
+            for n in added:
+                print("  new since the baseline: %s" % n, flush=True)
+            for n in missing:
+                print("  in the baseline but not run: %s" % n, flush=True)
+            print(flush=True)
+            print("%d of %d match the baseline" % (len(results) - len(changed),
+                                                   len(results)), flush=True)
+            # A regression detector has to be able to fail.  Anything that
+            # moved, appeared or vanished is a difference worth stopping on;
+            # if the change was meant, take the baseline again.
+            return 1 if (changed or added or missing) else 0
+        with open(args.baseline, "w") as fh:
+            fh.write("# pysnes library baseline, frames=%d%s" % (args.frames, NL))
+            fh.write("# %d ROMs; the final frame of each, as it was on this "
+                     "build%s" % (len(results), NL))
+            for r in sorted(results, key=lambda r: r["name"]):
+                fh.write("%s%s%s%s%s%s" % (r["name"], TAB, r["status"], TAB,
+                                           r.get("digest", ""), NL))
+        print("baseline written to %s" % args.baseline, flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
