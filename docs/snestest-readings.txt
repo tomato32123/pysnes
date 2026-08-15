@@ -925,3 +925,48 @@ So the whole library has no failure this emulator can be blamed for: two
 destroyed images, two titles waiting on DSP firmware that is not here, one
 distribution with no header in it at all, and two cartridges reporting that
 their coprocessor works.
+
+================================================================================
+Soaking eight titles, and a finding that turned out to be the opposite.
+
+Eight games from the library, twenty thousand frames each -- five and a half
+minutes of play apiece -- with pseudo-random input, covering plain LoROM and
+HiROM, two SA-1 titles, CX4, SuperFX and DSP.  All eight ran to the end
+without a crash or a hang, and seven finished with a full screen: between
+85,000 and 113,000 non-black pixels.
+
+The eighth, Rockman X2, ended with 3,960, and what it was drawing is the
+cartridge's own CX4 test:
+
+    INTERFACE REGISTER    ERROR!
+    REGISTER FILE         ERROR!
+    DATA RAM              ERROR!
+
+Three named failures from a program written by the people who made the chip
+-- the same kind of evidence as the SPC7110's ALL OK, and it looked like the
+best target of the day.
+
+The reference settles what the chip is: a Hitachi HG51B169, whose *program*
+is paged out of the cartridge ROM but whose lookup tables are a 1024 by
+24-bit ROM inside the package.  So the three failing lines are all about
+memory the console addresses directly -- data RAM at $6000-$6BFF, registers
+at $7F40-$7FAF -- and none of them needs the tables.  That is implementable
+here.
+
+It was implemented, and it was wrong.  With those addresses answering, the
+game stops printing the diagnostic and goes black: it runs further, into
+bank $00 and seventy-seven addresses rather than forty-five, and then waits
+for a calculation that cannot come.
+
+Which means the diagnostic was never a report about this emulator's CX4.  It
+was the game correctly noticing there is no CX4, and printing so.  Making
+those addresses answer did not fix anything; it removed an accurate reading
+and left a black screen in its place, and a chip that answers reads out of
+RAM is exactly the guessing-from-effects this project refuses elsewhere.
+
+Reverted.  Rockman X2 says ERROR three times again, which is the truth.
+The entry that says these chips are out of reach without their dumps was
+right, and the only thing worth adding to it is that the CX4 is out of reach
+for the tables rather than for the program.
+
+Sources: https://wiki.superfamicom.org/capcom-cx4-hitachi-hg51b169
