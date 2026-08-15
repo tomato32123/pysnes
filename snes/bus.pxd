@@ -57,6 +57,10 @@ cdef class Bus(AddressSpace):
     cdef uint16_t div_a
     cdef uint8_t div_b
     cdef uint16_t rd_div, rd_mpy
+    # A division takes sixteen steps, one a processor cycle, sharing the
+    # unit with the multiplier's eight.
+    cdef int div_steps
+    cdef uint32_t div_shifter
     # The multiplier is a shift-and-add that takes eight steps rather than
     # happening at once, and a game can look at it or disturb it part way.
     cdef uint16_t mul_shifter
@@ -64,6 +68,8 @@ cdef class Bus(AddressSpace):
     cdef int64_t mul_clock           # master clock the last step ran at
 
     cdef void mul_catch_up(self) noexcept
+    cdef void div_catch_up(self) noexcept
+    cdef inline void arith_step(self) noexcept
     cdef uint32_t wram_addr          # $2181-$2183 port
 
     # -- joypads -----------------------------------------------------------

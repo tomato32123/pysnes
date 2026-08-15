@@ -169,6 +169,8 @@ cdef class Bus:
         self.rd_div = 0
         self.rd_mpy = 0
         self.mul_shifter = 0
+        self.div_steps = 0
+        self.div_shifter = 0
         self.mul_steps = 0
         self.mul_clock = 0
         self.wram_addr = 0
@@ -206,34 +208,47 @@ cdef class Bus:
     # =====================================================================
 
     cdef void mul_catch_up(self) noexcept:
-        """Run the multiplier forward to now.
+        """Nothing to do: the unit steps in arith_step, once a cycle.
 
-        It is a shift-and-add over eight steps rather than a product that
-        appears at once: each step adds the shifted second operand if the
-        low bit of the first is set, then moves both along.  Jonas Quinn's
-        notes for these test ROMs describe it that way, and the arithmetic
-        agrees -- $A3 times $81 comes out $5223 step by step, and a run cut
-        short after the fourth step leaves $50A0, which is what his test 7
-        asks for.
+        This stays as a name because every place that reads a result calls
+        it, and because the multiplier used to run itself forward here from
+        a stored clock -- which, once arith_step existed, meant the sum
+        advanced twice per cycle and mul_behavior's test 7 caught it.
         """
-        cdef int64_t elapsed
-        cdef int steps
-        if not self.mul_steps:
-            return
-        elapsed = self.master_clock - self.mul_clock
-        steps = <int>(elapsed / 6)
-        if steps <= 0:
-            return
-        if steps > self.mul_steps:
-            steps = self.mul_steps
-        self.mul_clock += <int64_t>steps * 6
-        while steps > 0:
+        return
+
+    cdef inline void arith_step(self) noexcept:
+        """One step of whichever sum is running, per processor cycle.
+
+        A cycle is 6, 8 or 12 master clocks depending on what is being
+        touched, and the cartridges that measure this count their delays in
+        cycles rather than clocks -- so a unit stepping on a fixed span of
+        master clocks gains two bits at some of their readings and none at
+        others, which is what div_timing's table showed.
+        """
+        if self.div_steps:
+            self.div_shifter >>= 1
+            self.rd_div = <uint16_t>(self.rd_div << 1)
+            if <uint32_t>self.rd_mpy >= self.div_shifter:
+                self.rd_mpy = <uint16_t>(self.rd_mpy - self.div_shifter)
+                self.rd_div |= 1
+            self.div_steps -= 1
+        elif self.mul_steps:
             if self.rd_div & 1:
                 self.rd_mpy = <uint16_t>(self.rd_mpy + self.mul_shifter)
             self.mul_shifter = <uint16_t>(self.mul_shifter << 1)
             self.rd_div = self.rd_div >> 1
             self.mul_steps -= 1
-            steps -= 1
+
+    cdef void div_catch_up(self) noexcept:
+        """Run the divider forward to now: sixteen steps of restoring division.
+
+        RDMPY is the working remainder and RDDIV the quotient being shifted
+        in, which is why a write to WRDIVB part way -- which reloads RDMPY
+        from WRDIV -- changes the answer, and why div_behavior can measure
+        that it does.
+        """
+        return
 
     cdef uint32_t speed(self, uint32_t addr) noexcept:
         cdef uint32_t bank = (addr >> 16) & 0xFF
@@ -373,15 +388,19 @@ cdef class Bus:
             return self.wrio
         if a == 0x4214:
             self.mul_catch_up()
+            self.div_catch_up()
             return <uint8_t>(self.rd_div & 0xFF)
         if a == 0x4215:
             self.mul_catch_up()
+            self.div_catch_up()
             return <uint8_t>(self.rd_div >> 8)
         if a == 0x4216:
             self.mul_catch_up()
+            self.div_catch_up()
             return <uint8_t>(self.rd_mpy & 0xFF)
         if a == 0x4217:
             self.mul_catch_up()
+            self.div_catch_up()
             return <uint8_t>(self.rd_mpy >> 8)
         if 0x4218 <= a <= 0x421F:
             ch = (a - 0x4218) >> 1
@@ -495,6 +514,8 @@ cdef class Bus:
             return
         if a == 0x4203:
             self.mul_catch_up()
+            self.div_catch_up()
+            self.div_steps = 0
             self.mul_b = value
             if self.mul_steps:
                 # A write while one is running clears what has been
@@ -522,16 +543,18 @@ cdef class Bus:
             self.div_a = (self.div_a & 0x00FF) | (<uint16_t>value << 8)
             return
         if a == 0x4206:
+            self.div_catch_up()
+            if self.div_steps:
+                # "WRDIVB write during divide reloads RDMPY with last written
+                # value to WRDIV (value written is ignored)."
+                self.rd_mpy = self.div_a
+                return
             self.mul_steps = 0            # a divide takes the unit over
             self.div_b = value
-            if value == 0:
-                self.rd_div = 0xFFFF
-                self.rd_mpy = self.div_a
-            else:
-                quotient = self.div_a // value
-                remainder = self.div_a % value
-                self.rd_div = <uint16_t>quotient
-                self.rd_mpy = <uint16_t>remainder
+            self.rd_mpy = self.div_a      # "copy WRDIV to RDMPY"
+            self.rd_div = 0
+            self.div_shifter = (<uint32_t>value) << 16
+            self.div_steps = 16
             return
         if a == 0x4207:
             self.htime = (self.htime & 0x100) | value
@@ -809,6 +832,7 @@ cdef class Bus:
         self.next_event = best
 
     cdef void tick(self, int cycles) noexcept:
+        self.arith_step()
         self.master_clock += cycles
         if self.ticking:
             # DMA and HDMA charge their own cycles from inside an event; the
