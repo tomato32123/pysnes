@@ -178,9 +178,16 @@ def main():
     # earlier run's output means the same ROM here.
     ap.add_argument("--start", type=int, default=1,
                     help="skip to this position in the list (1-based)")
-    ap.add_argument("--play", action="store_true",
-                    help="press start and A while it runs, and report how "
-                         "much of the run was not a still picture")
+    # Pressing buttons is the default, because the run that does not press
+    # them is the weaker measurement and there is no reason for it to be the
+    # one you get by typing less.  Two SPC7110 cartridges sat in months of
+    # these reports as static screens; they were waiting for a button, and
+    # behind it was their manufacturer's own check program reporting ALL OK.
+    ap.add_argument("--no-play", dest="play", action="store_false",
+                    default=True,
+                    help="do not press anything: only check that it boots")
+    ap.add_argument("--play", dest="play", action="store_true",
+                    help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     roms = find_roms(args.romdir)
