@@ -208,3 +208,42 @@ There is a Bus.dma_channel() now that reads the file directly, and it
 was written for exactly this reason.  The lesson worth keeping is
 narrower than "verify your readings": it is that verifying a *different*
 path than the one you used is not verification at all.
+
+--- Mario Kart, what has been eliminated -------------------------------------
+
+Independent of any input: the attract demo drives itself round a lap and
+the road is the same slab, so the harness that presses buttons is not the
+cause.
+
+Ruled out, each by measurement:
+
+  * the DSP-1.  Command $0A, the raster coefficients, is asked for twice
+    in a race; command $06, which places the other karts, ten thousand
+    times, and the karts are placed correctly.
+  * the HDMA setup.  Channels 1 to 4 are configured exactly right --
+    indirect, two bytes to one register, $211B through $211E -- and their
+    line counters advance through the frame.
+  * the tables.  Well formed, and their pointers are followed correctly:
+    $4000 plus two bytes a line reaches $40A4 on the line it should.
+  * VRAM.  The track is in there: 251 distinct tilemap bytes, 220 distinct
+    tile bytes, 24,950 of 32,768 non-zero.  The picture the plane should
+    be showing is present and complete.
+  * Mode 7 rendering itself.  undisbeliever's four Mode 7 cartridges draw
+    an identical detailed image through four different VMAIN routes, so
+    the plane draws correctly when it is given a matrix.
+  * the processor writing the buffers.  Zero writes into $7E:4000-$4FFF
+    across five frames.
+  * a bulk fill through the WRAM port.  Zero writes to $2180-$2183 in a
+    frame, so they are not being filled by DMA either.
+
+What is left: the buffers those channels read -- $7E:4000, $7E:D000,
+$7E:6FE2, $7E:A0A2 -- are $FF from end to end, except for one byte at the
+very start of the first, and nothing observed fills them.  Four distinct
+(A, D) pairs do reach the matrix over a frame, including plausible ones
+like -9325 and 50, so something writes it occasionally; the rest of the
+lines get $FFFF from unwritten memory.
+
+The next question is what fills those buffers on hardware, and it has to
+be answered from the cartridge's own code rather than by guessing at the
+emulator.  Everything above is elimination, which is worth having written
+down: it is two sessions of work and none of it needs doing again.
