@@ -1,93 +1,70 @@
-# Android port — feasibility notes
+# Android
 
-Investigated, then shelved. Recording what was found so the next attempt does
-not have to rediscover it.
+**Built.** `android/bin/pysnes-0.1-arm64-v8a-debug.apk` is a real APK for
+`arm64-v8a`, produced on this machine by Buildozer and python-for-android.
+Everything below is what it took and what is still unknown.
 
-## This file is partly about a machine that is no longer the one
+Most of this file used to describe a Windows machine whose WSL2 would not
+start because VT-x was off in its firmware. That machine is not this one and
+that blocker does not exist here; the history has been dropped rather than
+left to mislead. Nobody needs to go looking for a BIOS setting.
 
-Everything under "The blocker" below describes a Windows machine whose WSL2
-would not start because VT-x was off in its firmware.  The project now lives
-on Linux, where python-for-android and Buildozer run directly, so **that
-blocker does not exist here**.  It is left in place because the machine may
-come back, but nobody should go hunting for a BIOS setting on this one.
-
-What is actually in the way now, in order:
-
-1. **Speed, and it is unmeasured.**  The core runs a frame in 4.70 ms here --
-   212 fps, three and a half times the budget -- on a desktop x86.  A phone's
-   single-core performance on this kind of work is commonly several times
-   lower, which would put a frame at 16-24 ms and the emulator at or below
-   the 60 Hz line.  Nothing about that is known: no ARM measurement has been
-   taken.  It should be the first thing done, because if the answer is bad
-   then optimisation comes before any app work, and packaging first would be
-   wasted.
-2. **There is no app.**  What exists is the emulator.  Display, sound, touch
-   controls, ROM handling, save-state UI and packaging are all absent.
-3. **Six coprocessors still want firmware**, so the DSP-series titles --
-   Super Mario Kart among them -- do not play correctly wherever this runs.
-
-## The blocker
-
-Building for Android means cross-compiling the Cython cores for `arm64-v8a`,
-which in practice means python-for-android / Buildozer, which only runs on
-Linux. On this machine that would be WSL2 — and WSL2 will not start:
+## How it is built
 
 ```
-Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED
+cd android
+buildozer android debug
 ```
 
-The cause is firmware, not Windows:
+from the conda `pysnes` environment, with the compiler variables **unset**
+first:
 
-| Check | Value |
-| --- | --- |
-| CPU | Intel Core i9-9900K |
-| `VMMonitorModeExtensions` (CPU supports VT-x) | True |
-| `VirtualizationFirmwareEnabled` (VT-x on in BIOS) | **False** |
-| `HypervisorPresent` | False |
+```
+unset LDFLAGS CFLAGS CPPFLAGS CXXFLAGS PKG_CONFIG_PATH CC CXX AR LD
+```
 
-So VT-x is switched off in the BIOS/UEFI. Docker Desktop is not a way around
-it — it runs on the same WSL2/Hyper-V layer.
+That is not optional. Conda's activation puts its own `CC`, `LDFLAGS` and
+`PKG_CONFIG_PATH` into the environment, and the NDK's cross-compiler then
+picks up x86-64 libraries and headers from the host: the failures it caused
+were an x86-64 `libzstd` and `libuuid` offered to an `aarch64` link, and a
+`Makefile` cached with a poisoned `CC` that survived several clean attempts.
 
-To unblock the local route:
+`android/recipes/pysnes` is a python-for-android `CythonRecipe` that copies
+`snes/`, `tools/`, `setup.py`, `build.py` and `pyproject.toml` out of the
+project and builds them in place. `pyproject.toml` exists for that recipe:
+without it the isolated build has no Cython.
 
-1. Reboot into BIOS/UEFI and enable *Intel Virtualization Technology (VT-x)*.
-2. From an elevated PowerShell: `wsl --install --no-distribution`, then reboot.
-3. `wsl -d Ubuntu` should then start, and the toolchain can be installed inside.
+## What it packages
 
-## What else was already in place
+`android/main.py` looks for ROMs in, in order:
 
-| Component | State |
-| --- | --- |
-| WSL2 Ubuntu (two distros) | installed, stopped |
-| Android SDK, platform-tools, `adb` | present, `adb` works |
-| Platform android-34, build-tools 34.0.0 | present |
-| Android NDK | **missing** (~1 GB download) |
-| JDK 17 | **missing** |
-| A physical device | none connected |
+    /storage/emulated/0/Android/data/org.pysnes.pysnes/files/roms
+    the app's own files directory
+    ./roms
 
-## Route that needs no local virtualisation
+The first is the one to use. Android 11's scoped storage will not let the
+app read an arbitrary folder, and -- separately -- the linker refuses to
+`dlopen` a shared object from `/storage` at all, which is why running the
+emulator from Termux out of shared storage fails every test at once.
+`tools/armcheck.sh` refuses to start from there and says why.
 
-GitHub Actions. `ubuntu-latest` runners have everything Buildozer needs, and
-the repository is already on GitHub, so a workflow can produce an APK as a
-build artifact. The cost is iteration speed: a Buildozer run takes 20-40
-minutes, and the first several attempts at a new recipe usually fail.
+## What is still unknown
 
-## Work remaining after the build chain works
+1. **Speed on the phone.** No ARM measurement exists. On this desktop the
+   core runs Super Mario World at about 236 fps, four times the 60 Hz
+   budget; a phone's single core on this kind of work is commonly several
+   times slower, which could put it anywhere from comfortable to half speed.
+   Until someone runs it, this is a guess and should be written as one.
+2. **The app is thin.** Display, sound and touch controls exist only as much
+   as `android/main.py` has them. Save states, a ROM picker and configuration
+   are not there.
+3. **Six coprocessors still want firmware**, so the DSP titles -- Super Mario
+   Kart among them -- will not play correctly wherever this runs. That is not
+   an Android problem.
 
-Getting an APK to build is the first of several steps, not the last:
+## Keeping the APK current
 
-* **A python-for-android recipe** that cross-compiles `snes/*.pyx` for arm64.
-  p4a builds Cython code for its own components, so the path is known, but a
-  recipe for a local package takes some fitting.
-* **A touch frontend.** The current one is keyboard-only and unusable on a
-  phone; an on-screen pad is needed. Bluetooth controllers, on the other
-  hand, arrive through the same SDL GameController API that `snes/gamepad.py`
-  already uses, so that part carries over unchanged.
-* **Storage.** Android's scoped storage means picking a ROM through the
-  Storage Access Framework rather than a path.
-* **Performance, unmeasured.** The desktop build runs at ~110 fps on an
-  i9-9900K. A phone's single-core throughput is roughly a third to a half of
-  that, which puts the estimate at 35-55 fps — possibly under the 60 fps
-  target. The scanline renderer in `snes/ppu.pyx` is the largest cost and
-  would be the first thing to optimise. This cannot be settled without a
-  device.
+It goes stale quickly: the first build was made twenty commits before it was
+next looked at, and by then it was missing a day of fixes and about a tenth
+of the frame rate. Rebuild it after any run of core changes worth having on
+the phone.
