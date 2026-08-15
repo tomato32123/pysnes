@@ -1058,8 +1058,11 @@ cdef class PPU:
 
         for layer in range(6):
             if not self.win_enabled[layer] and not self.win2_enabled[layer]:
-                for x in range(x0, x1):
-                    self.win_mask[layer][x] = 0
+                # Nothing is looking through this layer's windows, so the
+                # mask is not written at all -- filling it with zeroes is a
+                # pass over the line per layer, six of them, for a value
+                # every reader already knows.  The readers ask the same
+                # question first instead.
                 continue
             for x in range(x0, x1):
                 in1 = 1 if (l1 <= x <= r1) else 0
@@ -1106,6 +1109,11 @@ cdef class PPU:
             windowed = self.main_window[layer]
         if not enabled:
             return
+        # $212E and $212F only say the layer obeys its window; whether it has
+        # one is $2123-$2125.  With neither window switched on there is no
+        # region to clip to, and the mask has not been written.
+        if not (self.win_enabled[layer] or self.win2_enabled[layer]):
+            windowed = 0
 
         if layer == 4:
             for x in range(x0, x1):
@@ -1148,12 +1156,13 @@ cdef class PPU:
                     self.main_src[x] = layer
 
     cdef void _compose(self, uint32_t *row, int x0, int x1) noexcept:
-        cdef int x, i, mi, si, sub_used, math_here, halve, subtract, blacked
+        cdef int x, i, mi, si, sub_used, math_here, halve, subtract, blacked, inside
         cdef int r, g, b, sr, sg, sb
         cdef uint16_t main, main_raw, sub, fixed, fixed_or_main
         cdef uint32_t main_out
         cdef int bright = self.brightness
 
+        cdef int colour_win = 1 if (self.win_enabled[5] or self.win2_enabled[5]) else 0
         fixed = <uint16_t>(self.fixed_r | (self.fixed_g << 5) | (self.fixed_b << 10))
         subtract = 1 if (self.cgadsub & 0x80) else 0
         sub_used = 1 if (self.cgwsel & 0x02) else 0
@@ -1199,11 +1208,12 @@ cdef class PPU:
             # runs, and still asks whether the layer that would have been
             # showing has math switched on.  Skipping that question would let
             # the sub screen through in places the game meant to stay black.
-            blacked = self._region_black(self.cgwsel >> 6, self.win_mask[5][x])
+            inside = self.win_mask[5][x] if colour_win else 0
+            blacked = self._region_black(self.cgwsel >> 6, inside)
             if blacked:
                 main = 0
 
-            math_here = self._region(self.cgwsel >> 4, self.win_mask[5][x])
+            math_here = self._region(self.cgwsel >> 4, inside)
             if math_here:
                 i = self.main_src[mi]
                 if i == 5:

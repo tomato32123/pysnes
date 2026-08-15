@@ -1160,3 +1160,31 @@ made things slower; so did processor time, once, by forty percent.  Both
 were another emulator on the next core.  The reading that stands is the one
 that reproduced, and it agrees in direction with the mechanism -- which is
 the only reason to believe a five percent number on this machine at all.
+
+## Not filling a window mask nobody is looking through
+
+`_compute_windows` wrote a zero per dot per layer for every layer with no
+window switched on -- six passes over the line, per segment, for a value its
+readers could have worked out.  A game that writes a register mid-line gets
+several segments, so it paid for it several times a line.
+
+Sampled over ten seconds of eight library titles, the share of the six
+window users with neither window enabled:
+
+    Bahamut Lagoon, Battle Dodgeball II, Dokapon 3-2-1, Donkey Kong
+    Country, dq12j, Dragon Ball Z Super Butouden 3        all 100%
+    Dragon Quest III, Dragon Quest VI                     0%
+
+So for six of those eight the fill was entirely waste, every segment of
+every line, and for the other two none of it was.  The readers ask the
+question themselves now: `_paint` treats a layer with no window as
+unwindowed whatever $212E says, and `_compose` hoists the same question for
+the colour window out of its loop.
+
+    Bahamut Lagoon   2.081 -> 2.033 s of processor time, minimum of twelve
+
+That is 2.3%, against a spread of 0.8% between runs of the same build, so
+the timing on its own would not carry it.  What carries it is that the work
+removed is exact and the profile said `_compute_windows` was 4.3%; two
+percent measured against four percent available is the right order.  Every
+pixel-exact reference still matches.
