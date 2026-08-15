@@ -521,3 +521,38 @@ VMAIN and Mode 7 pairs did.
 Left alone rather than guessed at.  Two of the four remaining timer failures
 are the $F0 speed bits, decided against with reasons above; these two are
 not, and this is what is known about them.
+
+================================================================================
+Ladida's HDMA cartridge: one fault found under another.
+
+It drew nothing at all, and the reason was not HDMA.  CGWSEL's force-black
+field had inside and outside swapped, so a cartridge asking for "black
+inside the colour window" with no window set had its whole screen blacked.
+Fixing that also fixed two of undisbeliever's window cartridges, which
+nothing was aiming at.  The colour window was painting over the thing this
+ROM is actually about.
+
+What it is about, from byuu's own account beside the ROM: HDMA's
+initialisation at the top of a frame raises the transfer flag for all eight
+channels, including disabled ones, and then fetches a line counter only for
+the enabled ones.  So a channel switched on part way through a frame still
+carries that flag and transfers without a line fetch, reading its table one
+entry out.  And when no channel is enabled at the top of the frame the
+initialisation does not run at all, the flag stays down, and switching one
+on later costs a scanline before the first transfer.  The first case makes
+the picture green with no white line; the second puts the white line in.
+
+The real machine's answer is in expected-result.webm, a photograph of a
+CRT: white above, a black rectangle in the middle, green across the bottom
+third.
+
+This now draws white with a single black line where the green should
+start.  The boundary is in the right place and the green is missing, so
+the transfers stop after one.  The cartridge writes its line counter
+straight into $430A and then enables the channel mid-frame, which is the
+whole trick, and the window in which $420C is set is short enough that
+sampling the state has not caught it yet.
+
+Left there.  The flag is raised for all channels at init now, which is
+half of byuu's description; the other half is what happens on the very
+next HBlank, and that is where to start.
