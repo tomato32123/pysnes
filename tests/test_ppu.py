@@ -1173,24 +1173,7 @@ def test_hdma_terminates_on_a_zero_count():
     check("value held after the table ended", later, 0, "%d")
 
 
-def test_hdma_enabled_mid_frame_transfers_without_a_line_fetch():
-    """A channel switched on part way down the screen starts at the very next
-    HBlank, and starts with a transfer rather than a line fetch.
-
-    This test used to assert the opposite -- that nothing happens until the
-    next frame's init pass -- which was reasoning, not evidence, and it was
-    wrong.  byuu's Ladida cartridge is built to tell the two apart and comes
-    with a photograph of a real machine running it: the screen goes green,
-    which only happens if the first HBlank transfers.  Had it fetched a line
-    counter first, every read after that would be one byte along and the
-    screen would be a red gradient, which is what this emulator drew while
-    this test was passing.
-
-    So the sequence checked here is the cartridge's, in miniature: preset the
-    table pointer and a line count of one, enable part way down, and the next
-    HBlank writes the byte the pointer is on -- not the byte after it.
-    """
-    machine = run("""
+HDMA_MIDFRAME = """
         sep #$20
         lda #$8F
         sta $2100
@@ -1202,49 +1185,125 @@ def test_hdma_enabled_mid_frame_transfers_without_a_line_fetch():
         stz $212C
         lda #$0F
         sta $2100
-        ; set the channel up but only enable it from inside the display
-        lda #$00
-        sta $4300
-        lda #$00
-        sta $4301
-        rep #$20
-        lda #$5000
-        sta $4302
-        sep #$20
-        lda #$7E
-        sta $4304
-        rep #$20
-        lda #$5000              ; the table pointer, written straight in
-        sta $4308
-        sep #$20
-        ; $5000 is transferred as data, not read as a line count; $5001 is
-        ; then read as the count and ends the channel.
-        lda #$00
+
+        ; The table: a count of two, then a zero.  Which of the two bytes the
+        ; first transfer sends is the whole question.
+        lda #$02
         sta $7E5000
         lda #$00
         sta $7E5001
+        sta $7E5002             ; and a terminator, so nothing walks into
+        sta $7E5003             ; whatever the rest of RAM happens to hold
 
+        ; channel 0 writes one byte per entry to $2100
+        stz $4300
+        stz $4301
+        rep #$20
+        lda #$5000
+        sta $4302
+        sta $4308               ; the running pointer, written straight in
+        sep #$20
+        lda #$7E
+        sta $4304
+%(spare)s
         lda #$64
         sta $4209
         stz $420A
         lda #$20                ; V-only IRQ on line 100
         sta $4200
         cli
-spin:   bra spin
+        ; Switch channel 0 off again every V-blank, the way the cartridge
+        ; does.  Left on, it would still be enabled when the next frame
+        ; began, the init pass would arm it there, and the mid-frame enable
+        ; this test is about would no longer be a mid-frame enable at all.
+spin:   lda $4212
+        and #$80
+        beq spin
+        lda #%(vblank)s
+        sta $420C
+wait:   lda $4212
+        and #$80
+        bne wait
+        bra spin
 irq:    sep #$20
         lda #$01
-        sta $430A               ; one line on this entry
-        sta $420C               ; enable HDMA part-way down the first frame
+        sta $430A               ; one line left on this entry
+        lda #%(enable)s
+        sta $420C               ; switch channel 0 on, part way down the frame
         lda $4211
         rti
-""", max_frames=1).machine
-    # Only the first frame is examined.  Row 150 is below the enable, and the
-    # byte the pointer was left on is a zero written to $2100 -- so if the
-    # channel started, the row is dark.  If it had fetched a line counter
-    # first it would have read that same zero as a count, ended there, and
-    # left the row at full brightness.
-    check("mid-frame enable starts the channel at once",
+"""
+
+# A channel that is on when the frame begins, so that the init pass runs.  Its
+# own table is a single zero, so it transfers nothing itself -- all it does is
+# make the machine take the branch where init happens.
+SPARE_CHANNEL = """
+        lda #$00
+        sta $7E5100
+        stz $4370
+        lda #$26
+        sta $4371               ; aimed at a window bound, which with no
+                                ; window enabled changes nothing -- on the
+                                ; first frame its table is still whatever RAM
+                                ; held, and a spare channel must be harmless
+                                ; even then
+        rep #$20
+        lda #$5100
+        sta $4372
+        sep #$20
+        lda #$7E
+        sta $4374
+        lda #$80
+        sta $420C
+"""
+
+
+def test_hdma_mid_frame_enable_fetches_first_when_init_was_skipped():
+    """With no channel on at the top of the frame, a channel switched on part
+    way down spends its first HBlank fetching a line counter.
+
+    The two halves of byuu's Ladida cartridge are the two states of one flag,
+    and this is the half where it is clear: nothing was enabled when the frame
+    began, so the init pass never ran and never raised it.  The channel reads
+    the byte under its pointer as a count and transfers the one after it.
+
+    Here that means the zero reaches $2100 and the screen goes dark.  The
+    other half is the test below.
+    """
+    machine = run(HDMA_MIDFRAME % {"spare": "", "enable": "$01",
+                                   "vblank": "$00"}, max_frames=2).machine
+    check("a skipped init leaves the fetch to do",
           brightness_of_row(machine, 150), 0, "%d")
+
+
+def test_hdma_mid_frame_enable_transfers_at_once_when_init_ran():
+    """With any channel on at the top of the frame, one switched on part way
+    down transfers immediately, with no line fetch.
+
+    The init pass raises the transfer flag for all eight channels, including
+    the ones that are switched off, and only fetches counters for the ones
+    that are on.  So a channel enabled later inherits a flag from an
+    initialisation it took no part in, and its first HBlank sends the byte
+    under its own pointer -- a count byte, as data.  Every read after that is
+    one along.
+
+    This test used to assert that a mid-frame enable does nothing until the
+    next frame.  That was reasoning written down as fact; the cartridge and
+    the photograph of a real machine that ships with it say otherwise, and it
+    passed for exactly as long as the emulator was wrong the same way.
+
+    Here the count byte $02 reaches $2100, so the screen is at brightness 2
+    rather than the 0 the other case gives.  The spare channel transfers
+    nothing at all -- its only job is to make init run.
+    """
+    # Two frames, not one: the spare channel has to be on when a frame
+    # begins, and the first frame begins before the program has finished
+    # writing its table.  The second frame is the first one where it is a
+    # spare channel rather than a channel pointed at whatever RAM held.
+    machine = run(HDMA_MIDFRAME % {"spare": SPARE_CHANNEL, "enable": "$81",
+                                   "vblank": "$80"}, max_frames=2).machine
+    check("an init that ran leaves the transfer to do",
+          brightness_of_row(machine, 150), 2, "%d")
 
 
 # ------------------------------------------------------------ sprites ----
@@ -1604,6 +1663,48 @@ def main():
         return 1
     print("all PPU tests passed")
     return 0
+
+
+def test_colour_window_blacks_the_backdrop():
+    """CGWSEL's force-black applies to the backdrop, not only to layers.
+
+    With no layer switched on, every dot is the backdrop, and a cartridge
+    that asks for black inside the colour window expects a black band --
+    the backdrop is a colour like any other and the clip is applied after
+    the screen is composed, not while it is drawn.  byuu's Ladida test ROM
+    draws its black rectangle exactly this way: nothing on the main screen
+    at all, the colour window's bounds moved down the screen by HDMA, and
+    force-black inside.
+    """
+    machine = run("""
+        sep #$20
+        stz $2121
+        lda #$FF                ; backdrop white
+        sta $2122
+        lda #$7F
+        sta $2122
+        stz $212C               ; nothing on the main screen
+        stz $212D
+        lda #$40
+        sta $2126               ; window 1 from 64
+        lda #$C0
+        sta $2127               ; to 192
+        lda #$20
+        sta $2125               ; colour window uses window 1
+        lda #$80
+        sta $2130               ; force main black inside the colour window
+        lda #$0F
+        sta $2100
+        stz $4200
+spin:   bra spin
+irq:    rti
+""", max_frames=2).machine
+    check("outside the window is the backdrop", pixel(machine, 32, 100),
+          (255, 255, 255), "%s")
+    check("inside the window is black", pixel(machine, 128, 100),
+          (0, 0, 0), "%s")
+    check("past the right edge is the backdrop again",
+          pixel(machine, 224, 100), (255, 255, 255), "%s")
 
 
 if __name__ == "__main__":

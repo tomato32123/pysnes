@@ -596,3 +596,46 @@ mid-frame enable does nothing until the next frame.  It was reasoning
 written down as fact, it had never been checked against anything, and it
 passed for as long as the emulator was wrong in the same way.  Rewritten
 to the cartridge's own sequence.
+
+Correction to the entry above, and the rest of Ladida.
+
+That entry said the reset value of DoTransfer should be set rather than
+cleared, on the strength of the cartridge drawing green.  That was wrong,
+and wrong in the way worth recording: the reference is a video, not a
+photograph, and it shows the cartridge in two states.  A still frame taken
+out of it is not "the answer" -- it is one of two answers, and I had
+matched the emulator to whichever one I happened to have extracted.
+
+The cartridge is a demonstration of both halves of byuu's paragraph, and
+B switches between them.  Pressing it toggles a byte that does two things:
+it enables channel 7 at the top of the frame, whose only purpose is to make
+the init pass run at all, and it switches the colour window on.  So:
+
+  button up    no channel enabled at the frame's start, init skipped,
+               DoTransfer clear, the mid-frame channel fetches a line
+               counter first and reads its table one byte along -- colour
+               $001F, a red gradient, with the extra white line
+  button down  init runs, raises DoTransfer for all eight, the mid-frame
+               channel transfers without fetching -- colour $1F00, green,
+               no extra white line, and the black rectangle appears
+
+Both are correct hardware behaviour.  An emulator has to draw red for one
+and green for the other, and drawing green for both -- which is what the
+raised reset value did -- is not a fix, it is the same fault with a
+different picture.  byuu's published reset value is right.
+
+The rectangle is the colour window: HDMA channel 7 writes WH0/WH1 a line
+at a time from a table, so the bounds are (64,192) on lines 49 to 128 and
+empty elsewhere, and CGWSEL's force-black paints inside it.  Nothing on the
+main screen at all -- every dot of that screen is the backdrop, and the
+clip applies to the backdrop like any other colour.  That last part now has
+a test of its own, because it is the part an emulator is most likely to get
+wrong by only clipping layers.
+
+Two more things worth keeping.  The first: I read a rendered PNG as RGBA
+when this emulator's framebuffer is BGRA, called a red gradient blue, and
+built an argument about byte-swapped colour on top of it.  The framebuffer
+order is in tools/contactsheet.py and I had not looked.  The second: I
+looked at a contact sheet from before a rebuild and concluded the black
+rectangle was missing, when it had already been drawing.  Both times the
+correction came from reading pixel values instead of looking at a picture.

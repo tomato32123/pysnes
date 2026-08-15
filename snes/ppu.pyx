@@ -1805,6 +1805,25 @@ cdef class PPU:
                 "wide": self.bg_map_wide[i], "tall": self.bg_map_tall[i],
                 "shown": bool(self.main_enable[i] or self.sub_enable[i])}
 
+    def window_state(self):
+        """The two window ranges and who is looking through them.
+
+        A window is invisible from outside: it changes a picture without
+        drawing anything itself, so when a region fails to appear there is
+        no way to tell a window that is switched off from one whose bounds
+        are wrong from one whose bounds never arrived.  HDMA writes these
+        bounds a line at a time, which puts the answer somewhere no still
+        picture can show it.
+        """
+        names = ("BG1", "BG2", "BG3", "BG4", "OBJ", "COLOR")
+        return {"win1": (self.win1_left, self.win1_right),
+                "win2": (self.win2_left, self.win2_right),
+                "cgwsel": self.cgwsel, "cgadsub": self.cgadsub,
+                "users": {names[i]: (self.win_enabled[i], self.win_inverted[i],
+                                     self.win2_enabled[i], self.win2_inverted[i],
+                                     self.win_logic[i])
+                          for i in range(6)}}
+
     def dump(self):
         lines = [
             "INIDISP  forced_blank=%d brightness=%d" % (self.forced_blank, self.brightness),
