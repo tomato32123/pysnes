@@ -265,3 +265,43 @@ palettes start at 32, 64 and 96.
 Recorded because the picture is convincing and wrong.  Two cartridges judge
 each other only when everything outside the thing under test is equal, and
 here the backdrop was not.
+
+================================================================================
+The SPC7110, judged by the people who made it.
+
+Two cartridges in the library carry an SPC7110 and both were recorded as
+"flat" by the batch runner -- a couple of hundred lit pixels, nothing
+moving.  They are not broken.  Tengai Makyou Zero says
+
+    バックアップが壊れてます / Aボタンをおして
+    (the backup is corrupted / press the A button)
+
+and Momotarou Dentetsu Happy says PUSH A BUTTON, and pressing it runs the
+manufacturer's own check program, which is built into both cartridges:
+
+    SPC7110 CHECK PROGRAM V2.2   (Tengai Makyou Zero)
+    SPC7110 CHECK PROGRAM V3.0   (Momotarou Dentetsu Happy)
+    MODE 1
+      REG INIT                    OK
+      S-RAM DATA BUS   00   FF    OK
+      S-RAM ADDR BUS 0000 FFFF    OK
+      S-RAM R/W                   OK
+      D-PORT ACC       00   FF    OK
+      MUL                         OK
+      DIV                         OK
+      C-LENGTH                    OK
+      D-PORT B+O+S                OK
+      RTC TIME                    OK    (Tengai only; it has the clock)
+    COMPLETE
+    ALL OK
+
+Every item, on both cartridges, including the real-time clock this session
+rebuilt from the Epson part's own account of itself.
+
+This is the strongest evidence available for that chip and it was sitting
+behind one button press.  The batch runner presses nothing, so for months
+it recorded these two as a pair of static screens.
+
+Worth remembering next time something is classified rather than read: the
+classification was accurate -- two hundred lit pixels, no movement -- and
+what it was accurate about was a cartridge waiting to be asked.
