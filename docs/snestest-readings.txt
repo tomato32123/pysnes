@@ -858,3 +858,40 @@ the console gives is the question that is left, and it is a two-cycle
 question about the counter's phase rather than a four-cycle one about its
 value.  A knob on the reported dot cannot reach it, which is why the sweep
 above could not have succeeded and why the knob is not in the tree.
+
+================================================================================
+The library, after a day of changing HDMA and interrupt timing.
+
+Every game booted headless: 69 ok, 3 black, 3 flat, 1 that would not parse,
+out of 76.  Nothing new broke, which was the question worth asking after
+changing which HDMA channels may run and when the processor looks for an
+interrupt.
+
+The three that draw nothing were already known: Mix.smc and SMWREX.smc are
+Super Mario World hacks with the image itself destroyed, and Planet's Champ
+TG 3000 needs DSP firmware that is not here.
+
+The three "flat" ones are worth writing down because two of them are not
+faults at all.  Tengai Makyou Zero draws
+
+    バックアップが壊れてます
+    Aボタンをおして
+
+-- the save is empty, so it asks for a button, and the run was not pressing
+one.  Momotarou Dentetsu Happy sits in the same kind of loop, reading $4218
+and $4219 two thousand times.  batchtest.py has had a --play mode that
+presses Start and then A the whole time for exactly this, and it was not
+passed.  The reading was mine, not the emulator's.
+
+SD Gundam GX is a DSP-3 title and needs firmware, so that one is real and
+expected.
+
+The one that would not parse, DSP1 Tech Demo, is a 128 KiB image that is
+$FF everywhere except three small blocks, with no checksum and complement
+pair anywhere in it and nothing at either header position.  There is no
+header to find; the distribution is broken.  It would need DSP-1 firmware
+even if it loaded.
+
+Recorded because a library sweep is only as honest as its inputs, and a
+"flat" that means "waiting for the player" looks exactly like a "flat" that
+means "this emulator is wrong".
