@@ -47,12 +47,22 @@ def screen_text(machine):
     ROM that draws a picture instead.
     """
     vram = bytes(machine.ppu.vram_bytes)
+    # Where the screen actually is.  This read from word zero for a long
+    # time, which on most cartridges is the character generator: the same
+    # bytes on everything that shares a font, unchanging while the screen
+    # changes.  It made blargg's spc_dsp6 look hung twice.
+    base = 0
+    for bg in range(4):
+        info = machine.ppu.layer_map(bg)
+        if info["shown"]:
+            base = info["map"]
+            break
     lines = []
     printable = 0
     for row in range(28):
         chars = []
         for col in range(32):
-            code = vram[(row * 32 + col) * 2]
+            code = vram[((base + row * 32 + col) * 2) & 0xFFFF]
             if 32 <= code < 127:
                 chars.append(chr(code))
                 if code != 32:
@@ -67,8 +77,24 @@ def screen_text(machine):
     # words in it: runs of letters with spaces around them.  Without this,
     # a photograph of a mandrill reports a failure because three of its
     # tiles spell one.
-    words = re.findall(r"(?<![A-Za-z])[A-Za-z]{3,}(?![A-Za-z])", " ".join(lines))
+    joined = " ".join(lines)
+    words = re.findall(r"(?<![A-Za-z])[A-Za-z]{3,}(?![A-Za-z])", joined)
     if len(words) < 3:
+        return None
+    # Three words is not enough.  A screen of tile numbers that are not
+    # character codes still throws up letter runs -- `fnvff`, `ff<`, `p n x`
+    # -- and three of those pass a test written for three words.  What
+    # separates writing from noise is that in writing nearly every mark is
+    # part of a word: a report is letters and digits and a little
+    # punctuation, while noise is mostly symbols.
+    #
+    # This mattered: blargg's spc_dsp6 was declared hung twice on the
+    # strength of the same unreadable line coming back at every frame.  It
+    # was not hung.  The reader could not read it and said so in a shape
+    # that looked like an answer.
+    ink = [c for c in joined if c != " "]
+    in_words = sum(len(w) for w in words)
+    if not ink or in_words < len(ink) * 2 // 5:
         return None
     return [l for l in lines if l.strip()]
 

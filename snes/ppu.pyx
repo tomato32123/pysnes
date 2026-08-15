@@ -1778,6 +1778,20 @@ cdef class PPU:
             "bg3_priority": self.bg3_priority,
         }
 
+    def layer_map(self, int bg):
+        """Where a layer keeps its tilemap, and how big it is.
+
+        A tool that reads a screen back as text has to look where the
+        screen actually is.  Reading VRAM from zero finds the character
+        generator on most cartridges, which is the same bytes on every one
+        that shares a font and does not change when the screen does -- a
+        stable, convincing, meaningless answer.
+        """
+        cdef int i = bg & 3
+        return {"map": self.bg_map_base[i], "chr": self.bg_chr_base[i],
+                "wide": self.bg_map_wide[i], "tall": self.bg_map_tall[i],
+                "shown": bool(self.main_enable[i] or self.sub_enable[i])}
+
     def dump(self):
         lines = [
             "INIDISP  forced_blank=%d brightness=%d" % (self.forced_blank, self.brightness),
