@@ -247,3 +247,21 @@ The next question is what fills those buffers on hardware, and it has to
 be answered from the cartridge's own code rather than by guessing at the
 emulator.  Everything above is elimination, which is worth having written
 down: it is two sessions of work and none of it needs doing again.
+
+--------------------------------------------------------------------------------
+krom's four 2bpp background cartridges -- 8x8BG1Map2BPP32x328PAL and its BG2,
+BG3 and BG4 siblings.  Same image, same 32 colours, same 11,076 bytes of VRAM,
+each drawn on one layer in mode 0 with its palette at the base that layer's
+palette offset selects.  They look like a four-way answer of the kind the
+VMAIN cartridges give, and their pictures differ: the BG2, BG3 and BG4
+versions come out with black where BG1 has dark olive, over 15,063 pixels.
+
+Not a fault.  Every differing pixel is the same substitution, and the colour
+is $216A, which is CGRAM entry zero.  Those pixels are transparent, so what
+shows through them is the backdrop, and the backdrop is always CGRAM zero --
+which the BG1 cartridge fills and the others leave black, because their
+palettes start at 32, 64 and 96.
+
+Recorded because the picture is convincing and wrong.  Two cartridges judge
+each other only when everything outside the thing under test is equal, and
+here the backdrop was not.

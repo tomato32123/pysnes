@@ -12,6 +12,16 @@ does: the two screens have to come out the same pixel for pixel, or the
 remapping moved something it should not have.  Eleven cartridges with no
 verdict between them turn into six answers that way.
 
+Two cartridges only judge each other when everything outside the thing
+under test is equal, and that is easy to miss.  krom's four background
+tests looked like the same pair-wise answer -- one image, one palette,
+one layer each -- and their pictures differ in fifteen thousand pixels.
+Every one of those is the backdrop: the backdrop is always colour zero of
+CGRAM, the BG1 cartridge loads its palette there and the others load
+theirs higher up, so the transparent parts of the picture legitimately
+show different colours.  Nothing is wrong with the emulator and the
+cartridges were never meant to match.
+
 The cartridges are not in this repository.  Set PYSNES_ROMS to where they
 are, or drop them into roms/, and this runs; otherwise it skips.
 """
