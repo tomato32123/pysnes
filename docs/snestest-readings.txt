@@ -725,3 +725,45 @@ mismatching, and all twenty unit-test modules pass -- after adding the two
 rise times and the cycle start to the save state, which is what caught the
 omission.  A field the processor makes a decision against has to be in the
 state, or a restore takes an interrupt an instruction out.
+
+--------------------------------------------------------------------------------
+Correction, and where test_irq actually stops.
+
+The entry above says both cartridges stop at gate 3.  They stop at gate 2.
+The counter at $70:0000 is not zero when the first gate runs, so reading it
+as a count of gates passed is off by one, and the failure recorder can be
+found properly instead: the only STA-long in bank 0 that runs on the way to
+the report is at $8138, which is gate 2's.
+
+Gate 1 wants the CLC at $80E0 and passes.  Gate 2 has the same landing zone
+one delay further on and wants the NOP before it, and gets the CLC.
+
+Traced through both landing zones:
+
+  gate 1   00:80DC SEP  clock 1736342 +22
+           00:80DE SEC        1736364 +14
+           00:80DF NOP        1736378 +74   -> handler
+           00:80E0 CLC        1736798
+
+  gate 2   00:812D SEP  clock 2451076 +22
+           00:812F SEC        2451098 +14
+           00:8130 NOP        2451112 +74   -> handler
+           00:8131 CLC        2451532
+
+Identical.  The interrupt is taken at the end of the NOP in both, so both
+record the byte after it.  On the console the two differ by one
+instruction: gate 1 lands at the end of the NOP and gate 2 at the end of
+the SEC.
+
+That is the shape of the remaining fault and it is not the poll rule --
+the poll rule is what makes gate 1 right.  Between the two gates the
+program changes only how long it waits, so what has to be wrong is the
+length of that wait: the cycle-counted delay at $02:807D with a different
+argument, or the re-arming of the V-timer by the write to $4200 that sits
+between them.  Both are measurable and neither has been measured yet.
+
+Worth saying plainly: the earlier reading of "one instruction early" was
+right about the poll and wrong to stop there.  Two faults were stacked, one
+in when the processor looks and one in how long the program waits, and
+fixing the first moved the failure from gate 1 to gate 2 rather than
+turning the screen blue.
