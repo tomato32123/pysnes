@@ -13,3 +13,5 @@ pysnes-debug.spec
 *.state
 *.srm
 .romsdir
+android/.buildozer/
+android/bin/

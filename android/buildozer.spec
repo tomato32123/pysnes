@@ -30,7 +30,7 @@ android.permissions = READ_EXTERNAL_STORAGE
 
 # arm64 is every phone made in the last decade; armeabi-v7a is there for
 # older hardware and costs only build time.
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 
 android.api = 34
 android.minapi = 24
