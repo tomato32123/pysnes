@@ -767,3 +767,52 @@ right about the poll and wrong to stop there.  Two faults were stacked, one
 in when the processor looks and one in how long the program waits, and
 fixing the first moved the failure from gate 1 to gate 2 rather than
 turning the screen blue.
+
+--------------------------------------------------------------------------------
+What the delay routine actually is, and why gate 1 passing is not evidence.
+
+$02:8000 is not a delay at all.  It waits for the field flag and V-blank,
+then latches the H counter through $2137 and reads it back from $213C twice,
+subtracts, and computes a delay from the difference -- the program aligns
+itself to a dot before every gate.  The delay it computes is then spent in
+$02:807D, which subtracts $140, loops subtracting $64 while the value is
+still $100 or more, subtracts $9C, puts what is left in X and jumps through
+a table at $842A.
+
+The table entries are chains built to be two master cycles apart:
+
+    XBA + BIT #imm     20 + 16 = 36     (three cycles and two, all from ROM)
+    LDA dp + NOP       24 + 14 = 38     (three cycles, one of them WRAM)
+
+Swapping one pair for the other buys exactly two master cycles, which is the
+finest step the console offers -- there is no instruction that costs less
+than a whole cycle, so the routine trades cycle counts against memory speeds
+instead.  Measured here, gate 1 takes the chain at $02:823A for 234 master
+cycles and gate 2 the one at $02:824C for 236.  Both correct, and the two
+gates are two master cycles apart by design.
+
+Which is the problem.  Both gates were landing at exactly the same offset
+into the SEC -- eight master cycles, the start of its last cycle -- and two
+cycles of difference had gone missing.  It had not: irq_rose_at was
+recording when the timer event was *processed*, and events are processed at
+the end of whichever processor cycle crossed their deadline.  That rounds
+the instant up to a cycle boundary, and the processor's decision compares it
+against a cycle boundary, so the rounding threw the whole question away.
+Both gates rounded to the same boundary.
+
+Recording the real instant instead -- the event's own deadline -- puts gate
+1's rise at one master cycle into the SEC rather than eight, and gate 1
+fails.  So gate 1 was passing because the rounding happened to land it on
+the boundary it was being compared against.  That is not a pass and must not
+be read as one.  The commit that claimed it should be read with this beside
+it.
+
+The change is reverted, because shipping a cartridge regression on the
+strength of a half-finished investigation is worse than leaving a known
+artefact in place with a note on it.  What the measurement leaves behind is
+a well-posed question that neither the poll rule nor the delay chains can
+answer: the V-timer's interrupt fires about seven master cycles earlier,
+relative to where the program has aligned itself, than this cartridge
+expects.  Seven is not a multiple of four, so it is not a whole dot, and
+either the alignment this ROM computes from $213C is landing somewhere
+slightly different here or the timer's instant is.  Both are measurable.
