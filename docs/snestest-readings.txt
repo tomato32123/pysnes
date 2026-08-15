@@ -424,3 +424,24 @@ in the emulator, for behaviour no game uses.  Written down with the
 formula and the place it would go -- APU.tick, where the SPC700's cycles
 become the timers' scaler input -- so that whoever decides differently
 starts from the answer rather than from the measurements.
+
+--------------------------------------------------------------------------------
+The multiplier's start, settled; the divider's, not.
+
+With the unit stepping once a processor cycle, three of the four muldiv
+cartridges pass: div_behavior, mul_behavior, and mul_timing -- the last
+against a checksum over its whole sixteen-row table, which no accident
+matches.  It wants one cycle between the write that starts a multiply and
+its first step.
+
+The divider's is not a delay.  Sweeping it from nought to eight only
+slides its table along; the values themselves are wrong.  Ours reaches a
+quotient of $0001 four steps in, which for $AA55 over $07 means the first
+three comparisons all failed, and they should -- $07 shifted up fifteen,
+fourteen and thirteen places are all larger than $AA55.  So the shape is
+right and the alignment is not, and whatever is missing is in how the
+first step relates to the write rather than in how many clocks apart the
+steps are.
+
+Left there.  div_timing is the only one of the four still failing, and it
+is failing on less than it was.

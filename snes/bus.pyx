@@ -171,6 +171,10 @@ cdef class Bus:
         self.mul_shifter = 0
         self.div_steps = 0
         self.div_shifter = 0
+        self.mul_delay = 1
+        self.div_delay = 0
+        self.arith_wait = 0
+        self.arith_busy = 0
         self.mul_steps = 0
         self.mul_clock = 0
         self.wram_addr = 0
@@ -226,6 +230,12 @@ cdef class Bus:
         master clocks gains two bits at some of their readings and none at
         others, which is what div_timing's table showed.
         """
+        if self.arith_wait:
+            self.arith_wait -= 1
+            return
+        if not (self.div_steps or self.mul_steps):
+            self.arith_busy = 0
+            return
         if self.div_steps:
             self.div_shifter >>= 1
             self.rd_div = <uint16_t>(self.rd_div << 1)
@@ -534,6 +544,8 @@ cdef class Bus:
             self.mul_shifter = value
             self.rd_mpy = 0
             self.mul_steps = 8
+            self.arith_wait = self.mul_delay
+            self.arith_busy = 1
             self.mul_clock = self.master_clock
             return
         if a == 0x4204:
@@ -555,6 +567,8 @@ cdef class Bus:
             self.rd_div = 0
             self.div_shifter = (<uint32_t>value) << 16
             self.div_steps = 16
+            self.arith_wait = self.div_delay
+            self.arith_busy = 1
             return
         if a == 0x4207:
             self.htime = (self.htime & 0x100) | value
@@ -832,7 +846,11 @@ cdef class Bus:
         self.next_event = best
 
     cdef void tick(self, int cycles) noexcept:
-        self.arith_step()
+        # One predictable branch on the hottest path in the emulator: the
+        # unit is idle almost always, and asking three questions per memory
+        # access instead of one cost nearly three milliseconds a frame.
+        if self.arith_busy:
+            self.arith_step()
         self.master_clock += cycles
         if self.ticking:
             # DMA and HDMA charge their own cycles from inside an event; the
