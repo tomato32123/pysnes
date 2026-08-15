@@ -1094,9 +1094,15 @@ thing being looked at.
 * Mario Kart's flat road.  Seven candidates eliminated by measurement,
   including the DSP-1.  The game never fills its per-line matrix buffers and
   nothing observable writes them.
-* Four interrupt cartridges that report through a screen colour.  They record
-  the byte an interrupt landed on, and this lands one instruction early.  The
-  arithmetic work has not moved it.
+* Four interrupt cartridges, now readable rather than red: they keep the byte
+  the failing gate saw at $70:0001 and a running count beside it, so the
+  question is a byte and a gate number rather than a colour.  The processor
+  looks for an interrupt before its instruction's last cycle now, which is
+  what gate 1 wanted; gate 2 wants the same landing one instruction earlier
+  and gets the same one as gate 1.  Between those two gates the program
+  changes only how long it waits, so what is left is the length of that wait
+  -- the delay at $02:807D with a different argument, or the V-timer being
+  re-armed by the $4200 write between them.  Neither is measured yet.
 * Four homebrew cartridges that draw nothing.  `tools/whystuck.py` gives each
   a different answer in seconds.
 * The DSP-1's Mode 7 commands are still worked out from geometry.  Firmware
