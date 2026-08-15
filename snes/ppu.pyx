@@ -927,6 +927,12 @@ cdef class PPU:
         # drawn half as wide as it should be and the map is read at twice the
         # rate: krom's interlaced font demo comes out as fragments of the
         # wrong letters.
+        #
+        # The same as in _render_bg: a layer on neither screen is never read
+        # back, because _paint returns at once for it and is the only thing
+        # that looks at bg_idx_hi.
+        if not (self.main_enable[bg] or self.sub_enable[bg]):
+            return
         cdef int tile_shift = 4
         cdef int tile_shift_v = 3 + self.bg_tile_size[bg]
         cdef int base_y = self._mosaic_y(bg, line)
