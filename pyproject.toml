@@ -1,0 +1,10 @@
+# What is needed to build this, stated where a build tool will look.
+#
+# setup.py imports Cython at the top, which is fine when it is run in an
+# environment that has it and fails when pip builds in the isolated one it
+# makes for itself.  That is how the Android build first failed: pip asked
+# the project for its requirements, the project asked for Cython, and there
+# was none.
+[build-system]
+requires = ["setuptools>=64", "Cython>=3.0"]
+build-backend = "setuptools.build_meta"

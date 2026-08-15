@@ -15,7 +15,7 @@ version = 0.1
 # end takes -- a window, a streaming texture, and the mixer.  The cores are
 # not here: they are Cython, and Cython extensions cannot be listed as a
 # requirement.  See the note at the bottom.
-requirements = python3,pygame
+requirements = python3,pygame,pysnes
 
 orientation = landscape
 fullscreen = 1
@@ -38,6 +38,8 @@ android.ndk_api = 24
 
 # Keep the build's own noise out of the repository.
 android.private_storage = True
+
+p4a.local_recipes = ./recipes
 
 [buildozer]
 log_level = 2
