@@ -816,3 +816,45 @@ relative to where the program has aligned itself, than this cartridge
 expects.  Seven is not a multiple of four, so it is not a whole dot, and
 either the alignment this ROM computes from $213C is landing somewhere
 slightly different here or the timer's instant is.  Both are measurable.
+
+--------------------------------------------------------------------------------
+A whole class of explanations eliminated, by sweeping a knob that should not
+be shipped.
+
+The question left above was whether the alignment this cartridge computes
+from $213C lands somewhere slightly different here, or whether the timer's
+instant does.  A skew was added to the counter a $2137 read reports, purely
+to sweep it, and the two cartridges read at each setting.
+
+With the rounded rise time -- what is shipped:
+
+    skew  -12 .. -4   irq $EA   nmi $EA
+    skew   -2 .. +6   irq $18   nmi $18
+    skew  +10 .. +14  irq $A5   nmi $A5
+
+With the real rise time:
+
+    skew   -8 .. +3   irq $EA
+    skew   +4 .. +12  irq $18
+
+No setting passes both gates, either way.  The recorded byte walks whole
+instructions -- $EA, then $18, then the LDA after it -- and gate 1 and gate 2
+change together.  They never sit on opposite sides of the decision.
+
+That is a real elimination, and it is the point of writing it down.  The
+counter a $2137 read reports is a dot, so any constant added to it moves the
+program's arrival in steps of four master cycles; the two gates are two
+apart by construction; a four-cycle step cannot separate a two-cycle pair.
+So no error of the form "this emulator's H counter is N dots out" can
+explain these two gates, however N is chosen.  Every version of that idea is
+now dead, including the one the entry above named as likely.
+
+What survives: the cartridge resolves its own sub-dot phase by latching the
+counter twice, 230 master cycles apart, and testing whether the reported
+difference came out 57 dots or 58 -- 230 is 57.5 dots, so the answer depends
+on the phase, and the program adds 0 or 2 master cycles accordingly.
+Measured here, both answers do occur.  Whether they occur on the same phases
+the console gives is the question that is left, and it is a two-cycle
+question about the counter's phase rather than a four-cycle one about its
+value.  A knob on the reported dot cannot reach it, which is why the sweep
+above could not have succeeded and why the knob is not in the tree.
