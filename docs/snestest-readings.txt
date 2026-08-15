@@ -477,3 +477,27 @@ cartridges say what.
 
 Left at no delay, which is the setting that keeps three passing.
 div_timing is the one that fails, and it fails by one step.
+
+--------------------------------------------------------------------------------
+Power-up memory, from two real consoles.
+
+blargg's 2010-03-14 set carries mem_dumps/: VRAM, WRAM, OAM and CGRAM taken
+at power-up from two machines, labelled "big" and "mini".  WRAM is not
+uniform on either:
+
+    big   7f55 457f 457f 7f42 4e7f 7f44 7f44 457f
+    mini  bf45 d0fa fad0 45ef ef45 50fa fa50 45ef
+
+and the two disagree, which settles what kind of thing it is: DRAM settling,
+not a specification.  This emulator fills WRAM with $55, which is one of the
+bytes that dominates the "big" dump, so it is a reasonable stand-in and
+there is nothing to copy.  Recorded so that the next person to find those
+files knows they are not an oracle.
+
+The four timer cartridges beside them are still failing, and two of the four
+are not the $F0 speed bits: test_timer_stop passes while test_timer_stop2
+fails on the same displayed value, and stop2 differs by enabling all three
+timers at once ($F1 = $87) with a target of 2.  timer_at_power_reset prints
+$FFD2, which is where the SPC700 sits after its boot loader.  No source ships
+with these, so the pair is the only handle: one passes, one fails, and the
+difference between them is written above.
