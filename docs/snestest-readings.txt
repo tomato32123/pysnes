@@ -335,3 +335,53 @@ looks exactly like a hang.  It reaches zero at frame 2,619.
 
 Recorded so the next person to see a black screen there gives it ten
 thousand frames before concluding anything.
+
+================================================================================
+The divider has a during, and this does not model it.  Six failures found.
+
+Fixing the screen reader turned 426 unreadable screens into 366, and with
+them six cartridges that report failure where one did before:
+
+  blargg_2010-03-14/speed_2_freezes2      Failed
+  blargg_2010-03-14/test_timer_speed      0A 2731 / 1A          Failed
+  blargg_2010-03-14/test_timer_speed2     0A 2731 / 1A 2731     Failed
+  blargg_2010-03-14/test_timer_stop2      00                    Failed
+  blargg_2010-03-14/timer_at_power_reset  FFD2                  Failed
+  muldiv_tests/div_behavior   "WRDIVB write during div should reload
+                               WRDIV into RDMPY"                Failed #6
+
+The last one is the one with an answer attached, and the answer is in a
+notes.txt beside the ROM, the same place the multiplier's was:
+
+    WRDIVL write during divide has no effect on result.
+    WRDIVH write during divide has no effect on result.
+    WRDIVB write during divide reloads RDMPY with last written value to
+    WRDIV (value written is ignored).
+    Start divide: copy WRDIV to RDMPY.  Copy WRDIVB to internal right
+    shifter.
+
+So RDMPY is the divider's working register, and reloading it part way
+changes the answer -- which is exactly what the cartridge measures.  Its
+test 5 divides $A359 by $81 uninterrupted and wants $0144 remainder
+$0015; test 6 interrupts it and wants $017F remainder $839A.
+
+A sixteen-step restoring division reproduces both: the first exactly, the
+second when the reload lands before the tenth step, which is where three
+NOPs and a store put it.  Test 7's earlier store wants $0111 remainder
+$001E, and that is steps eight and nine.  Three numbers, one algorithm,
+no fitting.
+
+What is missing is the cadence.  Implemented at six master cycles a step,
+the reload landed on step twelve; at eight and at four it still failed at
+test 6, and at twelve it failed earlier, at test 2.  div_timing.smc
+prints the intermediate RDDIV and RDMPY at every cycle from $02 to $11
+and ours are wrong throughout even though the final $1855 remainder $0002
+is right -- our quotient gains two bits at some cycles and none at
+others, which is a divider running at a rate the cartridge does not
+recognise.
+
+The stepped divider is reverted.  It passed nothing the instant one did
+not, and its timing was invented.  The algorithm above is worth keeping,
+and so is div_timing's table: sixteen rows of what the intermediates
+should be, which is enough to settle the cadence for whoever picks this
+up with more patience than I had left today.
