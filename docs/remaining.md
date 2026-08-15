@@ -1188,3 +1188,32 @@ the timing on its own would not carry it.  What carries it is that the work
 removed is exact and the profile said `_compute_windows` was 4.3%; two
 percent measured against four percent available is the right order.  Every
 pixel-exact reference still matches.
+
+## Two things that did not work, and how to measure on this machine
+
+`_paint` reads five things per dot that cannot change during the call --
+which buffer the layer comes from, whether the screen is hires, whether
+direct colour applies, whether the layer is windowed, which screen is being
+written.  Hoisting them into locals and selecting the target buffers as
+pointers made it **2.3% slower**, twice, measured properly.  The compiler
+was already hoisting what mattered, and turning two fixed arrays into
+pointers costs more in aliasing than the branches saved.  Reverted.
+
+Measuring anything here needed a method first.  Single runs vary by up to
+70%; the minimum of eight helps but not enough, because the load drifts
+between one build's batch and the next.  Three times in one session a
+change measured as a large regression and then reproduced as an
+improvement, or the reverse.
+
+What works: build both versions, keep the two `.so` files, and alternate
+them run by run, taking each one's minimum.
+
+    cp with.so    snes/ppu.cpython-312-x86_64-linux-gnu.so   # then time it
+    cp without.so snes/ppu.cpython-312-x86_64-linux-gnu.so   # then time it
+    ... eight times, alternating
+
+Interleaved that way both versions see the same load, and the answer held
+across two runs of the experiment even though the absolute times nearly
+doubled between them.  Rebuilding between measurements does not just cost a
+minute; it puts each build in its own stretch of time, which is exactly the
+thing that has to be controlled for.
