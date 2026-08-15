@@ -151,6 +151,8 @@ cdef class Bus:
         self.irq_flag = 0
         self.timer_irq = 0
         self.irq_pending = 0
+        self.irq_rose_at = 0
+        self.cycle_start = 0
         self.irq_lock = 3
         self.irq_line_done = 0
         self.nmi_count = 0
@@ -905,6 +907,7 @@ cdef class Bus:
         # access instead of one cost nearly three milliseconds a frame.
         if self.arith_busy:
             self.arith_step()
+        self.cycle_start = self.master_clock
         self.master_clock += cycles
         if self.ticking:
             # DMA and HDMA charge their own cycles from inside an event; the
@@ -1012,7 +1015,10 @@ cdef class Bus:
     cdef inline void _update_irq(self) noexcept:
         """The CPU sees one IRQ line.  The console's H/V timer drives it, and
         so can a chip on the cartridge, so the flag is the OR of the two."""
-        self.irq_pending = 1 if (self.timer_irq or self.board.irq_line) else 0
+        cdef int now = 1 if (self.timer_irq or self.board.irq_line) else 0
+        if now and not self.irq_pending:
+            self.irq_rose_at = self.master_clock
+        self.irq_pending = now
 
     cdef inline int _line_length(self) noexcept:
         """Length of the line just started.
@@ -1225,14 +1231,6 @@ cdef class Bus:
     # python interface
     # =====================================================================
 
-    def irq_state(self):
-        return dict(nmi_enabled=self.nmi_enabled, nmi_flag=self.nmi_flag,
-                    nmi_pending=self.nmi_pending, nmi_count=self.nmi_count,
-                    irq_mode=self.irq_mode, irq_flag=self.irq_flag,
-                    irq_pending=self.irq_pending, irq_count=self.irq_count,
-                    htime=self.htime, vtime=self.vtime,
-                    auto_joypad=self.auto_joypad, fast_rom=self.fast_rom)
-
     def page_kind_at(self, addr):
         """Which kind of memory backs this address: for spotting execution
         that has run off into open bus."""
@@ -1257,7 +1255,14 @@ cdef class Bus:
                     irq_mode=self.irq_mode, irq_flag=bool(self.irq_flag),
                     irq_pending=bool(self.irq_pending), irq_count=self.irq_count,
                     htime=self.htime, vtime=self.vtime,
-                    auto_joypad=bool(self.auto_joypad))
+                    auto_joypad=bool(self.auto_joypad),
+                    # Whether an interrupt is taken one instruction early or
+                    # late turns on how much of the current instruction was
+                    # left when the line rose -- a master-cycle question
+                    # inside an instruction, which no instruction trace can
+                    # show.
+                    lock=bool(self.irq_lock), rose_at=self.irq_rose_at,
+                    clock=self.master_clock)
 
     def set_pad(self, int index, int value):
         self.pad_state[index & 3] = <uint16_t>value

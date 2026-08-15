@@ -71,6 +71,7 @@ cdef class SA1Space(AddressSpace):
         return self.mdr
 
     cdef void tick(self, int cycles) noexcept:
+        self.cycle_start = self.master_clock
         self.master_clock += cycles
 
     cdef uint32_t speed(self, uint32_t addr) noexcept:

@@ -738,7 +738,15 @@ cdef class CPU:
         if not self.bus.irq_lock:
             if self.bus.nmi_pending:
                 self.take_nmi = 1
-            self.take_irq = 1 if (self.bus.irq_pending and not i_before) else 0
+            # The line has to have been up before the instruction's last
+            # cycle began.  One that rises during that cycle is not seen
+            # until the end of the next instruction, which is the whole of
+            # what tukuyomi's four cartridges measure: they aim an interrupt
+            # at a particular byte with a cycle-counted delay and report the
+            # byte it actually landed on.  Polling at the boundary instead
+            # takes such an interrupt an instruction early.
+            self.take_irq = 1 if (self.bus.irq_pending and not i_before
+                                  and self.bus.irq_rose_at < self.bus.cycle_start) else 0
 
     # =====================================================================
     # instruction dispatch

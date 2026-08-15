@@ -18,6 +18,13 @@ cdef class AddressSpace:
     # DMA finishing inside that window hides the decision until the
     # instruction after next -- which is what Sour's dma_irq_test measures.
     cdef public int irq_lock
+    # When the line last went up, and when the cycle now running began.  The
+    # processor has to have seen the line before its instruction's last cycle
+    # started; one that rises inside that cycle waits for the instruction
+    # after.  Neither question can be answered at an instruction boundary,
+    # which is the only place a trace can look.
+    cdef public int64_t irq_rose_at
+    cdef public int64_t cycle_start
 
     cdef uint8_t read8(self, uint32_t addr) noexcept
     cdef void write8(self, uint32_t addr, uint8_t value) noexcept

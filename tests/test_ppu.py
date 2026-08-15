@@ -1211,6 +1211,20 @@ HDMA_MIDFRAME = """
         stz $420A
         lda #$20                ; V-only IRQ on line 100
         sta $4200
+        ; Let two whole frames go by before letting an interrupt in.  The
+        ; first frame of all begins before the program has finished writing
+        ; its tables, so a channel armed there is pointed at whatever RAM
+        ; happened to hold -- which is a real thing a console does, and no
+        ; part of what this test is asking about.
+        ldx #$02
+edge:   lda $4212
+        and #$80
+        beq edge
+back:   lda $4212
+        and #$80
+        bne back
+        dex
+        bne edge
         cli
         ; Switch channel 0 off again every V-blank, the way the cartridge
         ; does.  Left on, it would still be enabled when the next frame
@@ -1271,7 +1285,7 @@ def test_hdma_mid_frame_enable_fetches_first_when_init_was_skipped():
     other half is the test below.
     """
     machine = run(HDMA_MIDFRAME % {"spare": "", "enable": "$01",
-                                   "vblank": "$00"}, max_frames=2).machine
+                                   "vblank": "$00"}, max_frames=5).machine
     check("a skipped init leaves the fetch to do",
           brightness_of_row(machine, 150), 0, "%d")
 
@@ -1296,12 +1310,8 @@ def test_hdma_mid_frame_enable_transfers_at_once_when_init_ran():
     rather than the 0 the other case gives.  The spare channel transfers
     nothing at all -- its only job is to make init run.
     """
-    # Two frames, not one: the spare channel has to be on when a frame
-    # begins, and the first frame begins before the program has finished
-    # writing its table.  The second frame is the first one where it is a
-    # spare channel rather than a channel pointed at whatever RAM held.
     machine = run(HDMA_MIDFRAME % {"spare": SPARE_CHANNEL, "enable": "$81",
-                                   "vblank": "$80"}, max_frames=2).machine
+                                   "vblank": "$80"}, max_frames=5).machine
     check("an init that ran leaves the transfer to do",
           brightness_of_row(machine, 150), 2, "%d")
 

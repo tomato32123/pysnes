@@ -639,3 +639,47 @@ order is in tools/contactsheet.py and I had not looked.  The second: I
 looked at a contact sheet from before a rebuild and concluded the black
 rectangle was missing, when it had already been drawing.  Both times the
 correction came from reading pixel values instead of looking at a picture.
+
+================================================================================
+tukuyomi's four interrupt cartridges: the mechanism, not the constant.
+
+The note further up recorded that delaying the interrupt line by a swept
++24 master cycles moved test_irq's first gate from $EA to the $18 it wants,
+and rejected it: a number that satisfies one reading out of six is the
+shape of that reading, not a measurement.  That was right to reject.  What
+was missing was where the four cycles actually are.
+
+Measured, with a new record of when the line goes up:
+
+  02:80DE  SEC   starts 1736364, opcode fetch 8, internal cycle 6
+  the line rises at                1736372
+  the instruction ends at          1736378
+
+So the line rose exactly at the start of the instruction's last cycle, and
+this emulator took the interrupt at the end of that instruction.  The
+cartridges say it should not have: they aim an interrupt at a chosen byte
+with a cycle-counted delay and report the byte it landed on, and all four
+report one instruction earlier than the console does.
+
+The poll was at the instruction boundary.  It now requires the line to have
+been up before the last cycle began -- a line that rises inside that cycle
+waits for the end of the next instruction.  With that, test_irq's first
+gate reads $18.
+
+Two guards, both from hardware.  Sour's dma_irq_test reads 13 of 14 before
+and after, the one mismatch being the row its own README gets wrong (noted
+further up).  The twenty unit-test modules pass.
+
+The four screens are still red: the gates after the first fail for their
+own reasons, exactly as they did with the fitted constant in place.  What
+is different is that this is a mechanism with a measurement behind it
+rather than a number chosen to make one gate pass, so the gates that
+remain can now be read as their own questions.
+
+A test in this session's HDMA work failed on this change and was fragile,
+not wrong: it let an interrupt in on the first frame of all, before the
+program had finished writing its tables, so a channel could be armed
+pointing at whatever RAM held.  It now waits two frames.  Worth recording
+because the change that exposed it had nothing to do with HDMA -- a test
+that depends on power-on RAM will eventually fail for a reason from the
+other side of the emulator.
