@@ -791,6 +791,14 @@ cdef class PPU:
 
     cdef void _render_bg(self, int bg, int line, int bpp, int pal_base,
                          int x0, int x1) noexcept:
+        # A layer on neither screen is never read back: _paint returns at
+        # once for it, and nothing else looks at bg_idx.  Drawing it costs a
+        # full pass over the line for a result that cannot be seen.  The
+        # sprites are deliberately not treated this way -- their evaluation
+        # sets the range and time overflow flags whatever $212C says, and a
+        # program can read those.
+        if not (self.main_enable[bg] or self.sub_enable[bg]):
+            return
         cdef int tile_shift = 3 + self.bg_tile_size[bg]
         cdef int base_y = self._mosaic_y(bg, line)
         cdef int y = base_y + self.bg_vofs[bg]

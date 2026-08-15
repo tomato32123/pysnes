@@ -1133,3 +1133,30 @@ things twice as slow; eight said it made them a tenth faster.
 Guards: all twenty test modules, krom's 66 reference pages, ppucompare's 35
 demos exact to the pixel, and the VMAIN pairs.  A renderer change that
 alters no pixel anywhere is the only kind worth having.
+
+## Not drawing layers that are on neither screen
+
+`_render_bg` ran for every background the mode has, whether or not $212C or
+$212D had it on.  Nothing reads the result of that: `_paint` returns at once
+for a layer on neither screen and it is the only thing that looks at
+`bg_idx`.  The sprites are deliberately left alone -- their evaluation sets
+the range and time overflow flags that $213E reports whatever the screen
+registers say, so skipping them would be observable.
+
+How often it matters, sampled over ten seconds of ten library titles:
+
+    Dragon Quest III   100%    Dragon Quest VI    100%    Battle Dodgeball II  75%
+    Bahamut Lagoon      50%    Donkey Kong Country 50%    Final Fantasy IV     50%
+    Dokapon 3-2-1       25%    Dragon Quest V      25%
+
+-- the share of background layers on neither screen.  Super Mario World is
+not in that list because it keeps all of its on, which is why the benchmark
+this work started from showed nothing at all.
+
+    Bahamut Lagoon   3.768 -> 3.588 s of processor time, best of five
+
+That measurement took three tries to get honest.  Wall clock said the change
+made things slower; so did processor time, once, by forty percent.  Both
+were another emulator on the next core.  The reading that stands is the one
+that reproduced, and it agrees in direction with the mechanism -- which is
+the only reason to believe a five percent number on this machine at all.
