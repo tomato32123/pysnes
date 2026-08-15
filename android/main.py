@@ -23,14 +23,44 @@ import pygame
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from snes.system import System, BUTTONS
 
-# Where a phone lets an app keep files it can see.  The first ROM found is
-# the one that runs; picking between several is a screen this does not have
-# yet, and pretending otherwise would be worse than the honest limitation.
-ROM_DIRS = [
-    "/sdcard/pysnes",
-    "/storage/emulated/0/pysnes",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "roms"),
-]
+def rom_dirs():
+    """Where to look for a cartridge, best chance first.
+
+    Android 11 stopped letting an app read /sdcard just because it asked,
+    so the shared folders below may be unreadable however the permissions
+    are declared.  The app's own external directory always is -- it is the
+    one a file manager shows under Android/data -- so it goes first, and
+    the shared ones stay as the convenient case for a phone that still
+    allows them.
+
+    The first cartridge found is the one that runs.  Choosing between
+    several is a screen this does not have yet, and pretending otherwise
+    would be worse than saying so.
+    """
+    # Reachable by a file manager and readable without any permission:
+    # this is where a cartridge should go.
+    dirs = ["/storage/emulated/0/Android/data/org.pysnes.pysnes/files/roms"]
+    try:                                  # only present on the phone
+        from android.storage import (app_storage_path,
+                                     primary_external_storage_path)
+        dirs.append(os.path.join(app_storage_path(), "roms"))
+        dirs.append(os.path.join(primary_external_storage_path(), "pysnes"))
+        dirs.append(os.path.join(primary_external_storage_path(), "Download"))
+    except ImportError:
+        pass
+    argument = os.environ.get("ANDROID_ARGUMENT")
+    if argument:
+        dirs.append(os.path.join(argument, "roms"))
+    dirs += [
+        "/sdcard/pysnes",
+        "/storage/emulated/0/pysnes",
+        "/storage/emulated/0/Download/pysnes",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "roms"),
+    ]
+    return dirs
+
+
+ROM_DIRS = rom_dirs()
 ROM_SUFFIXES = (".smc", ".sfc", ".swc", ".fig")
 
 PICTURE_W, PICTURE_H = 512, 478          # what the PPU hands over
