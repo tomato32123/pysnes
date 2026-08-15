@@ -501,3 +501,23 @@ timers at once ($F1 = $87) with a target of 2.  timer_at_power_reset prints
 $FFD2, which is where the SPC700 sits after its boot loader.  No source ships
 with these, so the pair is the only handle: one passes, one fails, and the
 difference between them is written above.
+
+--------------------------------------------------------------------------------
+test_timer_stop2, measured as far as it can be without its source.
+
+    test_timer_stop    one timer enabled, target 1        Passed
+    test_timer_stop2   all three enabled, targets 2, 0, 0 Failed
+
+Both display "00".  In stop2 all three timers run here: their dividers
+advance and their four-bit counters change from frame to frame, so nothing
+is stalled.  Targets of 0 behave as 256, which is what timers 1 and 2 get.
+
+That is as far as measurement goes.  No source ships with these, notes.txt
+beside them is about $F0's speed bits and not about stopping, and the pair
+differ in three things at once -- how many timers, which targets, and what
+is written to $F1 -- so the difference does not isolate a cause the way the
+VMAIN and Mode 7 pairs did.
+
+Left alone rather than guessed at.  Two of the four remaining timer failures
+are the $F0 speed bits, decided against with reasons above; these two are
+not, and this is what is known about them.
