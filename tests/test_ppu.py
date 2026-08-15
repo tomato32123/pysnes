@@ -1186,14 +1186,16 @@ HDMA_MIDFRAME = """
         lda #$0F
         sta $2100
 
-        ; The table: a count of two, then a zero.  Which of the two bytes the
-        ; first transfer sends is the whole question.
+        ; The table: a count of two, then zeroes.  Which of the first two
+        ; bytes the first transfer sends is the whole question, and the
+        ; zeroes after them stop the channel walking into whatever the rest
+        ; of RAM happens to hold.
         lda #$02
         sta $7E5000
         lda #$00
         sta $7E5001
-        sta $7E5002             ; and a terminator, so nothing walks into
-        sta $7E5003             ; whatever the rest of RAM happens to hold
+        sta $7E5002
+        sta $7E5003
 
         ; channel 0 writes one byte per entry to $2100
         stz $4300
@@ -1206,51 +1208,41 @@ HDMA_MIDFRAME = """
         lda #$7E
         sta $4304
 %(spare)s
-        lda #$64
-        sta $4209
-        stz $420A
-        lda #$20                ; V-only IRQ on line 100
-        sta $4200
-        ; Let two whole frames go by before letting an interrupt in.  The
-        ; first frame of all begins before the program has finished writing
-        ; its tables, so a channel armed there is pointed at whatever RAM
-        ; happened to hold -- which is a real thing a console does, and no
-        ; part of what this test is asking about.
-        ldx #$02
-edge:   lda $4212
+        ; No interrupt anywhere in this test.  It used to enable the channel
+        ; from a V-timer handler, and it broke twice in one day on changes
+        ; that had nothing to do with HDMA -- once on power-on RAM and once
+        ; on when the processor looks for an interrupt.  A test of HDMA
+        ; should not be able to fail for either reason, so the line is
+        ; waited for by reading the counter instead.
+frame:  lda $4212
         and #$80
-        beq edge
-back:   lda $4212
-        and #$80
-        bne back
-        dex
-        bne edge
-        cli
-        ; Switch channel 0 off again every V-blank, the way the cartridge
-        ; does.  Left on, it would still be enabled when the next frame
-        ; began, the init pass would arm it there, and the mid-frame enable
-        ; this test is about would no longer be a mid-frame enable at all.
-spin:   lda $4212
-        and #$80
-        beq spin
+        beq frame               ; wait for V-blank
         lda #%(vblank)s
-        sta $420C
-wait:   lda $4212
+        sta $420C               ; channel off again, so the next frame's init
+                                ; pass sees it the way this test means it to
+show:   lda $4212
         and #$80
-        bne wait
-        bra spin
-irq:    sep #$20
+        bne show                ; wait for the display to start
+line:   lda $213F               ; reset the counter latch
+        lda $2137               ; latch H and V
+        lda $213D               ; V, low byte
+        cmp #$64
+        bcc line                ; wait for line 100
+        ; Point the channel at the start of its table again.  It is left
+        ; wherever last frame stopped otherwise, and every frame after the
+        ; first reads whatever follows -- which is how a test of one frame's
+        ; behaviour quietly becomes a test of uninitialised RAM.
+        rep #$20
+        lda #$5000
+        sta $4308
+        sep #$20
         lda #$01
         sta $430A               ; one line left on this entry
         lda #%(enable)s
         sta $420C               ; switch channel 0 on, part way down the frame
-        lda $4211
-        rti
+        bra frame
 """
 
-# A channel that is on when the frame begins, so that the init pass runs.  Its
-# own table is a single zero, so it transfers nothing itself -- all it does is
-# make the machine take the branch where init happens.
 SPARE_CHANNEL = """
         lda #$00
         sta $7E5100
@@ -1285,7 +1277,7 @@ def test_hdma_mid_frame_enable_fetches_first_when_init_was_skipped():
     other half is the test below.
     """
     machine = run(HDMA_MIDFRAME % {"spare": "", "enable": "$01",
-                                   "vblank": "$00"}, max_frames=5).machine
+                                   "vblank": "$00"}, max_frames=4).machine
     check("a skipped init leaves the fetch to do",
           brightness_of_row(machine, 150), 0, "%d")
 
@@ -1311,7 +1303,7 @@ def test_hdma_mid_frame_enable_transfers_at_once_when_init_ran():
     nothing at all -- its only job is to make init run.
     """
     machine = run(HDMA_MIDFRAME % {"spare": SPARE_CHANNEL, "enable": "$81",
-                                   "vblank": "$80"}, max_frames=5).machine
+                                   "vblank": "$80"}, max_frames=4).machine
     check("an init that ran leaves the transfer to do",
           brightness_of_row(machine, 150), 2, "%d")
 
