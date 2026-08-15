@@ -683,3 +683,45 @@ pointing at whatever RAM held.  It now waits two frames.  Worth recording
 because the change that exposed it had nothing to do with HDMA -- a test
 that depends on power-on RAM will eventually fail for a reason from the
 other side of the emulator.
+
+--------------------------------------------------------------------------------
+The same rule for NMI, and a better way to read these four cartridges.
+
+Disassembling test_irq from a correct instruction boundary shows what the
+screen colour was hiding.  Each gate is:
+
+    JSL $02807D            cycle-counted delay
+    SEP #$20 / SEC / NOP / CLC      the landing zone
+    LDA $00                the byte the handler recorded
+    CMP #$18               gate 1 wants the CLC
+    BEQ next
+    STA $700001            failure: the wrong byte, into SRAM
+    JMP report
+  next:
+    LDA $700000 / INC A / STA $700000     a count of gates passed
+
+So $70:0000 counts the gates that passed and $70:0001 holds the byte the
+failing one saw.  A red screen says "somewhere"; these say where and what.
+Reading them is two lines and should have been the first thing done to
+these four cartridges rather than the last.
+
+Before the poll change, with the byte read only through the screen:
+
+  test_irq       1 gate,  saw $EA        test_nmi   0 gates, saw $EA
+
+After it, and after giving NMI the same rule -- it is latched on an edge
+rather than held as a level, but the processor looks for it at the same
+moment:
+
+  test_irq       2 gates, saw $18        test_nmi   2 gates, saw $18
+  test_irq4200   no count written        demo_irqtest  3 gates
+
+Gate 1 wants the CLC at $80E0 and gate 2 wants the NOP one byte before it,
+with a shorter delay.  Both pass now.  Gate 3 is where both stop, and both
+hand it $18.  That is the next question and it is a well-posed one.
+
+Guards unchanged: dma_irq_test 13 of 14 with only its own README's bad row
+mismatching, and all twenty unit-test modules pass -- after adding the two
+rise times and the cycle start to the save state, which is what caught the
+omission.  A field the processor makes a decision against has to be in the
+state, or a restore takes an interrupt an instruction out.

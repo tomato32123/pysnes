@@ -152,6 +152,7 @@ cdef class Bus:
         self.timer_irq = 0
         self.irq_pending = 0
         self.irq_rose_at = 0
+        self.nmi_rose_at = 0
         self.cycle_start = 0
         self.irq_lock = 3
         self.irq_line_done = 0
@@ -540,6 +541,8 @@ cdef class Bus:
                 self._arm_irq(self.line_start)
             # Enabling NMI while the flag is already set fires immediately.
             if (value & 0x80) and not self.nmi_enabled and self.nmi_flag:
+                if not self.nmi_pending:
+                    self.nmi_rose_at = self.master_clock
                 self.nmi_pending = 1
             self.nmi_enabled = (value >> 7) & 1
             return
@@ -979,6 +982,8 @@ cdef class Bus:
             self.in_vblank = 1
             self.nmi_flag = 1
             if self.nmi_enabled:
+                if not self.nmi_pending:
+                    self.nmi_rose_at = self.master_clock
                 self.nmi_pending = 1
                 self.nmi_count += 1
             if self.auto_joypad:
@@ -1098,7 +1103,7 @@ cdef class Bus:
 
     def state_ints(self):
         cdef int i, j
-        v = [self.mdr, self.master_clock, self.hcount, self.line_start, self.next_event, self.mul_shifter, self.mul_steps, self.mul_clock, self.vcount, self.field, self.frame, self.frame_ready, self.ticking, self.lines_per_frame, self.vblank_start, self.nmi_enabled, self.nmi_flag, self.nmi_pending, self.irq_mode, self.irq_flag, self.irq_pending, self.irq_line_done, self.timer_irq, self.in_vblank, self.in_hblank, self.htime, self.vtime, self.fast_rom, self.wrio, self.mul_a, self.mul_b, self.div_a, self.div_b, self.rd_div, self.rd_mpy, self.wram_addr, self.auto_joypad, self.auto_joypad_busy, self.joypad_busy_until, self.pad_latched, self.hdma_enabled, self.dma_enabled]
+        v = [self.mdr, self.master_clock, self.hcount, self.line_start, self.next_event, self.mul_shifter, self.mul_steps, self.mul_clock, self.vcount, self.field, self.frame, self.frame_ready, self.ticking, self.lines_per_frame, self.vblank_start, self.nmi_enabled, self.nmi_flag, self.nmi_pending, self.irq_mode, self.irq_flag, self.irq_pending, self.irq_line_done, self.timer_irq, self.in_vblank, self.in_hblank, self.htime, self.vtime, self.fast_rom, self.wrio, self.mul_a, self.mul_b, self.div_a, self.div_b, self.rd_div, self.rd_mpy, self.wram_addr, self.auto_joypad, self.auto_joypad_busy, self.joypad_busy_until, self.pad_latched, self.hdma_enabled, self.dma_enabled, self.irq_rose_at, self.nmi_rose_at, self.cycle_start]
         for i in range(6):
             v.append(self.ev_time[i])
         for i in range(4):
@@ -1130,7 +1135,7 @@ cdef class Bus:
         return v
 
     def load_ints(self, v):
-        cdef int i, j, k = 42
+        cdef int i, j, k = 45
         self.mdr = v[0]
         self.master_clock = v[1]
         self.hcount = v[2]
@@ -1152,6 +1157,12 @@ cdef class Bus:
         self.irq_mode = v[18]
         self.irq_flag = v[19]
         self.irq_pending = v[20]
+        # When each line went up, and when the current cycle began: the
+        # processor's decision to take an interrupt is made against these,
+        # so a state restored without them can take one an instruction out.
+        self.irq_rose_at = v[42]
+        self.nmi_rose_at = v[43]
+        self.cycle_start = v[44]
         self.irq_line_done = v[21]
         self.timer_irq = v[22]
         self.in_vblank = v[23]

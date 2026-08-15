@@ -24,6 +24,7 @@ cdef class AddressSpace:
     # after.  Neither question can be answered at an instruction boundary,
     # which is the only place a trace can look.
     cdef public int64_t irq_rose_at
+    cdef public int64_t nmi_rose_at
     cdef public int64_t cycle_start
 
     cdef uint8_t read8(self, uint32_t addr) noexcept

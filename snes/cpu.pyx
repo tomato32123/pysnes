@@ -736,7 +736,11 @@ cdef class CPU:
         # interrupt is actually taken, which is what stops SEI's own decision
         # from letting one through.
         if not self.bus.irq_lock:
-            if self.bus.nmi_pending:
+            # NMI is latched on an edge rather than held as a level, but the
+            # processor looks for it at the same moment, so the same rule
+            # decides it: tukuyomi's test_nmi reports the byte it landed on
+            # exactly as its three siblings do.
+            if self.bus.nmi_pending and self.bus.nmi_rose_at < self.bus.cycle_start:
                 self.take_nmi = 1
             # The line has to have been up before the instruction's last
             # cycle began.  One that rises during that cycle is not seen
