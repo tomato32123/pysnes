@@ -556,3 +556,43 @@ sampling the state has not caught it yet.
 Left there.  The flag is raised for all channels at init now, which is
 half of byuu's description; the other half is what happens on the very
 next HBlank, and that is where to start.
+
+Ladida's cartridge: solved, against the photograph.
+
+Three faults, each hiding the next.
+
+The first was that a channel switched on part way through a frame never ran
+at all.  hdma_run gated on a flag set only by a line-counter reload, and
+reloads only happen at the top of a frame for channels already enabled --
+so the one thing this cartridge does was the one thing that could not
+happen.  The flag is not "has a table", it is "has not terminated", and
+nothing has terminated at power-on.
+
+The second was that termination was remembered across frames with nothing
+to clear it.  On the hardware there is no such latch: a channel is finished
+because its line counter is zero, and writing a count to $43xA is enough to
+revive it.  The cartridge writes $01 there immediately before enabling,
+every frame, which is exactly what that write is for.  Without this it drew
+correctly on one frame and never again.
+
+The third was the reset value of DoTransfer, which byuu published as
+cleared and marked "this is now under debate, may not be necessary".
+Cleared is wrong.  A channel first used part way through a frame then
+spends its first HBlank fetching a line counter, and every read after that
+is one byte along: the four data bytes come from 00 00 1F 00 instead of
+08 00 00 1F, which is colour $001F rather than $1F00 -- red rather than
+green, and repeated down the screen as a gradient because the channel
+survives instead of ending.  byuu's own note beside the ROM says the right
+answer is "no extra white line, and the color is green instead of a red
+gradient", and the photograph agrees.  So the flag is set at reset, and a
+reload raises it whatever count it read.
+
+What draws now: white above, green across the bottom third, boundary in
+the right place.  What does not: the black rectangle in the middle of the
+white area, which is nothing to do with HDMA.  That is next.
+
+A test in the suite had asserted the opposite of all this -- that a
+mid-frame enable does nothing until the next frame.  It was reasoning
+written down as fact, it had never been checked against anything, and it
+passed for as long as the emulator was wrong in the same way.  Rewritten
+to the cartridge's own sequence.

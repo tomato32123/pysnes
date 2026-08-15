@@ -1173,9 +1173,23 @@ def test_hdma_terminates_on_a_zero_count():
     check("value held after the table ended", later, 0, "%d")
 
 
-def test_hdma_enabled_mid_frame_waits_for_the_next_frame():
-    """The init pass happens once per frame; enabling later does nothing until
-    the next one."""
+def test_hdma_enabled_mid_frame_transfers_without_a_line_fetch():
+    """A channel switched on part way down the screen starts at the very next
+    HBlank, and starts with a transfer rather than a line fetch.
+
+    This test used to assert the opposite -- that nothing happens until the
+    next frame's init pass -- which was reasoning, not evidence, and it was
+    wrong.  byuu's Ladida cartridge is built to tell the two apart and comes
+    with a photograph of a real machine running it: the screen goes green,
+    which only happens if the first HBlank transfers.  Had it fetched a line
+    counter first, every read after that would be one byte along and the
+    screen would be a red gradient, which is what this emulator drew while
+    this test was passing.
+
+    So the sequence checked here is the cartridge's, in miniature: preset the
+    table pointer and a line count of one, enable part way down, and the next
+    HBlank writes the byte the pointer is on -- not the byte after it.
+    """
     machine = run("""
         sep #$20
         lda #$8F
@@ -1199,14 +1213,16 @@ def test_hdma_enabled_mid_frame_waits_for_the_next_frame():
         sep #$20
         lda #$7E
         sta $4304
-        lda #$82
+        rep #$20
+        lda #$5000              ; the table pointer, written straight in
+        sta $4308
+        sep #$20
+        ; $5000 is transferred as data, not read as a line count; $5001 is
+        ; then read as the count and ends the channel.
+        lda #$00
         sta $7E5000
         lda #$00
         sta $7E5001
-        lda #$00
-        sta $7E5002
-        lda #$00
-        sta $7E5003
 
         lda #$64
         sta $4209
@@ -1217,15 +1233,18 @@ def test_hdma_enabled_mid_frame_waits_for_the_next_frame():
 spin:   bra spin
 irq:    sep #$20
         lda #$01
+        sta $430A               ; one line on this entry
         sta $420C               ; enable HDMA part-way down the first frame
         lda $4211
         rti
 """, max_frames=1).machine
-    # Only the first frame is examined.  The init pass that arms a channel runs
-    # at the top of a frame, so nothing can transfer until the next one; rows
-    # below line 100 must still be at full brightness.
-    check("mid-frame enable does not start the channel",
-          brightness_of_row(machine, 150), 15, "%d")
+    # Only the first frame is examined.  Row 150 is below the enable, and the
+    # byte the pointer was left on is a zero written to $2100 -- so if the
+    # channel started, the row is dark.  If it had fetched a line counter
+    # first it would have read that same zero as a count, ended there, and
+    # left the row at full brightness.
+    check("mid-frame enable starts the channel at once",
+          brightness_of_row(machine, 150), 0, "%d")
 
 
 # ------------------------------------------------------------ sprites ----

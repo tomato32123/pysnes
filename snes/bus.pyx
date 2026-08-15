@@ -207,8 +207,17 @@ cdef class Bus:
             self.hdma_table[i] = 0xFFFF
             self.hdma_line[i] = 0xFF
             self.dma_unused[i] = 0xFF
-            self.hdma_active[i] = 0
-            self.hdma_do_transfer[i] = 0
+            # "Active" is the absence of a termination, not the presence of a
+            # table.  Nothing has terminated at power-on, so all eight start
+            # set; hdma_enabled is what decides whether any of them run.
+            self.hdma_active[i] = 1
+            # byuu's published reset clears this, with the line marked
+            # "under debate, may not be necessary".  Clearing it is wrong:
+            # a channel first used part way through a frame then spends its
+            # first HBlank fetching a counter, and every read after that is
+            # one byte out.  Ladida's cartridge does exactly that and shows
+            # the difference as a red gradient rather than green.
+            self.hdma_do_transfer[i] = 1
         self.hdma_enabled = 0
         self.dma_enabled = 0
 
@@ -657,6 +666,14 @@ cdef class Bus:
                 self.hdma_table[ch] = (self.hdma_table[ch] & 0x00FF) | (<uint16_t>value << 8)
             elif reg == 0xA:
                 self.hdma_line[ch] = value
+                # A channel is finished for the frame when a reload reads a
+                # zero count, and the only record of that is the zero itself:
+                # there is no separate latch on the hardware to say so.  So
+                # writing a count here revives it.  Ladida's cartridge is
+                # built on that -- it writes $01 immediately before enabling
+                # the channel part way through the frame, every frame, and
+                # without this the channel runs once and never again.
+                self.hdma_active[ch] = 1 if value else 0
             else:
                 self.dma_unused[ch] = value
             return
@@ -756,12 +773,15 @@ cdef class Bus:
         cdef uint32_t bank = self.dma_abus[ch] & 0xFF0000
         self.hdma_line[ch] = self.read8(bank | self.hdma_table[ch])
         self.hdma_table[ch] += 1
-        if self.hdma_line[ch] == 0:
-            self.hdma_active[ch] = 0
-            self.hdma_do_transfer[ch] = 0
-        else:
-            self.hdma_active[ch] = 1
-            self.hdma_do_transfer[ch] = 1
+        # The reload raises "transfer on the next HBlank" whatever it read.
+        # A zero count stops the channel, so the flag has no effect there --
+        # but it is still set, and that is what a channel revived part way
+        # through a later frame runs on.  Clearing it here instead is what
+        # made Ladida's cartridge draw a red gradient: the revived channel
+        # spent its first HBlank fetching a counter, which put every later
+        # read one byte out.
+        self.hdma_active[ch] = 0 if self.hdma_line[ch] == 0 else 1
+        self.hdma_do_transfer[ch] = 1
         # The indirect address is fetched even for a terminating entry: the
         # hardware has already started the read by the time it sees the zero.
         if self.dma_param[ch] & 0x40:
@@ -784,8 +804,6 @@ cdef class Bus:
         gradient.
         """
         cdef int ch
-        for ch in range(8):
-            self.hdma_active[ch] = 0
         if not self.hdma_enabled:
             return
         for ch in range(8):
