@@ -1037,3 +1037,67 @@ the last — it used to judge on the last, and reported working games as black
 because it caught them mid-fade. And when a golden trace changes, re-record
 it deliberately (`difftrace record`) after looking at the diff, never
 reflexively; the whole point is that a moved cycle has to be noticed.
+
+---
+
+## The day the instruments were read
+
+A later session, and the shape of it was different from the ones above: most
+of what it found came from fixing the things that do the looking, not the
+thing being looked at.
+
+**What is verified now, by something outside this repository:**
+
+| what | by what |
+| --- | --- |
+| every 65816, SPC700 and GSU instruction | krom's 66 cartridges, all passing |
+| the sound chip, in depth | blargg's eight, including spc_dsp6's sixty checks |
+| the SPC7110, including its clock | the manufacturer's own check program in two games, ALL OK |
+| the SA-1's memory protection | absindx's 222 tests, matching a photograph of real hardware |
+| VRAM address remapping at every depth | undisbeliever's cartridges, judged against each other |
+| the multiply and divide unit | Jonas Quinn's four, two of them checksums over whole tables |
+| save states and rewind | the suite's own, which had never run before today |
+
+**The instruments that were lying, and what each cost:**
+
+* `Bus.read()` resolves by page kind, and the register file is not a page --
+  so reading a DMA channel returned whatever the bus last carried.  All eight
+  channels agreed, uniformly and fictitiously, and an investigation into
+  Mario Kart was built on it before the reading was checked against the path
+  it had actually taken.  `Bus.dma_channel()` exists because of that.
+* `tools/verdicts.py` decoded VRAM from word zero as though the tilemap were
+  always there.  On most cartridges word zero is the font, so it returned the
+  same bytes for every ROM sharing one and the same bytes at every frame while
+  the screen changed.  It called blargg's spc_dsp6 hung twice.  Reading four
+  hundred and twenty-six screens "unreadable" was mostly this; fixing it left
+  three hundred and sixty-six and turned up six failures nobody had seen.
+* `tools/runtests.py` printed SKIP for save states and rewind all session,
+  and the reason was a line of setup, not a missing cartridge.  There are five
+  hundred on this machine.
+
+**What was decided against, with reasons, rather than left vague:**
+
+* `$230E`, the SA-1 version register: the cartridge that looks like its
+  oracle branches unconditionally to its own failure path.  It cannot pass.
+  Two sessions have now read that FAILED as a verdict; the second one is
+  written down so a third does not.
+* `$F0` bits 4-7, the SPC700's clock and timer speed: blargg's own notes give
+  the formula and twelve measurements confirm it.  Not implemented, because
+  those bits stretch the sound chip's clock -- the one piece of timing that
+  currently satisfies eight audio cartridges and a real game's music -- and
+  no commercial game writes them.
+* An interrupt-line offset of +24 master cycles, which fixes exactly one gate
+  of one cartridge and is contradicted by five others.
+
+**Still open, with the next step named:**
+
+* Mario Kart's flat road.  Seven candidates eliminated by measurement,
+  including the DSP-1.  The game never fills its per-line matrix buffers and
+  nothing observable writes them.
+* Four interrupt cartridges that report through a screen colour.  They record
+  the byte an interrupt landed on, and this lands one instruction early.  The
+  arithmetic work has not moved it.
+* Four homebrew cartridges that draw nothing.  `tools/whystuck.py` gives each
+  a different answer in seconds.
+* The DSP-1's Mode 7 commands are still worked out from geometry.  Firmware
+  would remove the guessing and unlock six chips at once.
