@@ -51,6 +51,14 @@ CHECKS = [
      [sys.executable, "tools/spc7110check.py",
       ROMS + "/snes/Momotarou Dentetsu Happy (Japan)/"
       "Momotarou Dentetsu Happy (Japan).sfc"], True),
+    # The whole game library against the last recorded run.  Reports "could
+    # not run" until a baseline exists; take one with the same command and
+    # no --baseline file present, on a build whose other checks all pass.
+    # An hour is not enough for it on a loaded machine, which is why it is
+    # last: everything above will have reported by the time it gives up.
+    ("the library against its baseline",
+     [sys.executable, "tools/batchtest.py", ROMS + "/snes",
+      "--frames", "900", "--baseline", ".library-baseline"], True),
 ]
 
 

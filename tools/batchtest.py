@@ -213,8 +213,14 @@ def main():
     # clone.  Without one this writes it; with one it compares and says what
     # moved.
     ap.add_argument("--baseline", default=None,
-                    help="compare each ROM's final frame against this file, "
-                         "or write it if it does not exist")
+                    help="compare each ROM's final frame against this file")
+    # Writing is a separate word on purpose.  With one flag that compares
+    # when the file is there and writes when it is not, the first run of an
+    # automated check creates the thing it was supposed to check against and
+    # reports success -- which is the failure mode this whole file exists to
+    # prevent.
+    ap.add_argument("--write-baseline", default=None,
+                    help="record this run as the baseline in this file")
     ap.add_argument("--play", action="store_true",
                     help="press start and A while it runs, and report how "
                          "much of the run was not a still picture")
@@ -222,7 +228,10 @@ def main():
 
     base = {}
     base_frames = None
-    if args.baseline and os.path.exists(args.baseline):
+    if args.baseline and not os.path.exists(args.baseline):
+        raise SystemExit("no baseline at %s; take one with --write-baseline"
+                         % args.baseline)
+    if args.baseline:
         with open(args.baseline) as fh:
             for line in fh:
                 if line.startswith("#"):
@@ -267,41 +276,42 @@ def main():
     print("summary:", dict(by_status), flush=True)
 
     if args.baseline:
-        if base:
-            changed, missing, added = [], [], []
-            for r in results:
-                was = base.get(r["name"])
-                if was is None:
-                    added.append(r["name"])
-                elif was != (r["status"], r.get("digest", "")):
-                    changed.append((r["name"], was, (r["status"], r.get("digest", ""))))
-            seen = {r["name"] for r in results}
-            missing = [n for n in base if n not in seen]
-            if changed:
-                print(flush=True)
-                print("== different from the baseline ==", flush=True)
-                for name, was, now in changed:
-                    print("  %-46s %s %s  ->  %s %s"
-                          % (name[:46], was[0], was[1], now[0], now[1]), flush=True)
-            for n in added:
-                print("  new since the baseline: %s" % n, flush=True)
-            for n in missing:
-                print("  in the baseline but not run: %s" % n, flush=True)
+        changed, missing, added = [], [], []
+        for r in results:
+            was = base.get(r["name"])
+            if was is None:
+                added.append(r["name"])
+            elif was != (r["status"], r.get("digest", "")):
+                changed.append((r["name"], was, (r["status"], r.get("digest", ""))))
+        seen = {r["name"] for r in results}
+        missing = [n for n in base if n not in seen]
+        if changed:
             print(flush=True)
-            print("%d of %d match the baseline" % (len(results) - len(changed),
-                                                   len(results)), flush=True)
-            # A regression detector has to be able to fail.  Anything that
-            # moved, appeared or vanished is a difference worth stopping on;
-            # if the change was meant, take the baseline again.
-            return 1 if (changed or added or missing) else 0
-        with open(args.baseline, "w") as fh:
+            print("== different from the baseline ==", flush=True)
+            for name, was, now in changed:
+                print("  %-46s %s %s  ->  %s %s"
+                      % (name[:46], was[0], was[1], now[0], now[1]), flush=True)
+        for n in added:
+            print("  new since the baseline: %s" % n, flush=True)
+        for n in missing:
+            print("  in the baseline but not run: %s" % n, flush=True)
+        print(flush=True)
+        print("%d of %d match the baseline" % (len(results) - len(changed),
+                                               len(results)), flush=True)
+        # A regression detector has to be able to fail.  Anything that
+        # moved, appeared or vanished is a difference worth stopping on;
+        # if the change was meant, take the baseline again.
+        return 1 if (changed or added or missing) else 0
+
+    if args.write_baseline:
+        with open(args.write_baseline, "w") as fh:
             fh.write("# pysnes library baseline, frames=%d%s" % (args.frames, NL))
             fh.write("# %d ROMs; the final frame of each, as it was on this "
                      "build%s" % (len(results), NL))
             for r in sorted(results, key=lambda r: r["name"]):
                 fh.write("%s%s%s%s%s%s" % (r["name"], TAB, r["status"], TAB,
                                            r.get("digest", ""), NL))
-        print("baseline written to %s" % args.baseline, flush=True)
+        print("baseline written to %s" % args.write_baseline, flush=True)
     return 0
 
 

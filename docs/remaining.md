@@ -1226,12 +1226,22 @@ fingerprint it computed used `hash()`, which CPython randomises per process,
 so it could count how often a picture changed inside one run and could not
 say whether today's picture was yesterday's.
 
-It now takes a digest of the final frame that does not move between runs,
-and `--baseline FILE` writes that file if it is absent and compares against
-it if it is there -- reporting what changed, what is new and what has gone,
-and exiting non-zero if anything did.
+It now takes a digest of the final frame that does not move between runs.
+Recording and checking are two different words:
 
-    python tools/batchtest.py <romdir> --baseline .library-baseline
+    python tools/batchtest.py <romdir> --write-baseline .library-baseline
+    python tools/batchtest.py <romdir> --baseline       .library-baseline
+
+The second reports what changed, what is new and what has gone, and exits
+non-zero if anything did.  With no baseline there it stops and says so
+rather than making one.  That distinction is not tidiness: with a single
+flag that writes when the file is missing, the first run of an automated
+check creates the thing it was meant to check against and reports success --
+which is the exact failure this tool exists to catch, and is what an APK
+build did three times over earlier the same day.
+
+`tools/checkall.py --slow` runs the comparison last, so everything else has
+reported by the time it finishes.
 
 The baseline is not in the repository and `.gitignore` keeps it out.  It is
 a list of one machine's game library, and a collection that exists here does
