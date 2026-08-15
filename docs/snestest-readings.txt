@@ -385,3 +385,42 @@ not, and its timing was invented.  The algorithm above is worth keeping,
 and so is div_timing's table: sixteen rows of what the intermediates
 should be, which is enough to settle the cadence for whoever picks this
 up with more patience than I had left today.
+
+================================================================================
+$F0's upper bits: known, verified, and deliberately not implemented.
+
+Four of the six newly-visible failures are blargg's SPC700 timer tests,
+and his own working notes sit beside the ROMs.  They are a table of
+measurements against $F0 values:
+
+    0A 2731   1A 1639   2A  910   3A  482
+    4A 2049   5A 1366   6A  819   7A  455
+    CA  819   DA  683   EA  512   FA  342
+
+and a formula worked out from them:
+
+    divisor = 1 + (1 << clock_speed) + (15 >> (3 - timer_speed))
+      clock_speed = $F0 bits 6-7,  timer_speed = bits 4-5
+    -> { 3, 5, 9, 17 ; 4, 6, 10, 18 ; 6, 8, 12, 20 ; 10, 12, 16, 24 }
+
+Checked against every measured count: 2731x3, 1639x5, 910x9, 482x17,
+2049x4, 1366x6, 819x10, 455x18, 819x10, 683x12, 512x16, 342x24 all come
+to about 8192.  Twelve values, one formula, no fitting.
+
+This emulator implements $F0 bits 0 to 3 -- timers off, RAM read-only,
+RAM unmapped, timers enabled -- and ignores 4 to 7 entirely.  The screen
+of test_timer_speed says so exactly: "0A 2731" is right and "1A" is where
+it stops.
+
+Not implemented, on purpose.  Those bits stretch the SPC700's own clock,
+so the processor, the DSP and all three timers slow together, and that is
+the synchronisation between the sound chip and the console -- the part
+that currently passes all eight of blargg's audio cartridges and tracks a
+real game's music at 0.983.  Against that: no commercial game writes
+those bits.  $F0 is the test register.
+
+So the trade is two to four test cartridges against the riskiest timing
+in the emulator, for behaviour no game uses.  Written down with the
+formula and the place it would go -- APU.tick, where the SPC700's cycles
+become the timers' scaler input -- so that whoever decides differently
+starts from the answer rather than from the measurements.
