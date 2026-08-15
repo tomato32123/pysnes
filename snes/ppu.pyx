@@ -807,6 +807,13 @@ cdef class PPU:
         cdef int tile_num, tile_base = 0, palette = 0, prio = 0
         cdef int hflip = 0, vflip = 0, row_in, col, colour
         cdef int px_in_tile, py_in_tile
+        # A tile is eight dots wide, so seven dots in eight ask VRAM for a map
+        # entry and a character row that the dot before them already read.
+        # Holding on to the last of each turns those into a compare.  The
+        # addresses are the whole key: everything that could change the answer
+        # -- the scroll, the mosaic, per-tile offsets in modes 2, 4 and 6, the
+        # flips -- changes one of them first.
+        cdef uint32_t last_map = 0xFFFFFFFF, last_chr = 0xFFFFFFFF
 
         for x in range(x0, x1):
             if opt:
@@ -824,12 +831,15 @@ cdef class PPU:
                 screen += 0x800 if self.bg_map_wide[bg] else 0x400
             map_addr = (map_base + screen + ((tile_y & 0x1F) << 5) + (tile_x & 0x1F)) & 0x7FFF
 
-            entry = self.vram[map_addr]
-            tile_base = entry & 0x03FF
-            palette = (entry >> 10) & 7
-            prio = (entry >> 13) & 1
-            hflip = (entry >> 14) & 1
-            vflip = (entry >> 15) & 1
+            if map_addr != last_map:
+                last_map = map_addr
+                last_chr = 0xFFFFFFFF
+                entry = self.vram[map_addr]
+                tile_base = entry & 0x03FF
+                palette = (entry >> 10) & 7
+                prio = (entry >> 13) & 1
+                hflip = (entry >> 14) & 1
+                vflip = (entry >> 15) & 1
 
             px_in_tile = sx & ((1 << tile_shift) - 1)
             py_in_tile = y & ((1 << tile_shift) - 1)
@@ -847,12 +857,14 @@ cdef class PPU:
             col = px_in_tile & 7
 
             chr_addr = (chr_base + tile_num * words_per_tile + row_in) & 0x7FFF
-            plane0 = self.vram[chr_addr]
-            if bpp >= 4:
-                plane1 = self.vram[(chr_addr + 8) & 0x7FFF]
-            if bpp == 8:
-                plane2 = self.vram[(chr_addr + 16) & 0x7FFF]
-                plane3 = self.vram[(chr_addr + 24) & 0x7FFF]
+            if chr_addr != last_chr:
+                last_chr = chr_addr
+                plane0 = self.vram[chr_addr]
+                if bpp >= 4:
+                    plane1 = self.vram[(chr_addr + 8) & 0x7FFF]
+                if bpp == 8:
+                    plane2 = self.vram[(chr_addr + 16) & 0x7FFF]
+                    plane3 = self.vram[(chr_addr + 24) & 0x7FFF]
 
             colour = ((plane0 >> (7 - col)) & 1) | (((plane0 >> (15 - col)) & 1) << 1)
             if bpp >= 4:

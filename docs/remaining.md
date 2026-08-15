@@ -1107,3 +1107,29 @@ thing being looked at.
   a different answer in seconds.
 * The DSP-1's Mode 7 commands are still worked out from geometry.  Firmware
   would remove the guessing and unlock six chips at once.
+
+## Holding the last tile fetch
+
+Sampled with py-spy over Super Mario World, native stacks, 15,000 samples:
+
+    30.5%  _render_bg          12.0%  _paint           7.6%  Bus.read8
+     7.4%  _compose             3.9%  _compute_windows 3.7%  DSP.tick
+
+`_render_bg` walked the tilemap and the character data once per *dot*.  A
+tile is eight dots wide, so seven fetches in eight asked VRAM for what the
+dot before had already read, and then decoded the same map entry again.
+Holding the last map address and the last character address and comparing
+turns those into a compare.  The addresses are the whole key: everything
+that could change the answer -- the scroll, the mosaic, per-tile offsets in
+modes 2, 4 and 6, either flip -- moves one of them first.
+
+    215.3 -> 236.1 fps on Super Mario World, best of eight runs
+
+Best of eight because single runs on this machine vary by up to 70% -- there
+was a second emulator on the other core for part of this, and the first
+comparison came out backwards because of it.  Two runs said the change made
+things twice as slow; eight said it made them a tenth faster.
+
+Guards: all twenty test modules, krom's 66 reference pages, ppucompare's 35
+demos exact to the pixel, and the VMAIN pairs.  A renderer change that
+alters no pixel anywhere is the only kind worth having.
