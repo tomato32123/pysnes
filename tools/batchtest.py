@@ -178,16 +178,21 @@ def main():
     # earlier run's output means the same ROM here.
     ap.add_argument("--start", type=int, default=1,
                     help="skip to this position in the list (1-based)")
-    # Pressing buttons is the default, because the run that does not press
-    # them is the weaker measurement and there is no reason for it to be the
-    # one you get by typing less.  Two SPC7110 cartridges sat in months of
-    # these reports as static screens; they were waiting for a button, and
-    # behind it was their manufacturer's own check program reporting ALL OK.
-    ap.add_argument("--no-play", dest="play", action="store_false",
-                    default=True,
-                    help="do not press anything: only check that it boots")
-    ap.add_argument("--play", dest="play", action="store_true",
-                    help=argparse.SUPPRESS)
+    # Not the default, though it was for an hour.  The argument for making
+    # it one was that two SPC7110 cartridges sat here as static screens
+    # while waiting for a button, with their manufacturer's own check
+    # program behind it.  Measured over the whole library, pressing buttons
+    # improved no cartridge's classification and worsened three -- and it
+    # did not improve those two either, because a check program is white
+    # text on black and classifies as "flat" exactly like the prompt it
+    # replaced.  What found them was looking at the picture.
+    #
+    # This report is a regression detector, and its worth is in comparing
+    # one run to the next.  Pressing buttons makes a run depend on when the
+    # presses land, which costs the comparison more than it pays.
+    ap.add_argument("--play", action="store_true",
+                    help="press start and A while it runs, and report how "
+                         "much of the run was not a still picture")
     args = ap.parse_args()
 
     roms = find_roms(args.romdir)
