@@ -171,10 +171,20 @@ cdef class Bus:
         self.mul_shifter = 0
         self.div_steps = 0
         self.div_shifter = 0
+        # One processor cycle between the write that starts a sum and its
+        # first step, for both.  Each was measured against its cartridge's
+        # checksum over a whole table of intermediate values, and each came
+        # out at one on its own.
+        # One processor cycle for the multiplier, measured against
+        # mul_timing's checksum.  None for the divider: div_timing wants one
+        # and div_behavior wants none, and no single value satisfies both --
+        # see docs/snestest-readings.txt.  Nought is the one that keeps the
+        # cartridge measuring behaviour rather than intermediates.
         self.mul_delay = 1
         self.div_delay = 0
         self.arith_wait = 0
         self.arith_busy = 0
+        self.div_reload = 0
         self.mul_steps = 0
         self.mul_clock = 0
         self.wram_addr = 0
@@ -564,7 +574,12 @@ cdef class Bus:
             self.mul_steps = 0            # a divide takes the unit over
             self.div_b = value
             self.rd_mpy = self.div_a      # "copy WRDIV to RDMPY"
-            self.rd_div = 0
+            # RDDIV is not cleared.  The notes say what a division loads --
+            # WRDIV into RDMPY, WRDIVB into the shifter -- and say nothing
+            # about this one, and its cartridge deliberately leaves $FFFF
+            # here before measuring, which is only worth doing if what
+            # happens to it is the thing being watched.  The quotient
+            # shifts in over the top of it.
             self.div_shifter = (<uint32_t>value) << 16
             self.div_steps = 16
             self.arith_wait = self.div_delay

@@ -65,7 +65,7 @@ cdef class Bus(AddressSpace):
     # for the multiplier, measured against mul_timing's checksum over its
     # whole table; the divider's is not settled.
     cdef int mul_delay, div_delay
-    cdef int arith_wait, arith_busy
+    cdef int arith_wait, arith_busy, div_reload
     # The multiplier is a shift-and-add that takes eight steps rather than
     # happening at once, and a game can look at it or disturb it part way.
     cdef uint16_t mul_shifter

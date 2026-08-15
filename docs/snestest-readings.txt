@@ -445,3 +445,35 @@ steps are.
 
 Left there.  div_timing is the only one of the four still failing, and it
 is failing on less than it was.
+
+--------------------------------------------------------------------------------
+Three of the four, and where the fourth disagrees.
+
+RDDIV is not cleared when a division starts.  The notes say what is
+loaded -- WRDIV into RDMPY, WRDIVB into the shifter -- and say nothing
+about the quotient register, and div_timing deliberately leaves $FFFF
+there before every reading, which is only worth doing if what happens to
+it is the thing being watched.  It shifts out as the quotient shifts in:
+FFF8, FFF1, FFE3, FFC6, FF8C, ... 8C2A, 1855.
+
+With that, and one processor cycle between the write and the first step:
+
+  mul_behavior  PASSED
+  mul_timing    PASSED   (checksum over its whole table)
+  div_behavior  PASSED   with no delay on the divider
+  div_timing    PASSED   with a delay of one
+
+-- and those last two are the same number set differently.  div_timing
+wants the whole table one step later; div_behavior wants the reload that
+a mid-division write causes to land after the tenth step, and a delay of
+one puts it after the ninth.  Latching the reload to the next step does
+not bridge it: that moves it to where it already was.
+
+So a single "cycles before the first step" cannot satisfy both, and the
+difference between them is one step in where a write lands relative to
+the run.  Something distinguishes the write that starts a division from
+the write that interrupts one, and neither notes.txt nor these four
+cartridges say what.
+
+Left at no delay, which is the setting that keeps three passing.
+div_timing is the one that fails, and it fails by one step.
