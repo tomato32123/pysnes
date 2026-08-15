@@ -1474,15 +1474,28 @@ cdef class PPU:
         return 0
 
     cdef inline int _region_black(self, int mode, int inside) noexcept:
-        """CGWSEL bits 7-6, force-main-black: 0=never 1=inside 2=outside 3=always.
-        Note the 0 and 3 cases are the reverse of the colour-math field."""
+        """CGWSEL bits 7-6, force-main-black: 0=never 1=outside 2=inside 3=always.
+
+        These two were the wrong way round, and the note that used to sit
+        here -- that the field is the reverse of the colour-math one -- is
+        what put them there.  It is not.  Both fields select the same way;
+        what differs is that one names where drawing is allowed and the
+        other where black is forced, and reading that as "reversed" turns
+        1 and 2 around.
+
+        The reference settles it.  snes9x builds a mask, sets it to CW for
+        a value of 2 and to ~CW for 1, and then clips where the mask is
+        set -- which is inside the window for 2 and outside for 1.  With
+        the old reading, a cartridge that asks for 2 with no window at all
+        had its whole screen forced black, and Ladida's HDMA test ROM drew
+        nothing whatever because of it."""
         mode &= 3
         if mode == 0:
             return 0
         if mode == 1:
-            return inside
-        if mode == 2:
             return 1 - inside
+        if mode == 2:
+            return inside
         return 1
 
     # -- paint orders, lowest priority first --------------------------------

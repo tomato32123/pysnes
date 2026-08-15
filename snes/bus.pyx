@@ -768,13 +768,28 @@ cdef class Bus:
             self.dma_size[ch] = self._hdma_fetch16(ch)
 
     cdef void hdma_init(self) noexcept:
-        """Start of frame: point every enabled channel at its table."""
+        """Start of frame: point every enabled channel at its table.
+
+        The transfer flag is raised for all eight, including the ones that
+        are switched off, and only the enabled ones then have their line
+        counter fetched.  That asymmetry is the whole of Ladida's test ROM:
+        a channel enabled part way through a frame still has the flag from
+        an initialisation it took no other part in, so its first transfer
+        happens without a line fetch and reads its table one entry out.
+
+        And when no channel at all is enabled, this does not run, so the
+        flag stays down -- which is why enabling one later starts its
+        transfers a scanline further on.  byuu described both halves after
+        working out why that cartridge draws green rather than a red
+        gradient.
+        """
         cdef int ch
         for ch in range(8):
             self.hdma_active[ch] = 0
-            self.hdma_do_transfer[ch] = 0
         if not self.hdma_enabled:
             return
+        for ch in range(8):
+            self.hdma_do_transfer[ch] = 1
         self.tick(<int>(8 - (self.master_clock & 7)))
         self.tick(18)
         for ch in range(8):
