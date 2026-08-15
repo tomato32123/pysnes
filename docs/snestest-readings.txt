@@ -895,3 +895,33 @@ even if it loaded.
 Recorded because a library sweep is only as honest as its inputs, and a
 "flat" that means "waiting for the player" looks exactly like a "flat" that
 means "this emulator is wrong".
+
+--------------------------------------------------------------------------------
+The library again, with the buttons pressed this time.
+
+    69 ok, 4 black, 2 flat, 1 that will not parse, of 76.
+
+The two "flat" ones are the SPC7110 pair, and what they are drawing is the
+cartridge's own built-in check program -- v2.2 in Tengai Makyou Zero and
+v3.0 in Momotarou Dentetsu Happy.  Both reach COMPLETE and ALL OK, with
+every line passing:
+
+    REG INIT / S-RAM DATA BUS / S-RAM ADDR BUS / S-RAM R/W / B-PORT ACC
+    MUL / DIV / C-LENGTH / DECOMP / D-PORT / RTC TIME
+
+then ask to be powered off.  They are in that program because the backup is
+empty on a first boot and pressing A takes them there; it is not a fault,
+and it is the best evidence in the library.  A self-test written by the
+people who made the chip, passing every line on two different versions of
+itself, outranks anything this project could write about the SPC7110.
+tools/spc7110check.py reads the same screens back and agrees: ten tests in
+mode 1, two in mode 2, and the signature 'SPC7110 CHECK OK' written to save
+memory.
+
+SD Gundam GX moved from flat to black once buttons were being pressed, which
+is a DSP-3 title with no firmware here and expected either way.
+
+So the whole library has no failure this emulator can be blamed for: two
+destroyed images, two titles waiting on DSP firmware that is not here, one
+distribution with no header in it at all, and two cartridges reporting that
+their coprocessor works.
