@@ -66,6 +66,9 @@ cdef class Bus(AddressSpace):
     # whole table; the divider's is not settled.
     cdef int mul_delay, div_delay
     cdef int arith_wait, arith_busy, div_reload
+    # What the result registers held before the step now running.  A read
+    # while a sum is in flight sees this rather than the live value.
+    cdef uint16_t shadow_div, shadow_mpy
     # The multiplier is a shift-and-add that takes eight steps rather than
     # happening at once, and a game can look at it or disturb it part way.
     cdef uint16_t mul_shifter

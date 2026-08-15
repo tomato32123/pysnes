@@ -175,16 +175,16 @@ cdef class Bus:
         # first step, for both.  Each was measured against its cartridge's
         # checksum over a whole table of intermediate values, and each came
         # out at one on its own.
-        # One processor cycle for the multiplier, measured against
-        # mul_timing's checksum.  None for the divider: div_timing wants one
-        # and div_behavior wants none, and no single value satisfies both --
-        # see docs/snestest-readings.txt.  Nought is the one that keeps the
-        # cartridge measuring behaviour rather than intermediates.
-        self.mul_delay = 1
+        # No delay before either sum's first step.  There was one for a
+        # while, fitted to mul_timing, and it was the wrong shape: what
+        # actually lags is the reading, not the run.  See arith_step.
+        self.mul_delay = 0
         self.div_delay = 0
         self.arith_wait = 0
         self.arith_busy = 0
         self.div_reload = 0
+        self.shadow_div = 0
+        self.shadow_mpy = 0
         self.mul_steps = 0
         self.mul_clock = 0
         self.wram_addr = 0
@@ -246,6 +246,17 @@ cdef class Bus:
         if not (self.div_steps or self.mul_steps):
             self.arith_busy = 0
             return
+        # What a read sees while a sum is in flight is the state before
+        # this step, not after it.  One latch, and all four of Jonas
+        # Quinn's cartridges agree: the two that check behaviour, and the
+        # two that check a whole table of intermediates against a checksum.
+        # Before this there were two fitted delay constants that could not
+        # both be right -- div_timing wanted the divider's table a step
+        # later and div_behavior would not allow it -- which is what a
+        # missing latch looks like when you try to model it as a head
+        # start.
+        self.shadow_div = self.rd_div
+        self.shadow_mpy = self.rd_mpy
         if self.div_steps:
             self.div_shifter >>= 1
             self.rd_div = <uint16_t>(self.rd_div << 1)
@@ -409,18 +420,26 @@ cdef class Bus:
         if a == 0x4214:
             self.mul_catch_up()
             self.div_catch_up()
+            if self.arith_busy:
+                return <uint8_t>(self.shadow_div & 0xFF)
             return <uint8_t>(self.rd_div & 0xFF)
         if a == 0x4215:
             self.mul_catch_up()
             self.div_catch_up()
+            if self.arith_busy:
+                return <uint8_t>(self.shadow_div >> 8)
             return <uint8_t>(self.rd_div >> 8)
         if a == 0x4216:
             self.mul_catch_up()
             self.div_catch_up()
+            if self.arith_busy:
+                return <uint8_t>(self.shadow_mpy & 0xFF)
             return <uint8_t>(self.rd_mpy & 0xFF)
         if a == 0x4217:
             self.mul_catch_up()
             self.div_catch_up()
+            if self.arith_busy:
+                return <uint8_t>(self.shadow_mpy >> 8)
             return <uint8_t>(self.rd_mpy >> 8)
         if 0x4218 <= a <= 0x421F:
             ch = (a - 0x4218) >> 1
