@@ -1,15 +1,22 @@
 """Save state must reproduce the machine exactly: same state in -> same frames out."""
 import hashlib, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from tools.romarg import from_argv
+from tools.romarg import from_argv, any_rom, NO_ROM
 from snes.system import System, BUTTONS
 
-ROM = from_argv()
+# A cartridge, any cartridge, but the same one every run: these check
+# that the machine can be put back exactly as it was, and that needs
+# something real to put back rather than a particular thing.
+ROM = from_argv(quiet=True) if len(sys.argv) > 1 else any_rom()
 def digest(machine):
     return hashlib.sha1(bytes(machine.framebuffer)).hexdigest()
 
 
 def main():
+    if ROM is None:
+        sys.stderr.write("no cartridge to check a state against; set "
+                         "PYSNES_ROMS or pass one" + chr(10))
+        return NO_ROM
     s = System(ROM)
     for _ in range(1750):
         s.run_frame()

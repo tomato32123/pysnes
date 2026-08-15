@@ -95,6 +95,29 @@ def find_named(*names):
     return None
 
 
+def any_rom():
+    """One cartridge, the same one every time, for a test that needs a
+    cartridge rather than a particular cartridge.
+
+    Save states and rewind have to be checked against something real, and
+    it does not matter what -- but it does matter that it is the same thing
+    on every run, or a failure cannot be reproduced.  So this is the first
+    name in sorted order under the material root, which is stable as long
+    as the collection is.
+
+    Returns None when there is nothing to pick, so the caller can skip.
+    """
+    root = material_root()
+    if not os.path.isdir(root):
+        return None
+    found = []
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            if name.lower().endswith((".smc", ".sfc")):
+                found.append(os.path.join(dirpath, name))
+    return sorted(found)[0] if found else None
+
+
 def from_argv(index=1, quiet=False):
     """Take argv[index] as the ROM if it looks like one, else fall back."""
     if len(sys.argv) > index and sys.argv[index].lower().endswith((".smc", ".sfc")):
