@@ -5,11 +5,15 @@ thing still open, what it actually is, where in the code it goes, how you
 would know you got it right, and what — if anything — makes it impossible
 today. Written so it can be picked up cold.
 
-As of this writing the 68-ROM local library has **no unexplained failure**.
-Four titles do not draw a game, and each is accounted for: two are defective
-ROM images (proved defective, not assumed so), one wants a coprocessor whose
-firmware is not here, and one is a blank cartridge correctly booting the
-check program its own ROM carries. Everything else renders.
+As of this writing the 76-ROM local library has **no unexplained failure**,
+by two measures taken separately. Booted and compared against a recorded
+baseline, 76 of 76 are identical frame for frame. Driven for four thousand
+frames of random input, 67 keep drawing and the nine that stop are each
+accounted for: three ROM images that are destroyed (proved so, not assumed),
+three waiting on coprocessor firmware that is not here, one whose chip is not
+emulated and whose error screen is static by definition, and two resting on
+the check program their own cartridge carries, which ends by asking to be
+powered off.
 
 That sentence is worth reading sceptically, because it was wrong twice this
 week in opposite directions. Rudra no Hihou was written up here as a defect
