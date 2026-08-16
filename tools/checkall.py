@@ -24,6 +24,24 @@ from tools.romarg import ROMS
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
+# Where the reference binaries built from blargg's library are kept.  They
+# are not in this repository and should not be -- they are somebody else's
+# code, built here -- but leaving them to an environment variable meant both
+# audio checks reported "could not run" for as long as nobody remembered to
+# export it, which is not a pass and reads like one at a glance.  So there is
+# a conventional place as well, and the variable still wins.
+REFDIR = os.path.expanduser("~/.local/share/pysnes")
+
+
+def reference(name, env_var):
+    """The built reference, from the environment or the conventional place."""
+    said = os.environ.get(env_var)
+    if said:
+        return said
+    here = os.path.join(REFDIR, name)
+    return here if os.path.exists(here) else name + "-not-built"
+
+
 # (name, argv, slow) -- slow ones need whole libraries or thousands of frames.
 CHECKS = [
     ("unit tests", [sys.executable, "tools/runtests.py"], False),
@@ -40,7 +58,7 @@ CHECKS = [
     # reports "could not run", which is not a pass.
     ("DSP against blargg's, by sample",
      [sys.executable, "tools/dspdiff.py",
-      os.environ.get("PYSNES_DSPPROBE", "dspprobe-not-built")], True),
+      reference("dspprobe", "PYSNES_DSPPROBE")], True),
     # A game's own music through both implementations: the SPC700 running
     # its driver, the timers and the DSP together.  Needs the same player
     # as above; without it this reports "could not run".

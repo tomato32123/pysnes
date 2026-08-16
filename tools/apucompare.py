@@ -64,7 +64,14 @@ def main():
     if len(sys.argv) < 2:
         print("usage: apucompare.py <rom>")
         return 1
+    # The environment wins, but there is a conventional place too: leaving
+    # this to a variable alone meant the check reported "could not run" for
+    # as long as nobody remembered to export it.
     player = os.environ.get("PYSNES_SPCPLAYER", "")
+    if not player:
+        here = os.path.expanduser("~/.local/share/pysnes/play_spc")
+        if os.path.exists(here):
+            player = here
     if not player or not os.path.exists(player):
         print("no reference player: set PYSNES_SPCPLAYER to a built play_spc")
         return 1

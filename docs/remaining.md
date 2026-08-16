@@ -1281,3 +1281,32 @@ Why this and why now: a whole day of changes to HDMA channel gating, to when
 the processor looks for an interrupt, and to two renderer paths went in
 against a library check that was read by eye, twice, twenty-five minutes at
 a time -- and one of those readings was wrong because a flag was left off.
+
+## The two audio checks were not running at all
+
+`checkall.py` says of itself that something not run is not something that
+passed, and then reported both DSP comparisons as "skipped" or "could not
+run" for as long as nobody exported a variable.  The probe had never been
+built on this machine.  So the strongest audio evidence this project has --
+blargg's own implementation, the same author as the test ROMs -- was inert,
+and the routine looked green.
+
+Built now, from the library the source files already told us to clone:
+
+    g++ -O2 -o dspprobe dspprobe.cpp SPC_DSP.cpp
+    g++ -O2 -I. -o play_spc demo/play_spc.c demo/demo_util.c \
+        demo/wave_writer.c snes_spc/*.cpp          # minus dspprobe.cpp
+
+and both say the same thing:
+
+    DSP alone, sample by sample     0 of 14 scripts differ
+    a game's driver, both chips     correlation 0.9829, rms 476 against 471
+
+The binaries live in `~/.local/share/pysnes/`, outside the repository --
+they are somebody else's code built here.  Both tools look there when the
+environment variable is unset, because a check that depends on remembering
+to export something is a check that stops running and does not say so.
+
+The second `*.cpp` glob has to exclude `dspprobe.cpp` or the link fails on
+two `main`s, which is worth a line because the instructions in the source
+files do not mention it.
