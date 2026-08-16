@@ -1447,3 +1447,35 @@ enough.
 
 Guards, as before: 76 of 76 library games identical, krom's 66 pages,
 ppucompare's 35 demos exact, twenty test modules.
+
+## What the renderer work came to
+
+Four changes to the PPU in one day, each measured against the one before it,
+and the whole against where it started -- complete module sets, alternated
+run by run:
+
+    Super Mario World   9.278 -> 7.185 s of processor time   (-22.6%)
+    Bahamut Lagoon      2.062 -> 1.852 s                     (-10.2%)
+
+  * hold the last map entry and character row instead of re-reading them
+    for every dot in a tile
+  * do not draw a background that is on neither screen
+  * do not fill a window mask nobody is looking through
+  * do the tile arithmetic once per eight dots rather than once per dot
+  * let the painter decline a priority the layer never used
+
+And one that was reverted: hoisting `_paint`'s five loop-invariant reads and
+selecting the target buffers as pointers, which measured 2.3% slower twice
+because the compiler was already hoisting what mattered and the pointers
+cost more in aliasing than the branches saved.
+
+The profile that started it and where it ended:
+
+    before   30.5% _render_bg  12.0% _paint   7.6% Bus.read8   7.4% _compose
+    after    17.4% _render_bg  13.2% _paint   8.9% Bus.read8  10.7% _compose
+
+Every one of these was checked against 76 library games at frame 900,
+krom's 66 pages, ppucompare's 35 demos and the twenty test modules.  Not one
+moved a pixel anywhere.  The baseline that makes that sentence possible was
+built this morning; before it, the innermost loop of the renderer was not
+something to rewrite on a hunch.
