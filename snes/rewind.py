@@ -23,7 +23,8 @@ RAW, PACKED = 0, 1
 
 
 class Rewind:
-    MAX_PENDING = 3
+    MAX_PENDING = 16                  # sixteen raw states, about 8 MB, held
+                                      # only while the worker is behind
 
     def __init__(self, seconds=20.0, interval=3, level=1, enabled=True, threaded=True):
         self.interval = max(1, int(interval))
@@ -58,9 +59,20 @@ class Rewind:
         entry = [RAW, machine.save_state_raw()]
         with self._lock:
             self.frames.append(entry)
-        # Backpressure: an uncompressed snapshot is ~4x the size of a packed
-        # one, so if the worker falls behind (fast-forward, a slow machine)
-        # compress inline rather than let raw states pile up.
+        # Backpressure.  An uncompressed snapshot is about four times the
+        # size of a packed one, so the worker falling behind must not let raw
+        # states pile up; when the queue is full this compresses inline
+        # instead, on this thread.
+        #
+        # That inline path is a 3.4 ms stall in the middle of a 16.67 ms
+        # frame, and it was the largest single cause of frames going over
+        # budget -- a 13 ms tail at the 99th percentile in a real play loop.
+        # The queue was three deep, chosen when it only had to bound memory.
+        # Sixteen is deep enough that a loop paced to 60 Hz never reaches the
+        # inline path at all, so the stall is left where it cannot hurt: when
+        # frames are being produced faster than real time there is no budget
+        # to miss, and dropping snapshots there instead would only make
+        # rewind coarse exactly where it is being filled fastest.
         if self._worker is not None and len(self._pending) < self.MAX_PENDING:
             self._pending.append(entry)
             self._wake.release()

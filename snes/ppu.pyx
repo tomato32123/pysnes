@@ -1888,8 +1888,24 @@ cdef class PPU:
             self.sub_window[i] = v[k + i]
         k += 5
 
+    cdef Py_ssize_t _live_bytes(self) noexcept:
+        """Bytes of the framebuffer a viewer can ever see.
+
+        The buffer is 478 rows so that an interlaced picture fits; a normal
+        one is 224 and overscan makes it 239.  More than half of it was going
+        into every save state and every rewind snapshot, and nothing reads it
+        -- the display takes visible_height rows and stops.
+        """
+        cdef int lines = 240 if self.overscan else 225
+        cdef int rows = (lines - 1) * (2 if self.screen_interlace else 1)
+        if rows < 1:
+            rows = 1
+        if rows > OUT_H:
+            rows = OUT_H
+        return <Py_ssize_t>(OUT_W * rows * 4)
+
     def state_blobs(self):
-        return [PyBytes_FromStringAndSize(<char *>self.vram, 65536), PyBytes_FromStringAndSize(<char *>self.cgram, 512), PyBytes_FromStringAndSize(<char *>self.oam, 544), PyBytes_FromStringAndSize(<char *>self.framebuffer, 978944)]
+        return [PyBytes_FromStringAndSize(<char *>self.vram, 65536), PyBytes_FromStringAndSize(<char *>self.cgram, 512), PyBytes_FromStringAndSize(<char *>self.oam, 544), PyBytes_FromStringAndSize(<char *>self.framebuffer, self._live_bytes())]
 
     def load_blobs(self, blobs):
         if len(blobs[0]) != 65536:
@@ -1901,9 +1917,12 @@ cdef class PPU:
         if len(blobs[2]) != 544:
             raise ValueError('bad oam blob')
         memcpy(<char *>self.oam, <char *><bytes>blobs[2], 544)
-        if len(blobs[3]) != 978944:
+        if not (0 < len(blobs[3]) <= 978944) or (len(blobs[3]) % (OUT_W * 4)):
             raise ValueError('bad framebuffer blob')
-        memcpy(<char *>self.framebuffer, <char *><bytes>blobs[3], 978944)
+        # However many rows the picture had.  Older states carry the whole
+        # buffer; both are copied by their own length, and anything below the
+        # last row drawn is never read back out, so leaving it alone is free.
+        memcpy(<char *>self.framebuffer, <char *><bytes>blobs[3], len(<bytes>blobs[3]))
 
     # -- end generated save state ------------------------------------------
 

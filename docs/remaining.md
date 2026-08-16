@@ -1492,3 +1492,42 @@ cartridge is loaded and the division kept for the rest.
 
 Guards: 76 of 76 library games identical, gilyon's 65C816 and SPC700 ROMs,
 krom's 66 pages, twenty test modules.
+
+## More than half of every save state was a picture nobody sees
+
+Profiling a real play loop -- with a real display, which matters -- put the
+worst tail not in the emulator but in the rewind snapshot: 0.94 ms mean and
+**14.33 ms at the 99th percentile**, the largest single reason a frame went
+over budget.
+
+The first guess was the backpressure path, where a full queue compresses on
+the game loop instead of the worker.  Deepening the queue from three to
+sixteen did not move the tail, so that was not it.  Nor was the cyclic
+collector: disabling it changed nothing.
+
+Measured instead of guessed:
+
+    save_state_raw   mean 1.59 ms   p99 6.09   max 23.01
+    the state itself 1217 KB
+
+The module's own header says 511 KB and 0.38 ms.  It has more than doubled
+since, and the reason is the framebuffer: 512 by 478 by four is 979 KB, four
+fifths of the whole state.  The buffer is that tall so an interlaced picture
+fits, and a normal one is 224 rows -- so more than half of what was being
+copied, pickled and compressed, twenty times a second, is below the last row
+anything ever reads.
+
+Storing the rows that exist:
+
+    the state        1217 -> 739 KB   (-39%)
+    capture p99      12.79 -> 9.97 ms
+    the rewind stage  p99 14.33 -> 6.88 ms, mean 0.94 -> 0.50
+
+Older states still load: the blob is copied by its own length and anything
+below the last row drawn is left alone.
+
+A note on the measurement.  The first run of this used
+`SDL_VIDEODRIVER=dummy` and reported the blit at 4.91 ms and 42.5% of frames
+over budget, which sent me looking at the display path.  Both numbers were
+the dummy driver's.  With a real display the blit is 0.49 ms and the figure
+is 3.7%, and `play.py`'s own docstring had said so all along.
