@@ -21,7 +21,17 @@ from snes.cpu import CPU as PyCPU
 # When frozen by PyInstaller the package lives in a temporary extraction
 # directory that is deleted on exit, so saves must sit next to the executable.
 def _app_dir():
+    """Where battery saves live.
+
+    $PYSNES_HOME overrides it, which is how a test can exercise the save
+    naming and the import of older ones without writing into a real
+    collection -- there was no test for any of that until there was a way to
+    run one somewhere harmless.
+    """
     import sys
+    said = os.environ.get("PYSNES_HOME")
+    if said:
+        return said
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
