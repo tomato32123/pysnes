@@ -74,9 +74,28 @@ reading.
 
 ## First, the thing that shapes everything else
 
-**There is no reference emulator on this machine.** No bsnes, no ares, no
-Mesen. That single absence is why six items are "partial" rather than done,
-and it is worth understanding what it costs before reading the rest.
+**There is no reference emulator *running* on this machine.** No bsnes, no
+ares, no Mesen to step beside this one and diff against. That absence is why
+six items are "partial" rather than done, and it is worth understanding what
+it costs before reading the rest.
+
+**Its source, though, is readable, and that is not the same absence.** A copy
+of bsnes's CPU files has been in a scratch directory since some earlier
+session, and the rest is a fetch away -- `counter-inline.hpp` came down in
+one request. In a single afternoon that settled four things nothing here
+could measure: that the interrupt unit sees the counters ten clocks late and
+the NMI unit two, which took test_irq from one gate to three and test_nmi
+from none to fifteen; that the DRAM refresh moves with the DMA clock phase;
+that HDMA runs at dot 276; and that a scanline is 340 dots rather than 341,
+two of them six clocks long.
+
+The difference between reading a reference and running one is worth keeping
+straight. Reading it gives numbers and structures, ranked in this project's
+order of evidence above documentation and below a test cartridge -- and two
+of today's changes rest on nothing else, which is written up as a pattern
+rather than left to accumulate. Running one would give a trace to diff
+against instruction by instruction, which is still what test_irq's third
+gate wants and still what nobody here has.
 
 **The largest of them turned out to be a download away.** krom's per-instruction
 test ROMs — 66 of them, covering the 65816, the SPC700 and the GSU — are now
