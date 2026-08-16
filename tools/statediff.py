@@ -15,20 +15,25 @@ tests/test_state.py does this for one cartridge, which has no coprocessor.
 This does it for the whole library, which is where the SA-1, the SuperFX,
 the SPC7110, the S-DD1 and the OBC1 are.
 
-**What it does not reach.**  A round trip only tests what was running when
-the state was taken, and nothing here gets Star Fox to a stage.  Its whole
-SuperFX state -- 616 registers and 32 KB of the chip's own RAM -- can be
-zeroed at frame 750, 1350 or 1800, under random input or a scripted string
-of Starts, and the next hundred and twenty frames are identical.  So this
-covers the SuperFX in name only.
+**What it cannot see, and why that is not a hole.**  A round trip only tests
+what is carried *between* frames.  Star Fox was the case that made this
+worth chasing: its entire SuperFX state -- 616 registers and 32 KB of the
+chip's own RAM -- can be zeroed and the next hundred and twenty frames come
+out identical.
 
-That was worth chasing rather than assuming, because the other explanation
-would have been a real defect: a loader that quietly does not apply the
-board's state would look exactly the same from outside.  It does apply it --
-after loading a zeroed board the state reads back as zero -- so the reason
-is the cartridge, not the emulator.  Star Fox draws its title and menus from
-the S-CPU and does not start the chip in the first 1800 frames of anything
-tried here.
+Three things could explain that and only one is harmless, so they were
+separated rather than assumed.  The loader is not quietly skipping the board:
+after loading a zeroed one the state reads back as zero.  The chip is not
+idle: driven to a stage with a scripted string of Starts and As, the screen
+is full of polygons, which nothing else on that cartridge can draw.  What is
+left is the cartridge's own design -- Star Fox writes the GSU's program and
+its data afresh every frame, so what the chip holds at a frame boundary is
+already dead, and a state that dropped it would still play correctly.
+
+So the SuperFX is reached and running here, and there is nothing across a
+frame boundary for this check to find.  That is worth writing down, because
+"the check passes" and "the check cannot see anything" look the same from
+outside, and the difference took a screenshot of a stage to establish.
 
     python tools/statediff.py <romdir> [warm] [compare]
 """
