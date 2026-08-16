@@ -1345,3 +1345,32 @@ sweeps -- the baseline over fixed input and the soak over random -- looked
 at the same change and only one of them saw anything.  The baseline said 75
 of 76 and named Star Fox; the soak said one of 76 and named a different
 cartridge entirely.  Neither would have found the other's.
+
+--------------------------------------------------------------------------------
+The DRAM refresh moves with the DMA clock, and what that rests on.
+
+`cpu_timing.cpp` sets it as
+
+    if(version == 2) status.dramRefreshPosition = 530 + 8 - dmaCounter();
+
+-- so the position walks between 531 and 538 with the phase of the eight-clock
+DMA cycle the scanline happens to begin on.  This was pinned at 538, which is
+that range's phase-zero end.
+
+What this rests on, said plainly: nothing here measures it.  test_irq and
+test_nmi hold at three and fifteen gates, dma_irq_test at 14 of 14, all
+twenty-four test modules and every reference picture unchanged.  The only
+support is the reference's own source, which this project's order of evidence
+ranks below a test cartridge and above documentation, and the number is
+specific enough -- with a CPU-version distinction beside it -- to read as
+having come from hardware rather than from reasoning.
+
+The cost is one frame of one game: Super Bomberman 5 draws differently at
+frame 900 and the baseline was retaken.  That is what any timing change does
+to a game with animation in it, and it is not evidence either way.
+
+Recorded at this length because it is the weakest thing shipped today.  If a
+later session finds it wrong, this is what it rested on: a number in a
+reference, no contradiction, and low risk.  The version distinction is not
+modelled here -- this emulator has no notion of CPU revisions -- which is the
+part most likely to be wrong.

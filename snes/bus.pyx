@@ -1022,7 +1022,11 @@ cdef class Bus:
         self._update_irq(when)
 
         self._arm_irq(when)
-        self._schedule(EV_REFRESH, when + REFRESH_CYCLE)
+        # The refresh does not sit at a fixed dot: the reference puts it at
+        # 530 + 8 - dmaCounter(), so it moves with the phase of the eight-clock
+        # DMA cycle the line happens to start on.  This was pinned at the
+        # phase-zero end of that range.
+        self._schedule(EV_REFRESH, when + REFRESH_CYCLE - <int>(when & 7))
         self._schedule(EV_LINE, when + self._line_length())
 
     cdef inline void _update_irq(self, int64_t at) noexcept:
