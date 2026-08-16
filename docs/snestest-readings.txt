@@ -1057,3 +1057,40 @@ why that is different from the two reverts: those replaced an accidental
 pass with an honest failure and gained nothing observable.  This one keeps
 every reading and removes the thing that could not be true, which is the
 shape a fix is supposed to have.
+
+--------------------------------------------------------------------------------
+Where the V match fires: eliminated too.
+
+With the dot-grid fix in, gate 1 passes and the program reaches gate 2, so
+both landing zones can be read without any measurement build.  Both rises
+land at +8 into the SEC -- identical -- because what is recorded is the
+rounded processing time, which quantises the two cycles apart.
+
+Recording the real instant instead puts gate 1's rise at +4, one dot after
+its SEC begins, and gate 1 wants +8 or later.  One dot short, which looked
+like an answer.  It is not: with the clamp in place the computed instant
+never survives, because for a V match it has always just gone by, so the
+interrupt is placed wherever the clamp puts it whatever `at` said.
+
+So the clamp was taken out of that path and the firing dot swept, with both
+gates pinning it from opposite sides:
+
+    dot 0, 1, 2     irq $EA      gate 1 fails
+    dot 3, 4, 5     irq $18      gate 1 passes, gate 2 fails
+    dot 6           irq $A5      past both
+
+No dot satisfies both, and the reason is the same shape as the H counter
+elimination: the gates are two master cycles apart by construction and a dot
+is four, so a knob that moves in dots cannot put one on each side of a
+boundary.  Every explanation of the form "the V timer fires N dots into the
+line" is now dead as well, for any N.
+
+What that leaves is genuinely narrow.  The two cycles are in the program and
+they arrive -- 36390 against 36392 master to the landing zone.  The
+interrupt instant, once it is not being decided by the clamp, is fixed to
+the line and cannot move with the program.  So the difference must appear in
+the comparison, which is between an instant on the dot grid and a boundary
+on the processor's own clock -- and the only part of that this emulator does
+not derive from first principles is `cycle_start`, the instant the current
+processor cycle began.  That is the next thing to measure, and nothing else
+is left to guess at.
