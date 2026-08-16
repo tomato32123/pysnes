@@ -970,3 +970,54 @@ right, and the only thing worth adding to it is that the CX4 is out of reach
 for the tables rather than for the program.
 
 Sources: https://wiki.superfamicom.org/capcom-cx4-hitachi-hg51b169
+
+--------------------------------------------------------------------------------
+test_irq, measured to the point where the two gates should separate.
+
+The last entry eliminated every explanation of the form "the H counter is N
+dots out".  What was never measured was the other side: where gate 2's
+interrupt actually lands.  It could not be, because with the real rise
+instant gate 1 fails and the program never reaches gate 2.  Adding a
+constant to the instant the processor decides against -- a measurement
+build, not a change -- gets past gate 1 and lets both be read.
+
+    gate 1   SEC starts 1736364, the rise lands at +9
+    gate 2   SEC starts 2451098, the rise lands at +9
+
+Identical.  The design wants them two apart: gate 1's interrupt deferred to
+the NOP, gate 2's taken at the end of the SEC.
+
+The two apart are in the program, and they arrive:
+
+    gate 1   JSL $02807D with A=$899A ... 36390 master to the SEC
+    gate 2   JSL $02807D with A=$899C ... 36392 master to the SEC
+
+So the program reaches its landing zone two cycles later for gate 2, exactly
+as written, and the interrupt lands at the same offset anyway -- which means
+the interrupt moved two as well.
+
+The alignment explains why the rest cancels and this does not.  $02:8000
+reads the H counter twice, works out where it is, and computes a delay so
+that start plus delay is a constant; gate 1 starts at position $013A with a
+phase correction of 2, gate 2 at $0130 with a correction of 0, and their
+delays differ by exactly the ten that separates the positions.  That is the
+routine doing its job.  The two from the explicit call afterwards is the
+part that is meant to survive.
+
+What cannot be right, whatever the cause: the two rise instants are 1736373
+and 2451107, and 714734 between them is not a multiple of four.  A V-only
+timer fires at the same dot of a line, lines are 1364 master and the two
+that are not are 1360 and 1368, so any two firings must be a whole number of
+dots apart.
+
+`_arm_irq` has one path that can produce an instant off the dot grid:
+
+    if at <= self.master_clock:
+        at = self.master_clock + 1
+
+-- an arbitrary master cycle, wherever the processor happened to be, rather
+than the next dot at which the comparison could be true.  That is the first
+mechanism found that can put an interrupt where a console cannot, and it is
+where to look next.  Not changed here: it wants its own measurement, and
+this session's record already has one fix that was really a rounding
+artefact wearing the right colour.
