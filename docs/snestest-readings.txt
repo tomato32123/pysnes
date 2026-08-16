@@ -1424,3 +1424,19 @@ against the line.  The copy of the reference on this machine has the CPU's
 files and the PPU's *rendering* files, and the counter is defined in the
 PPU's timing, which is not among them.  So this stops here with the gate two
 clocks away and the question named precisely.
+
+The units half of that question is answered by the declaration alone:
+
+    uint12 htime = 0x1ff + 1 << 2;
+    uint9  vtime = 0x1ff;
+
+Twelve bits holding 2048 against nine bits holding 511.  `htime` is kept in
+clocks, already multiplied by four; `vtime` is kept raw.  So
+`hcounter(10) == io.htime` compares clocks with clocks, and this emulator's
+`htime * 4` is the same quantity.  The formula is right.
+
+What is left is the origin: where the reference's horizontal counter reads
+zero against the start of a line, which is two clocks' worth of difference
+and lives in the PPU's timing rather than the CPU's.  Not in the copy here.
+So gate 3 stands at two clocks with half its question closed, and the half
+that remains is a single number in a file nobody on this machine has.
