@@ -1440,3 +1440,40 @@ zero against the start of a line, which is two clocks' worth of difference
 and lives in the PPU's timing rather than the CPU's.  Not in the copy here.
 So gate 3 stands at two clocks with half its question closed, and the half
 that remains is a single number in a file nobody on this machine has.
+
+--------------------------------------------------------------------------------
+The origin question, answered -- and a bigger thing behind it.
+
+`counter-inline.hpp`, fetched:
+
+    auto PPUcounter::hcounter() const -> uint { return time.hcounter; }
+    auto PPUcounter::hcounter(uint offset) const -> uint {
+      if(offset <= hcounter()) return hcounter() - offset;
+      ...
+
+The counter is clocks from the start of the scanline, wrapping at 1364, and
+the delayed form is simply the value that many clocks ago.  So
+`hcounter(10) == io.htime` fires at line start plus htime-in-clocks plus ten
+-- which is exactly what this emulator computes.  The formula and the origin
+both match, and gate 3's two clocks are not there.
+
+The comment underneath is the larger find:
+
+    //one PPU dot = 4 CPU clocks.
+    //
+    //PPU dots 323 and 327 are 6 CPU clocks long.
+    //this does not apply to NTSC non-interlace scanline 240 on odd fields.
+
+A scanline is not 341 uniform dots.  It is 340: 338 of four clocks and two
+of six, which is where 1364 comes from.  This emulator divides the line by
+four everywhere -- `_screen_x` and `_hcount` both do -- so every dot from
+323 onwards is placed two or four clocks early, and a program reading the
+counter through $2137 and $213C past that point gets a number this emulator
+would not.
+
+Not implemented here.  It moves where every dot after 323 is drawn as well as
+what the counter reports, and the two long dots are outside the visible 256,
+so nothing in the reference pictures or the library would show it while a
+great deal could shift.  It is written down as the largest single unmodelled
+thing now known about the timing, with the citation, for a session that can
+give it the measurements it deserves.
