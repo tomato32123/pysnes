@@ -1556,3 +1556,20 @@ and exits 0.  It now says what it did instead and exits 77, the code
 `checkall.py` reports 77 as NOTHING TO RUN and counts it with the not-run
 total rather than the passes, which is what its own last line has been
 saying all along.
+
+## Five member writes a dot, on the path most dots take
+
+`_compose`'s fast path -- no colour math, no forced black, not hires, which
+is most dots of most frames -- wrote five "previous dot" fields on every
+one.  Only the hires path reads them, and this path is not it; what a later
+segment can inherit is the last dot's, so they are written once at the end.
+
+    7.163 -> 6.994 s on Super Mario World  (-2.4%), interleaved
+
+The same shape as the `_paint` priority flag, which cost more than it saved
+until it was folded into a local and written once per span.  A member store
+in the innermost loop of a renderer is not free, and the two places it
+turned up were both written as if it were.
+
+Guards: 76 of 76 library games identical, krom's 66 pages, ppucompare's 35
+demos exact, twenty test modules.

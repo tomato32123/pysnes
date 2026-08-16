@@ -1296,7 +1296,13 @@ cdef class PPU:
                 main_out = table[self.main_buf[x] & 0x7FFF]
                 row[x * 2] = main_out
                 row[x * 2 + 1] = main_out
-                self.prev_main = self.main_buf[x]
+            # These five carry the dot's state to the *next* dot, and only
+            # the hires path ever reads them -- which this path is not.  What
+            # a later segment can inherit is the last dot's, so they are
+            # written once here rather than five member stores per dot on the
+            # commonest path in the renderer.
+            if x1 > x0:
+                self.prev_main = self.main_buf[x1 - 1]
                 self.prev_blacked = 0
                 self.prev_math = 0
                 self.prev_halve = 0
