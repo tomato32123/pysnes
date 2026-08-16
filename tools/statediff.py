@@ -16,12 +16,19 @@ This does it for the whole library, which is where the SA-1, the SuperFX,
 the SPC7110, the S-DD1 and the OBC1 are.
 
 **What it does not reach.**  A round trip only tests what was running when
-the state was taken.  Star Fox is black at frame 1200 under random input --
-it never gets to a stage -- and its SuperFX state can be zeroed, all six
-hundred and sixteen values of it, without changing the next hundred and
-twenty frames.  So this covers the SuperFX in name only.  Getting there
-wants a scripted way in rather than a random one, and until something drives
-it that far the honest thing is to say so here.
+the state was taken, and nothing here gets Star Fox to a stage.  Its whole
+SuperFX state -- 616 registers and 32 KB of the chip's own RAM -- can be
+zeroed at frame 750, 1350 or 1800, under random input or a scripted string
+of Starts, and the next hundred and twenty frames are identical.  So this
+covers the SuperFX in name only.
+
+That was worth chasing rather than assuming, because the other explanation
+would have been a real defect: a loader that quietly does not apply the
+board's state would look exactly the same from outside.  It does apply it --
+after loading a zeroed board the state reads back as zero -- so the reason
+is the cartridge, not the emulator.  Star Fox draws its title and menus from
+the S-CPU and does not start the chip in the first 1800 frames of anything
+tried here.
 
     python tools/statediff.py <romdir> [warm] [compare]
 """
