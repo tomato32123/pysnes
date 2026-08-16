@@ -1340,3 +1340,47 @@ a library sweep ran beside it.
 Interleaved in short rounds, both halves see the same load: 3.55, 3.89 and
 3.80 ms over three runs with that sweep still going.  It is the same lesson
 as the benchmark method above, and the test had to learn it twice.
+
+## The routine, end to end
+
+    13 passed, 0 failed, 0 not run
+
+That last number is the one that changed today.  Before: two audio checks
+reported "could not run" because a reference had never been built, there was
+no library check at all, and the one that did run reported a permanent
+failure on a row its own README gets wrong.  A routine with a standing red
+line and two silent gaps is a routine nobody reads.
+
+What it now covers, all of it actually executing:
+
+| Check | What it is |
+| --- | --- |
+| unit tests | 20 modules |
+| 65C816 and SPC700 test ROMs | gilyon's, every test |
+| krom instruction ROMs | 66 pages |
+| krom PPU references | 35 demos, exact to the pixel |
+| neser OBJ behaviour | which tiles the hardware fetches |
+| colour-halve order | halve after add |
+| VRAM address remapping | every bit depth, two ways |
+| SPC dumps, by ear | every dump reports a pass |
+| interrupt timing after DMA | Sour's, 14 of 14 |
+| DSP against blargg's, by sample | 0 of 14 scripts differ |
+| a game's music, both chips | correlation 0.9829 |
+| SPC7110 cartridge self-test | the cartridge's own program |
+| the library against its baseline | 76 of 76 |
+
+Three of those thirteen were doing nothing this morning.
+
+### The row the README gets wrong
+
+`dma_irq_test`'s README gives $FFFF for "IRQ - SEI+INC", and the built
+cartridge cannot print it: its own source zeroes the high byte of every
+result before writing the low one, so no emulator and no console can produce
+that value.  The table holds $00FF, what the cartridge actually reports, with
+the README's claim written beside it in the output:
+
+    IRQ - SEI+INC   $00FF  $00FF   (README says $FFFF; the cartridge cannot print it)
+
+Not to make the number go green.  A check that is permanently red is a check
+people stop reading, and the fact worth keeping is which of the two is
+evidence and which is a typo -- so both are on the line.

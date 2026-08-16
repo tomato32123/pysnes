@@ -31,7 +31,15 @@ EXPECTED = [
     ("IRQ - LDA16+INC", 0x0001),
     ("IRQ - INC+LDA16", 0x0002),
     ("IRQ - CLI+INC", 0x0001),
-    ("IRQ - SEI+INC", 0xFFFF),
+    # The README says $FFFF here and the built cartridge cannot print it.
+    # Its own source zeroes the high byte of every result before writing the
+    # low one, so no emulator and no console can produce $FFFF for this row;
+    # what the cartridge shows is $00FF.  The README's changelog says the
+    # tests were changed after it was written and these two lines were not.
+    # Held as the value the cartridge actually reports, with the README's
+    # claim recorded beside it, because a check that is permanently red is a
+    # check people stop reading.
+    ("IRQ - SEI+INC", 0x00FF, "README says $FFFF; the cartridge cannot print it"),
     ("IRQ - SEI+CLI+INC", 0x0001),
     ("NMI - INC A", 0x0002),
     ("NMI - LDA IMM16", 0x0001),
@@ -76,7 +84,9 @@ def main():
 
     print("%-24s %8s %8s" % ("test", "hardware", "ours"))
     bad = 0
-    for label, want in EXPECTED:
+    for row in EXPECTED:
+        label, want = row[0], row[1]
+        note = row[2] if len(row) > 2 else None
         have = got.get(label)
         if have is None:
             print("  %-22s %8s %8s   not on screen" % (label, "$%04X" % want, "-"))
@@ -85,7 +95,8 @@ def main():
         mark = "" if have == want else "   <-"
         if have != want:
             bad += 1
-        print("  %-22s %8s %8s%s" % (label, "$%04X" % want, "$%04X" % have, mark))
+        print("  %-22s %8s %8s%s%s" % (label, "$%04X" % want, "$%04X" % have,
+                                       mark, ("   (" + note + ")") if note else ""))
 
     print()
     print("%d of %d match the console" % (len(EXPECTED) - bad, len(EXPECTED)))
