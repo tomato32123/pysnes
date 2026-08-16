@@ -1134,3 +1134,41 @@ Not changed here.  Gate 1 passes on the shipped build for a reason that is
 now understood -- the rounded instant, which is honest about being rounded
 -- and swapping it for a build where gate 1 fails and gate 2 is merely
 reachable would trade a reading for a hope.
+
+--------------------------------------------------------------------------------
+test_irq's second gate: every term swept, and the answer is not in them.
+
+The comparison the processor makes has three terms -- when the line went up,
+where the current cycle began, and what counts as "before".  All three have
+now been swept, each with both gates pinning it from opposite sides, and one
+more thing besides:
+
+    the H counter's offset, in dots            no value passes both
+    the dot the V match fires on               no value passes both
+    where in the read cycle $2137 latches      no value passes both
+    where in a cycle the line is sampled       no value passes both
+    the last of those with the V instant
+      fixed to the line rather than to
+      wherever the processor was               no value passes both
+
+The last of those is the configuration with every part argued for
+separately: the real instant, which is provably necessary; a V match tied to
+its line rather than to the processor's position, which is the only way the
+timer can be independent of what the program is doing; and the sampling
+point as the unknown.  Gate 1 passes from -14 to -10 and gate 2 never does.
+
+Sweeping the sampling point also showed the sign is wrong.  The design has
+gate 2 arriving two cycles later, so the interrupt should appear two cycles
+*earlier* against its landing zone.  Here it appears later, and no threshold
+puts the two on opposite sides of it, which is not what a two-cycle error in
+one term looks like -- it is what a missing term looks like.
+
+That is where this stops.  Five families of explanation are dead, one result
+is a proof rather than a search, and the remaining difference is not
+reachable by adjusting anything in the comparison as this emulator models
+it.  Whatever is missing is a thing the model does not have, and finding it
+needs evidence this machine cannot produce: a console, or another
+implementation to diff against instruction by instruction.
+
+What is shipped is unchanged and understood: gate 1 passes on a rounded
+instant, and the rounding is honest about being a rounding.
