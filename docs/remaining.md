@@ -24,6 +24,54 @@ the emulator is checked *against* is.
 
 ---
 
+## Where to look
+
+**What is open, and why**
+- First, the thing that shapes everything else — no reference emulator here
+- Second, what no cartridge has ever exercised
+- The untouched items · The six partial items
+- The titles that do not render, and one that only looked like it
+
+**Decided against, with reasons** — these are refusals, not omissions
+- The INIDISP glitch: measured, understood, and deliberately not modelled
+- Two things that did not work, and how to measure on this machine
+- Stepping the bitplanes instead of shifting by the column: slower
+
+**How anything here is checked**
+- How to verify anything here · The day the instruments were read
+- The library as a regression detector — a baseline the whole library fails against
+- Every cartridge under random input
+- Are the tests themselves able to fail? · Which modules the tests never named
+- Auditing the checks for the shape the APK check had
+- The two audio checks were not running at all
+- The routine, end to end
+
+**Speed, and what it cost to be sure of it**
+- Speed, measured for the first time
+- Holding the last tile fetch · Doing the tile arithmetic once per tile
+- Not drawing layers that are on neither screen
+- Not filling a window mask nobody is looking through · A window mask is a step function
+- Declining a pass the layer has nothing for · Five member writes a dot
+- A division on every instruction fetch
+- More than half of every save state was a picture nobody sees
+- What the renderer work came to
+- What frameprof's tails mean, and what they do not
+
+**Defects found, and what found them**
+- What the reference pictures found
+- The first timing defect found, and fixed, by a hardware oracle
+- VRAM address remapping, checked without a reference
+- Sprites that name the tiles they came from
+
+**Faults in things that were not the emulator**
+- Two saves that were one
+- A timing assertion that measured the machine
+- The day the library was read
+
+Sections are in the order they were written, which is the order the work
+happened; this index is the only concession to that being a poor order for
+reading.
+
 ## First, the thing that shapes everything else
 
 **There is no reference emulator on this machine.** No bsnes, no ares, no
