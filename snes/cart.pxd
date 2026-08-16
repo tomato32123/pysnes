@@ -18,6 +18,8 @@ cdef class Cart:
     cdef readonly object path
     cdef readonly unicode title
     cdef readonly uint32_t rom_size
+    cdef uint32_t rom_mask           # size - 1 when the size is a power
+                                     # of two, 0 when it is not
     cdef readonly uint32_t sram_size
     cdef readonly uint32_t sram_mask
     cdef readonly int map_mode              # MapMode

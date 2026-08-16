@@ -319,7 +319,10 @@ cdef class Bus:
         cdef uint32_t off = addr & 0x1FFF
 
         if kind == PK_ROM:
-            self.mdr = self.cart.rom[(self.page_base[page] + off) % self.cart.rom_size]
+            if self.cart.rom_mask:
+                self.mdr = self.cart.rom[(self.page_base[page] + off) & self.cart.rom_mask]
+            else:
+                self.mdr = self.cart.rom[(self.page_base[page] + off) % self.cart.rom_size]
         elif kind == PK_WRAM:
             self.mdr = self.wram[(self.page_base[page] + off) & 0x1FFFF]
         elif kind == PK_MMIO_LO or kind == PK_MMIO_HI:

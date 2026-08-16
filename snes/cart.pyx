@@ -174,6 +174,11 @@ cdef class Cart:
 
         self.rom_data = raw
         self.rom_size = len(raw)
+        # Mirroring a power-of-two ROM is a mask; the rest need the
+        # division.  Twenty-eight of the thirty-nine images here are a
+        # power of two, and the division was on every instruction fetch.
+        self.rom_mask = (self.rom_size - 1) if (
+            self.rom_size and (self.rom_size & (self.rom_size - 1)) == 0) else 0
         self.rom = <const uint8_t *>self.rom_data
 
         self._detect_header()

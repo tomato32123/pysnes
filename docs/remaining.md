@@ -1479,3 +1479,16 @@ krom's 66 pages, ppucompare's 35 demos and the twenty test modules.  Not one
 moved a pixel anywhere.  The baseline that makes that sentence possible was
 built this morning; before it, the innermost loop of the renderer was not
 something to rewrite on a hunch.
+
+## A division on every instruction fetch
+
+`read8` mirrored a ROM address with `% self.cart.rom_size`.  Integer
+division is twenty-odd cycles and that ran on every fetch and every operand
+byte.  Twenty-eight of the thirty-nine images in this library are a power of
+two in size, where mirroring is a mask; the mask is worked out once when the
+cartridge is loaded and the division kept for the rest.
+
+    6.865 -> 6.661 s on Super Mario World  (-3.0%), interleaved
+
+Guards: 76 of 76 library games identical, gilyon's 65C816 and SPC700 ROMs,
+krom's 66 pages, twenty test modules.
