@@ -1172,3 +1172,43 @@ implementation to diff against instruction by instruction.
 
 What is shipped is unchanged and understood: gate 1 passes on a rounded
 instant, and the rounding is honest about being a rounding.
+
+--------------------------------------------------------------------------------
+Two things about interrupt polling that this emulator does not model.
+
+Read rather than measured, because the measurements ran out.  Recorded as
+gaps, not acted on.
+
+**A taken branch polls a cycle early.**  The 6502 and 65816 examine the
+interrupt lines on the last cycle of an instruction, except in a branch,
+where the decision is made on the second cycle whether or not the branch is
+taken.  For a taken branch that is one cycle earlier than normal, which
+delays the interrupt by a whole instruction.  This emulator polls at one
+point for every instruction.
+
+It does not explain test_irq: its landing zone is SEP, SEC, NOP, CLC and the
+line rises in the SEC, not in a branch.  It would show somewhere else, and
+nothing here fails on it, so it is written down rather than implemented --
+the same treatment as $2140-$2143.
+
+**bsnes latches a transition, not a level.**  Its `lastCycle()` sets a
+pending flag from `irqTest()`, which reports a *transition* that was latched
+when the line went up, rather than asking whether the line is up now.  This
+emulator compares a level and a rise time.  The two models are not the same
+shape, and the difference is exactly the kind that shows up in a cartridge
+that aims an interrupt at a chosen byte.
+
+Which also corrects something written above.  The entry that proved a
+rounded instant cannot separate test_irq's two gates was reasoning about
+*this* emulator's rounding, and it does not follow that a cycle-granular
+model cannot pass them: bsnes's is cycle-granular and the cartridges shipped
+with bsnes.  The gates are two master cycles apart, and the SEC's cycle
+boundary falls at eight -- so a rise at +6 and a rise at +8 are in different
+cycles, and a model that latches per cycle distinguishes them.  What this
+emulator has to get right is not finer resolution; it is putting the two
+rises on either side of that boundary, which is an alignment question and
+not a granularity one.
+
+Sources:
+  https://www.nesdev.org/wiki/Visual6502wiki/6502_Timing_of_Interrupt_Handling
+  https://forums.nesdev.org/viewtopic.php?t=19163
