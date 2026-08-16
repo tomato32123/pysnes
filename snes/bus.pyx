@@ -987,7 +987,11 @@ cdef class Bus:
             self.nmi_flag = 1
             if self.nmi_enabled:
                 if not self.nmi_pending:
-                    self.nmi_rose_at = self.master_clock
+                    # Two clocks, not the ten the IRQ gets: the reference
+                    # polls NMI against vcounter(2) and IRQ against
+                    # vcounter(10) -- the delay between the counters and each
+                    # unit is not the same for the two.
+                    self.nmi_rose_at = when + 2
                 self.nmi_pending = 1
                 self.nmi_count += 1
             if self.auto_joypad:
@@ -1033,7 +1037,7 @@ cdef class Bus:
         first throws the question away."""
         cdef int now = 1 if (self.timer_irq or self.board.irq_line) else 0
         if now and not self.irq_pending:
-            self.irq_rose_at = self.master_clock
+            self.irq_rose_at = at
         self.irq_pending = now
 
     cdef inline int _line_length(self) noexcept:
@@ -1072,9 +1076,9 @@ cdef class Bus:
         if self.irq_mode == 2:                       # V match, at dot 0
             if self.vcount != self.vtime:
                 return
-            at = line_start
+            at = line_start + 10
         elif self.irq_mode == 1:                     # H match, every line
-            at = line_start + <int64_t>self.htime * 4
+            at = line_start + 10 + <int64_t>self.htime * 4
             # A dot already gone does not come back on this line.  The compare
             # runs with the counter, so a program that asks for dot 85 while
             # the beam is at dot 140 is answered at dot 85 of the next line,
@@ -1086,8 +1090,8 @@ cdef class Bus:
         else:                                        # H and V
             if self.vcount != self.vtime:
                 return
-            at = line_start + <int64_t>self.htime * 4
-        if at <= self.master_clock:
+            at = line_start + 10 + <int64_t>self.htime * 4
+        if at <= self.master_clock and self.irq_mode != 2:
             # The computed instant has gone by -- this runs while the line
             # event is being processed, so a V match always has.  Pushing it
             # to master_clock + 1 puts the interrupt wherever the processor

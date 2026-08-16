@@ -740,7 +740,7 @@ cdef class CPU:
             # processor looks for it at the same moment, so the same rule
             # decides it: tukuyomi's test_nmi reports the byte it landed on
             # exactly as its three siblings do.
-            if self.bus.nmi_pending and self.bus.nmi_rose_at < self.bus.cycle_start:
+            if self.bus.nmi_pending and self.bus.nmi_rose_at <= self.bus.cycle_start:
                 self.take_nmi = 1
             # The line has to have been up before the instruction's last
             # cycle began.  One that rises during that cycle is not seen
@@ -750,7 +750,7 @@ cdef class CPU:
             # byte it actually landed on.  Polling at the boundary instead
             # takes such an interrupt an instruction early.
             self.take_irq = 1 if (self.bus.irq_pending and not i_before
-                                  and self.bus.irq_rose_at < self.bus.cycle_start) else 0
+                                  and self.bus.irq_rose_at <= self.bus.cycle_start) else 0
 
     # =====================================================================
     # instruction dispatch

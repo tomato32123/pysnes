@@ -1274,3 +1274,52 @@ implementations, that leaves the transition latch -- sampling that the line
 *went up* rather than that it *is* up -- and that one cannot be tried the
 same way, because it changes the shape of the model rather than a constant
 in it.
+
+================================================================================
+The reference was on this machine all along.
+
+Every entry above about test_irq ends the same way: what is missing needs a
+console or another implementation to diff against.  There was a copy of
+bsnes's CPU sources in a scratch directory, fetched in some earlier session,
+and `cpu_irq.cpp` opens with this:
+
+    //nmiPoll() and irqPoll() are called once every four clock cycles;
+    //ppu.(vh)counter(n) returns the value of said counters n-clocks before
+    //current time; it is used to emulate hardware communication delay
+    //between opcode and interrupt units.
+
+    if(status.irqValid.raise(io.irqEnable
+    && (!io.virqEnable || vcounter(10) == io.vtime)
+    && (!io.hirqEnable || hcounter(10) == io.htime)
+
+The counters are compared **ten clocks in the past**.  The interrupt unit
+does not see the counter the moment it changes; there is a delay between
+them, and the timer therefore asserts ten master cycles after the match.
+NMI gets its own figure -- `vcounter(2)` -- so the two units are not the
+same distance away.
+
+Ten is not a multiple of four.  Every sweep in this file moved the firing
+point by whole dots, so none of them could ever have found it.
+
+Applied, along with one more thing the measurements had cornered.  Gate 2's
+rise landed exactly on the boundary the processor compares against, and was
+being treated as not seen; a line that goes up as a cycle begins is high for
+the whole of that cycle, so the comparison is "at or before", not "before".
+
+    test_irq   2 gates -> 3          test_nmi   2 gates -> 15
+    dma_irq_test 14 of 14, unchanged
+    krom 66, ppucompare 35 exact, 24 test modules
+
+Two things moved that had to be looked at rather than accepted.
+
+The H-IRQ split test failed by one column, 169 against a bound of 168.  That
+bound was a round forty columns of slack for "the handler takes a few
+cycles"; the handler is an eight-cycle interrupt sequence, SEP, LDA absolute
+and RTI, which on slow ROM is about 190 master cycles, or 48 dots.  The
+guess is replaced by the arithmetic.
+
+And the library baseline reported 75 of 76, with Star Fox drawing a
+different frame at 900.  It is a SuperFX title in an animated intro and a
+timing change moves what is on screen; the frame it draws now is polygonal
+ships over a planet, which is what that intro is.  The baseline was retaken
+deliberately, after the four checks above, and not before them.
