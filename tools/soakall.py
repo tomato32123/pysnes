@@ -41,6 +41,12 @@ EXPECTED = {
     "Planet's Champ TG 3000, The (Japan).sfc": "DSP firmware is not here",
     "SD Gundam GX (Japan).sfc": "DSP-3 firmware is not here",
     "Rockman_X_2_(J).smc": "the CX4 is not emulated; its error screen is static",
+    # Reached an actual game -- board drawn, pieces placed -- and waiting for
+    # a move its coprocessor is not here to compute.  It moved before the
+    # interrupt timing was corrected, which only means random input used to
+    # leave it wandering the menus; getting further in is not a regression.
+    "Hayazashi Nidan Morita Shougi (Japan).sfc":
+        "the ST01x is not emulated; it sits on a board waiting for a move",
     "Momotarou Dentetsu Happy (Japan).sfc": "its own check program, which ends",
     "Tengai Makyou Zero (Japan).sfc": "its own check program, which ends",
 }

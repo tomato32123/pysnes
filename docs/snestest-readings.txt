@@ -1323,3 +1323,25 @@ different frame at 900.  It is a SuperFX title in an animated intro and a
 timing change moves what is on screen; the frame it draws now is polygonal
 ships over a planet, which is what that intro is.  The baseline was retaken
 deliberately, after the four checks above, and not before them.
+
+--------------------------------------------------------------------------------
+The soak fired on the interrupt change, and it was not a regression.
+
+`Hayazashi Nidan Morita Shougi` stopped moving.  Looked at rather than
+assumed: the screen is a shogi board, fully drawn, pieces placed, and the
+program is waiting for the computer's move from an ST01x that is not
+emulated here -- `LoROM (ST01x not emulated)`.
+
+It moved before the timing was corrected, and that only means random input
+used to leave it wandering its menus.  Getting as far as a game and stopping
+at the chip is further in, not further wrong.  Added to the list the tool
+carries, with that reasoning written beside it, because adding an entry to
+that list is silencing a check and the next reader is owed the grounds.
+
+    0 of 76 stopped moving or crashed unexpectedly, nine standing still
+
+Which is the thing worth recording about the whole afternoon: the two
+sweeps -- the baseline over fixed input and the soak over random -- looked
+at the same change and only one of them saw anything.  The baseline said 75
+of 76 and named Star Fox; the soak said one of 76 and named a different
+cartridge entirely.  Neither would have found the other's.
