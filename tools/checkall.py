@@ -45,6 +45,9 @@ def reference(name, env_var):
 # (name, argv, slow) -- slow ones need whole libraries or thousands of frames.
 CHECKS = [
     ("unit tests", [sys.executable, "tools/runtests.py"], False),
+    # And whether any of them could have failed.  A test that prints what it
+    # saw and never judges it is green on a broken build.
+    ("tests that can fail", [sys.executable, "tools/weaktests.py"], False),
     ("65C816 and SPC700 test ROMs", [sys.executable, "tools/cputest.py"], True),
     ("krom instruction ROMs", [sys.executable, "tools/kromtests.py"], True),
     ("krom PPU references", [sys.executable, "tools/ppucompare.py"], True),

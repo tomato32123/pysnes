@@ -1599,3 +1599,23 @@ where it ends:
 
 -- against a total that is a quarter smaller, so every one of those is less
 work than the number suggests.
+
+## Are the tests themselves able to fail?
+
+The same question that caught the APK check, turned on the suite: a test
+that runs the emulator, prints what it saw and never judges it is green on a
+broken build and green on a correct one, and it makes the count larger
+without making it stronger.
+
+    169 test functions, 0 of which cannot fail
+
+`tools/weaktests.py` asks it, and `checkall` runs it beside the tests
+themselves.  It was proved able to fail by adding a test that only prints:
+it named it and exited 1.
+
+The first version of the audit reported four false positives.  It had the
+judging helpers hard-coded and did not know about `check_near`, which is
+the one `test_timing.py` uses.  So it finds them instead -- any function in
+`tests/` whose body appends to FAILURES or raises.  An auditor that does not
+know its subject invents faults and misses real ones, and the second kind is
+the one that matters.
