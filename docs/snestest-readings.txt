@@ -1021,3 +1021,39 @@ mechanism found that can put an interrupt where a console cannot, and it is
 where to look next.  Not changed here: it wants its own measurement, and
 this session's record already has one fix that was really a rounding
 artefact wearing the right colour.
+
+--------------------------------------------------------------------------------
+The interrupt that landed off the dot grid.
+
+The entry above named `at = self.master_clock + 1` in `_arm_irq` as the
+first mechanism found that can put an interrupt where a console cannot, and
+left it alone pending its own measurement.  Measured:
+
+For a V-only match that path is not an edge case, it is every time.
+`_arm_irq` runs while the line event is being processed, so `at = line_start`
+has always just gone by, and the interrupt is placed one master cycle after
+wherever the processor happened to be -- an instant with no relation to the
+dot grid.  Two firings measured 714734 apart, which is not a multiple of
+four, and no console can do that: the comparison is against a counter that
+moves a dot at a time and every line is a whole number of dots.
+
+Removing the clamp altogether puts it on the grid and loses gate 1 of
+test_irq, which had been passing on the old behaviour.  That is the third
+time in this session that a defensible change has taken away an accidental
+pass, and the first time there was a third option: keep the clamp, and round
+it up to the next dot at which the comparison could be true.
+
+    at = self.master_clock + 1
+    at += (-(at - line_start)) & 3
+
+With that, everything holds at once:
+
+    test_irq   $18, gate 1 passes        test_nmi   $18, gate 1 passes
+    dma_irq_test  14 of 14               twenty test modules
+    the library   76 of 76 unchanged
+
+Same observable behaviour as before, one impossibility gone.  Worth saying
+why that is different from the two reverts: those replaced an accidental
+pass with an honest failure and gained nothing observable.  This one keeps
+every reading and removes the thing that could not be true, which is the
+shape a fix is supposed to have.
