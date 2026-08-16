@@ -1653,3 +1653,24 @@ every working game.  It reported 27 of 76 as bad.  None of them were.
 **The list is only valid at the length it was measured over.**  At 600
 frames five more cartridges are still on a boot logo and look stopped, so
 the tool says so when asked to run shorter.
+
+## What frameprof's tails mean, and what they do not
+
+The per-stage percentiles are not all measurements of work.  On a machine
+with something else on a core, whichever stage is running when the scheduler
+takes the CPU away wears the delay, and a stage whose mean is a twentieth of
+a millisecond can show a 99th percentile of eleven.
+
+    audio    mean 0.06 ms   p99 10.86   max 15.95      in frameprof
+    audio    mean 0.01 ms   max  0.28                  measured on its own
+
+So the audio stage has no spike; `take_samples` and building the mixer
+chunks are both hundredths of a millisecond, and the tail in the profile is
+the operating system, not the emulator.  The same caution applies to `blit`,
+whose mean is 0.89 and whose maximum is 33.
+
+The rewind tail from the same table was real, and the difference is how it
+was established: `capture` measured on its own reproduced it -- 0.74 ms mean
+against a 12.79 p99 -- and the cause was found in the state's size rather
+than inferred from the profile.  A tail is worth chasing when it reproduces
+in isolation.  Otherwise the profile is telling you about the machine.
