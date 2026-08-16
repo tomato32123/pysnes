@@ -42,6 +42,8 @@ SAMPLE_RATE = 32000
 
 # From the tests' readme: the first tone is always low, and what follows
 # says what went wrong.
+NOTHING_TO_DO = 77      # tools/romarg.py's "there is nothing here to run"
+
 VERDICTS = {
     ("low",): "passed",
     ("low", "high"): "general failure",
@@ -176,6 +178,13 @@ def main():
         paths = [os.path.join(DEFAULT_DIR, n)
                  for n in sorted(os.listdir(DEFAULT_DIR))
                  if n.lower().endswith(".spc")]
+    # Nothing to listen to is not everything passing.  Without this the loop
+    # below runs zero times, bad stays nought, and the last line says every
+    # dump reported a pass -- on a machine with no dumps at all.  Every other
+    # tool here fails loudly when handed nothing; this one was the exception.
+    if not paths:
+        print("no .spc dumps in %s -- nothing was checked" % DEFAULT_DIR)
+        return NOTHING_TO_DO
     bad = 0
     for path in paths:
         name = os.path.basename(path)

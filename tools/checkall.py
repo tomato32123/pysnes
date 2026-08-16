@@ -101,6 +101,13 @@ def main():
             skipped += 1
             continue
         code, last = run(argv)
+        if code == 77:
+            # A tool saying "there was nothing here to run".  Reported as
+            # itself rather than as a pass, which is the whole point of the
+            # line at the bottom of this file.
+            print("  %-32s NOTHING TO RUN -- %s" % (name, last[:44]))
+            skipped += 1
+            continue
         if code is None:
             print("  %-32s COULD NOT RUN -- %s" % (name, last))
             skipped += 1

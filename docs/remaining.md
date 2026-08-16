@@ -1531,3 +1531,28 @@ A note on the measurement.  The first run of this used
 over budget, which sent me looking at the display path.  Both numbers were
 the dummy driver's.  With a real display the blit is 0.49 ms and the figure
 is 3.7%, and `play.py`'s own docstring had said so all along.
+
+## Auditing the checks for the shape the APK check had
+
+The Android packaging check proved something worth turning on the rest: a
+verification that reports on *existence* rather than *identity*, or that can
+fail silently, reads exactly like one that works.  So every tool in the
+routine was handed nothing and watched.
+
+    kromtests   cputest   vmaintest   dspdiff
+    spc7110check   dmairqtest   objglyphs   colourmath
+
+All eight fail loudly with a named reason.  `ppucompare` excludes eight of
+krom's references and prints a measured reason for each -- six are off the
+SNES palette, one is a vertical rescale whose 437 of 448 rows are ours
+verbatim, one is interactive -- which is a report, not a silence.
+
+One was not.  `spcplay.py` collects the `.spc` dumps, loops over them
+counting failures, and prints "every dump reports a pass" when the count is
+nought.  With no dumps the loop runs zero times and it says exactly that,
+and exits 0.  It now says what it did instead and exits 77, the code
+`tools/romarg.py` uses for "there is nothing here to run".
+
+`checkall.py` reports 77 as NOTHING TO RUN and counts it with the not-run
+total rather than the passes, which is what its own last line has been
+saying all along.
