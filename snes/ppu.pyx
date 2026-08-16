@@ -1161,7 +1161,8 @@ cdef class PPU:
     # ------------------------------------------------------------- windows ---
 
     cdef void _compute_windows(self, int x0, int x1) noexcept:
-        cdef int layer, x, in1, in2, r
+        cdef int layer, x, in1, in2, r, n, a, b, c, lo, hi
+        cdef int edge[6]
         cdef int l1 = self.win1_left, r1 = self.win1_right
         cdef int l2 = self.win2_left, r2 = self.win2_right
 
@@ -1173,11 +1174,32 @@ cdef class PPU:
                 # every reader already knows.  The readers ask the same
                 # question first instead.
                 continue
-            for x in range(x0, x1):
-                in1 = 1 if (l1 <= x <= r1) else 0
+            # The answer is a step function of x: it can only change where a
+            # window's edge is, so there are at most four places in a line
+            # where it does.  Working it out per dot was 256 branches a layer
+            # per segment to fill at most five runs.
+            n = 0
+            edge[n] = x0; n += 1
+            for e in (l1, r1 + 1, l2, r2 + 1):
+                if x0 < e < x1:
+                    edge[n] = e; n += 1
+            edge[n] = x1; n += 1
+            # Insertion sort: at most six entries, already nearly ordered.
+            for a in range(1, n):
+                b = edge[a]
+                c = a - 1
+                while c >= 0 and edge[c] > b:
+                    edge[c + 1] = edge[c]; c -= 1
+                edge[c + 1] = b
+            for a in range(n - 1):
+                lo = edge[a]
+                hi = edge[a + 1]
+                if hi <= lo:
+                    continue
+                in1 = 1 if (l1 <= lo <= r1) else 0
                 if self.win_inverted[layer]:
                     in1 = 1 - in1
-                in2 = 1 if (l2 <= x <= r2) else 0
+                in2 = 1 if (l2 <= lo <= r2) else 0
                 if self.win2_inverted[layer]:
                     in2 = 1 - in2
 
@@ -1194,7 +1216,7 @@ cdef class PPU:
                     r = in1
                 else:
                     r = in2
-                self.win_mask[layer][x] = r
+                memset(&self.win_mask[layer][lo], r, <size_t>(hi - lo))
 
     # ------------------------------------------------------------- compose ---
 

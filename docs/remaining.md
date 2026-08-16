@@ -1573,3 +1573,29 @@ turned up were both written as if it were.
 
 Guards: 76 of 76 library games identical, krom's 66 pages, ppucompare's 35
 demos exact, twenty test modules.
+
+## A window mask is a step function, not 256 decisions
+
+Whether a dot is inside a layer's window can only change where a window's
+edge is, so there are at most four places in a line where the answer moves
+and at most five runs between them.  `_compute_windows` was deciding it per
+dot: 256 branches a layer per segment, six layers, to fill five runs.
+
+It now collects the edges that fall inside the segment, sorts six entries
+with an insertion sort, and fills each run with `memset`.
+
+    7.058 -> 6.950 s on Super Mario World  (-1.5%), interleaved
+
+Small, because the layers that have no window at all were already skipped
+and the ones left are few.  Kept because the shape is right and it was
+checked: 76 of 76 library games identical, krom's 66 pages, ppucompare's 35
+demos exact.
+
+That is the last of the renderer for now.  The profile it started from and
+where it ends:
+
+    before   30.5 _render_bg  12.0 _paint   7.4 _compose  3.9 _compute_windows
+    after    18.1 _render_bg   9.2 _paint   8.4 _compose  5.0 _compute_windows
+
+-- against a total that is a quarter smaller, so every one of those is less
+work than the number suggests.
