@@ -87,7 +87,13 @@ def fail(message):
 
 
 def parse_args(argv):
-    ap = argparse.ArgumentParser(description="pysnes")
+    # The controls live in this file's docstring and were reachable only by
+    # opening it: --help said "pysnes" and nothing else.  Anyone who has to
+    # read the source to find out which key is Start has not been told.
+    ap = argparse.ArgumentParser(
+        description="pysnes -- run a SNES ROM in a window",
+        epilog=__doc__[__doc__.index("Controls"):].rstrip(),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("rom", nargs="?", help="path to a .smc / .sfc image")
     ap.add_argument("--scale", type=int, default=3, help="window scale factor")
     ap.add_argument("--software-scale", action="store_true",
