@@ -235,28 +235,54 @@ class Screen:
         pygame.display.flip()
 
 
+def _say(screen, font, lines):
+    """Put words on the screen and wait.
+
+    A phone gives nothing back when an app closes: no console, no exit code,
+    nothing to read.  Anything that stops this has to say so here or it may
+    as well not have happened.
+    """
+    screen.window.fill((16, 17, 22))
+    for i, text in enumerate(lines):
+        image = font.render(text, True, (232, 231, 227))
+        screen.window.blit(image, (screen.width // 24,
+                                   screen.height // 4 + i * font.get_height() * 3 // 2))
+    screen.flip()
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return 0
+        pygame.time.wait(200)
+
+
 def main():
-    rom = find_rom()
     pygame.init()
     screen = Screen()
     font = pygame.font.Font(None, max(18, screen.height // 22))
+    try:
+        return _run(screen, font)
+    except SystemExit:
+        raise
+    except BaseException:
+        # Whatever went wrong, the only place it can be read is the screen.
+        import traceback
+        lines = ["pysnes stopped."]
+        for part in traceback.format_exc().strip().splitlines()[-6:]:
+            lines.append(part.strip()[:52])
+        try:
+            return _say(screen, font, lines)
+        except BaseException:
+            raise
+
+
+def _run(screen, font):
+    rom = find_rom()
 
     if rom is None:
         # Say what is missing and where to put it, rather than a blank screen.
-        screen.window.fill((16, 17, 22))
-        lines = ["No cartridge found.",
-                 "Put a .smc or .sfc file in:",
-                 ROM_DIRS[0]]
-        for i, text in enumerate(lines):
-            image = font.render(text, True, (232, 231, 227))
-            screen.window.blit(image, (screen.width // 12,
-                                       screen.height // 3 + i * font.get_height() * 3 // 2))
-        screen.flip()
-        while True:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    return 0
-            pygame.time.wait(200)
+        return _say(screen, font, ["No cartridge found.",
+                                   "Put a .smc or .sfc file in:",
+                                   ROM_DIRS[0]])
 
     machine = System(rom)
     touch = Touch(screen.width, screen.height, screen.layout)
@@ -269,6 +295,7 @@ def main():
         audio = None                     # sound is not worth failing over
 
     clock = pygame.time.Clock()
+    frames, since, fps = 0, pygame.time.get_ticks(), 0.0
     running = True
     while running:
         for event in pygame.event.get():
@@ -283,6 +310,17 @@ def main():
         machine.run_frame()
         screen.show(machine.framebuffer, machine.visible_height)
         screen.draw_pad(touch.held())
+        # The frame rate, on screen, because nobody has ever measured this
+        # emulator on an ARM core and the number cannot be read any other way
+        # from a phone.  Averaged over a second so it is readable.
+        frames += 1
+        now = pygame.time.get_ticks()
+        if now - since >= 1000:
+            fps = frames * 1000.0 / (now - since)
+            frames, since = 0, now
+        if fps:
+            image = font.render("%.1f fps" % fps, True, (232, 231, 227))
+            screen.window.blit(image, (screen.width - image.get_width() - 8, 8))
         screen.flip()
         if audio is not None:
             audio.feed(machine)
