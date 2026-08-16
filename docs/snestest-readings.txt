@@ -1212,3 +1212,37 @@ not a granularity one.
 Sources:
   https://www.nesdev.org/wiki/Visual6502wiki/6502_Timing_of_Interrupt_Handling
   https://forums.nesdev.org/viewtopic.php?t=19163
+
+--------------------------------------------------------------------------------
+test_irq: the error is one dot, and the timer is not where to fix it.
+
+With the real instant recorded and the V match tied to its line rather than
+to wherever the processor was, both gates can be read at once, and the two
+cycles the program builds in do survive all the way to the landing:
+
+    gate 1   call to SEC 36390 master   the line rises at +12
+    gate 2   call to SEC 36392 master   the line rises at +10
+
+That is the design working: gate 2's landing is two cycles later, so the
+interrupt arrives two cycles earlier against it.  The SEC's last cycle
+begins at +8, so what the cartridge wants is +8 and +6 -- one on each side.
+What it gets is +12 and +10, both on the same side, and the whole difference
+is **one dot**.
+
+Moving the timer does not close it.  Firing the V match at line_start + 8,
++4 or +0 instead of +12 does not put gate 1 at +8; it fails outright, with
+no setting in between.  The reason is that the program aligns itself *to the
+interrupt*: $02:8000 waits for V-blank, reads the H counter twice and
+computes a delay from where it finds itself, so moving the interrupt moves
+when the handler returns, moves where the alignment starts, and moves the
+landing with it.  The loop gain is not one and a four-cycle push does not
+arrive as four.
+
+So the fault is one dot of absolute alignment, and it is somewhere the timer
+cannot reach.  The two candidates now on the table are the ones read out of
+other implementations rather than measured here: polling a cycle early in a
+taken branch, and latching the line's transition rather than sampling its
+level.  The delay routine and the alignment are full of branches.
+
+Nothing changed.  Every measurement in this entry was taken on a build that
+was thrown away.
