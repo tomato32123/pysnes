@@ -68,9 +68,20 @@ cdef class System:
             saves = os.path.join(_app_dir(), "saves")
             os.makedirs(saves, exist_ok=True)
             name = os.path.splitext(os.path.basename(rom_path))[0]
-            self.sram_path = os.path.join(saves, name + ".srm")
+            # The cartridge's own checksum is in the name.  Keyed by file
+            # name alone, two different games that happen to share one --
+            # which is not rare in a collection sorted into folders -- write
+            # over each other's battery, and the second one to be opened
+            # loses a save with nothing said.
+            self.sram_path = os.path.join(
+                saves, "%s-%04X.srm" % (name, self.cart.computed_checksum))
+            # Older saves, in order: the name without a checksum, which is
+            # what this wrote before, and then one sitting beside the ROM,
+            # which belongs to whatever emulator put it there.  Both are read
+            # once and then written back to the new name.
             if not self.cart.load_sram(self.sram_path):
-                self.cart.load_sram(os.path.splitext(rom_path)[0] + ".srm")
+                if not self.cart.load_sram(os.path.join(saves, name + ".srm")):
+                    self.cart.load_sram(os.path.splitext(rom_path)[0] + ".srm")
 
     def reset(self):
         self.ppu.reset()

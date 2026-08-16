@@ -1310,3 +1310,33 @@ to export something is a check that stops running and does not say so.
 The second `*.cpp` glob has to exclude `dspprobe.cpp` or the link fails on
 two `main`s, which is worth a line because the instructions in the source
 files do not mention it.
+
+## Two saves that were one
+
+Battery saves were kept as `saves/<rom base name>.srm`.  Sorting a
+collection into folders makes duplicate base names ordinary -- this library
+has two pairs -- and two different games sharing one wrote over each other's
+battery, with the second to be opened losing a save and nothing said.
+
+The cartridge's own checksum is in the name now:
+
+    saves/BahamutLagoon-B856.srm
+
+Older saves are still picked up, in order: the name without a checksum,
+which is what this wrote before, and then one sitting beside the ROM, which
+belongs to whatever emulator put it there.  Either is read once and written
+back under the new name.
+
+## A timing assertion that measured the machine
+
+`test_rewind` checks that recording costs a small fraction of a frame.  It
+had already learned once not to assert on the absolute frame time, because
+the same build measures 11 to 24 ms depending on what else is open, and to
+assert on the *difference* instead.  The difference was still measured as
+one batch of recorded frames followed by one batch of plain ones -- two
+stretches of time as much as two workloads -- and it failed at 5.43 ms while
+a library sweep ran beside it.
+
+Interleaved in short rounds, both halves see the same load: 3.55, 3.89 and
+3.80 ms over three runs with that sweep still going.  It is the same lesson
+as the benchmark method above, and the test had to learn it twice.

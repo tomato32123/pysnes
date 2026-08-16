@@ -55,15 +55,27 @@ def main():
 
     # Cost of recording, against a 16.67 ms frame budget.
     r3 = Rewind(seconds=10.0, interval=3)
-    t0 = time.perf_counter()
-    for _ in range(180):
-        s.run_frame()
-        r3.capture(s)
-    with_rewind = (time.perf_counter() - t0) / 180 * 1000
-    t0 = time.perf_counter()
-    for _ in range(180):
-        s.run_frame()
-    plain = (time.perf_counter() - t0) / 180 * 1000
+    # Interleaved, not one batch after the other.  Two batches run back to
+    # back are two stretches of time as much as two workloads, and on a
+    # machine with something else on a core the difference between them
+    # swings by more than the thing being measured -- this test failed for
+    # exactly that reason while a library sweep was running beside it.
+    # Alternating in short rounds makes both halves see the same load.
+    rounds, per = 12, 15
+    rec_ms = plain_ms = 0.0
+    for _ in range(rounds):
+        t0 = time.perf_counter()
+        for _ in range(per):
+            s.run_frame()
+            r3.capture(s)
+        rec_ms += time.perf_counter() - t0
+        t0 = time.perf_counter()
+        for _ in range(per):
+            s.run_frame()
+        plain_ms += time.perf_counter() - t0
+    n = rounds * per
+    with_rewind = rec_ms / n * 1000
+    plain = plain_ms / n * 1000
     overhead = with_rewind - plain
     print("frame cost: %.2f ms plain, %.2f ms while recording (+%.2f ms)"
           % (plain, with_rewind, overhead))
