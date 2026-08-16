@@ -80,28 +80,49 @@ claimed:
    shipped an APK **with no emulator in it at all** -- 768 KB smaller, and
    silently useless.
 
-What works is removing the distribution, which forces it to be rebuilt from
-the recipes that are already compiled, so SDL and Python are not rebuilt:
+What works is removing the distribution, the recipe's build **and its
+install**, which forces the whole chain and still does not rebuild SDL or
+Python:
 
     B=.buildozer/android/platform/build-arm64-v8a
-    rm -rf "$B/dists/pysnes" "$B/build/other_builds/pysnes"
+    rm -rf "$B/dists/pysnes" "$B/build/other_builds/pysnes" \
+           "$B/build/python-installs/pysnes"
     buildozer android debug
 
-A real build of this recipe writes about 4,300 lines of log.  A few hundred
-means it packaged whatever was lying around.
+The install directory is the one that catches people out.  Leaving it in
+place, the recipe compiles fresh every time -- the log is four thousand
+lines, the `.c` files are regenerated, the `.so` files appear with the
+current timestamp -- and then the install step decides the package is
+already there and packages the old copy.  Every APK built here between 08:26
+and 11:52 one morning carried the same core, byte for byte, through four
+rebuilds that all looked convincing.
 
-**Check the artefact, not the exit code.**  The Python side is not a plain
-zip entry: it is a tar inside `lib/arm64-v8a/libpybundle.so`.
+**Check the artefact by identity, not by existence.**  Counting modules and
+running `file` proves the APK has *a* core, not *this* core, and that is the
+mistake that let those four through.  Compare what was packed against what
+was built:
 
     python -c "
-    import zipfile, tarfile, io
+    import zipfile, tarfile, io, hashlib, glob, os
     z = zipfile.ZipFile('android/bin/pysnes-0.1-arm64-v8a-debug.apk')
     t = tarfile.open(fileobj=io.BytesIO(z.read('lib/arm64-v8a/libpybundle.so')))
-    print(sorted(n.split('/')[-1] for n in t.getnames()
-                 if '/snes/' in n and n.endswith('.so')))"
+    packed = {n.split('/')[-1]: hashlib.md5(t.extractfile(n).read()).hexdigest()
+              for n in t.getnames() if '/snes/' in n and n.endswith('.so')}
+    built = {os.path.basename(f).split('.')[0] + '.so':
+             hashlib.md5(open(f,'rb').read()).hexdigest()
+             for f in glob.glob('android/.buildozer/android/platform/'
+                                'build-arm64-v8a/build/other_builds/pysnes/*/'
+                                'pysnes/build/lib.*/snes/*.so')}
+    print(sum(1 for k in packed if built.get(k) == packed[k]), 'of', len(packed))"
 
-Fifteen modules is right.  Zero is the failure above, and nothing else in
-the build says so.
+Fifteen of fifteen is right.  Anything less means the packaging and the build
+disagree.
+
+Searching the binary for a symbol does not work as a freshness check and
+looked as though it did.  A `cdef` struct member has no name in the compiled
+object, so its absence proves nothing -- and `strings` is not on the PATH
+without the conda environment, so the search printed 0 because the command
+was missing, which reads exactly like a real answer.
 
 One thing that looks wrong and is not: the intermediate objects are named
 `ppu.cpython-314-x86_64-linux-gnu.so`.  That is the *host* Python's tag.
