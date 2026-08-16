@@ -1702,3 +1702,33 @@ strength of the argument.
 Worth one caveat for whoever reads this on a phone: the reasoning that kills
 it is about x86.  An in-order ARM core may weigh the two differently, and
 nobody here can measure that.
+
+## Which modules the tests never named
+
+Asked mechanically, five: `superfx`, `gamepad`, `obc1`, `audioout`,
+`boards`.  That is not the same question as which are untested -- Star Fox
+and Metal Combat are in the library baseline and the soak, so the SuperFX
+and the OBC1 are checked every time either runs, just not by anything that
+pins a particular behaviour.
+
+The other three had nothing at all behind them, and each breaks in a way a
+player meets immediately:
+
+* **`boards`** decides which chip is on a cartridge.  Getting it wrong is
+  silent.  The $Fx chipset byte is shared by four chips and $FFBF picks
+  between them; two cartridges here are $F6, which the byte alone calls
+  SPC7110, and one of them is an ST01x.  That was a comment; it is a test
+  now, against forged headers and the seven real cartridges it was written
+  from.
+* **`gamepad`** writes the button table out a second time, and maps by
+  position rather than label -- SNES B onto the pad's bottom button, which
+  is named A.  Anyone correcting that to match the labels breaks every
+  player's hands.
+* **`audioout`** re-opens the mixer when it is at the wrong rate, because
+  `Sound(buffer=...)` does not resample and 44100 would replay the DSP's
+  32 kHz 1.378 times too fast.  Drop the check and the emulator still makes
+  sound: fast, high-pitched sound, of the kind that gets blamed on timing.
+
+All three were proved able to fail by breaking the thing they guard.  What
+is left unnamed is `superfx` and `obc1`, both covered in substance by the
+library.
