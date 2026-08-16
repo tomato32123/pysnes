@@ -1398,3 +1398,29 @@ are unmeasurable here, and both moved a frame of a game with animation in
 it.  If the reference turns out to be describing a different CPU revision --
 it distinguishes version 1 from version 2 for the refresh and this emulator
 models neither -- these are the two to look at first.
+
+--------------------------------------------------------------------------------
+All three gates measured, and where the third one stands.
+
+    gate 1  V only    rise at +10 into its SEC   deferred to the NOP   wants $18  passes
+    gate 2  V only    rise at  +8                taken at the SEC      wants $EA  passes
+    gate 3  H and V   rise at  +6                taken at the SEC      wants $18  fails
+
+Gate 3 needs the line up at +8 or later and it arrives at +6.  Two clocks,
+again, and this time on the H and V path rather than the V-only one.
+
+The reference says `irqPoll()` runs once every four clocks, which would round
+an assertion up to that grid -- +6 becomes +8 and gate 3 passes.  It also
+moves gate 2 from +8 to +10, where it is deferred and fails.  The two are
+mutually exclusive under that model, so the rounding is not it, or not it
+alone.  Tried and reverted; test_irq is back to three gates.
+
+What would settle it is the units in
+
+    && (!io.hirqEnable || hcounter(10) == io.htime)
+
+-- whether that counter is in clocks or in dots, and where its origin sits
+against the line.  The copy of the reference on this machine has the CPU's
+files and the PPU's *rendering* files, and the counter is defined in the
+PPU's timing, which is not among them.  So this stops here with the gate two
+clocks away and the question named precisely.
