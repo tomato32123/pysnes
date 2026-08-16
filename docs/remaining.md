@@ -1678,3 +1678,27 @@ was established: `capture` measured on its own reproduced it -- 0.74 ms mean
 against a 12.79 p99 -- and the cause was found in the state's size rather
 than inferred from the profile.  A tail is worth chasing when it reproduces
 in isolation.  Otherwise the profile is telling you about the machine.
+
+## Stepping the bitplanes instead of shifting by the column: slower
+
+A character row's bits come out in one direction for a whole span, so the
+per-dot `plane >> (7 - col)` looked replaceable: reverse each bitplane byte
+once with a table, drop what the span starts past, and shift by one a dot.
+Eight variable shifts a dot become eight masks.
+
+    7.179 -> 7.276 s on Super Mario World  (+1.4%), interleaved
+
+Slower, twice over.  A variable shift on this processor is one cycle -- the
+barrel shifter does not care what the amount is -- so the eight it removes
+were nearly free, and the per-span setup it adds is eight table lookups and
+eight shifts against spans that are often shorter than eight dots and tiles
+that are often transparent.
+
+Reverted, with the table.  This is the second change in this session whose
+mechanism was clear and whose measurement was the other way round; the first
+was hoisting `_paint`'s loop invariants.  Both would have gone in on the
+strength of the argument.
+
+Worth one caveat for whoever reads this on a phone: the reasoning that kills
+it is about x86.  An in-order ARM core may weigh the two differently, and
+nobody here can measure that.
