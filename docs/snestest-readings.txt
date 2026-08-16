@@ -1094,3 +1094,43 @@ on the processor's own clock -- and the only part of that this emulator does
 not derive from first principles is `cycle_start`, the instant the current
 processor cycle began.  That is the next thing to measure, and nothing else
 is left to guess at.
+
+--------------------------------------------------------------------------------
+test_irq's second gate: what is now known to be impossible.
+
+One thing is a proof rather than a sweep.  The two gates are two master
+cycles apart by construction -- 36390 against 36392 to the landing zone --
+and a processor cycle here is six or eight.  The shipped build records the
+interrupt's arrival as the master_clock at which the timer event was
+*processed*, which is the end of whichever cycle crossed the deadline.  Any
+two arrivals inside one cycle round to the same value.  **So while the
+rounded instant is what the processor compares against, gate 2 cannot
+differ from gate 1 for any setting of anything.**  It is not that no value
+was found; there is none.
+
+Recording the real instant is therefore necessary.  It is also not
+sufficient: with it, gate 1 fails at every setting tried.
+
+Swept, each with both gates pinning it from opposite sides:
+
+    the H counter, offset in dots           no value passes both  (earlier)
+    the dot the V match fires on, 0 to 6    no value passes both
+    where in the read cycle $2137 latches   no value passes both
+    the last of those, with the real instant  gate 1 fails throughout
+
+So three whole families are dead -- "the H counter is N dots out", "the V
+timer fires N dots into the line", "the counter latches N cycles into the
+read" -- and dead for every N, not merely for the ones tried.  The shape of
+the argument is the same each time: a knob that moves in dots is four master
+cycles coarse and the gates are two apart, so it cannot put one on each side
+of a decision.
+
+What has not been examined is the only sub-dot quantity left: where the
+processor's own cycle boundaries sit relative to the dot grid, which is what
+`cycle_start` carries.  Every other term in the comparison is now either
+measured or eliminated.  That is the next thing, and it is the last thing.
+
+Not changed here.  Gate 1 passes on the shipped build for a reason that is
+now understood -- the rounded instant, which is honest about being rounded
+-- and swapping it for a build where gate 1 fails and gate 2 is merely
+reachable would trade a reading for a hope.
