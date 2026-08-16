@@ -122,6 +122,7 @@ cdef class PPU:
     # megabytes to save ten operations per dot, which is the difference
     # between fitting in a frame and not.
     cdef uint32_t light_rgb[16][32768]
+    cdef int bg_prio_seen[4]         # which priorities a layer actually drew
     cdef uint16_t bg_direct[256]     # direct-colour result for BG1
     cdef int direct_active           # is direct colour in force this span
     cdef int mosaic_start            # first line of the current block

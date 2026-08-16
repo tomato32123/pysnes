@@ -671,6 +671,11 @@ cdef class PPU:
             hx0 = x0
             hx1 = x1
         for b in range(4):
+            # Which priorities this layer puts down, so _paint can decline a
+            # pass over the line for one it never used.  In mode 1 the
+            # painter is called ten times a screen and most layers answer
+            # only one of the two priorities it is asked about.
+            self.bg_prio_seen[b] = 0
             for x in range(x0, x1):
                 self.bg_idx[b][x] = 0
                 self.bg_pri[b][x] = 0
@@ -822,7 +827,7 @@ cdef class PPU:
         # -- the scroll, the mosaic, per-tile offsets in modes 2, 4 and 6, the
         # flips -- changes one of them first.
         cdef uint32_t last_map = 0xFFFFFFFF, last_chr = 0xFFFFFFFF
-        cdef int span, k, step, tilew
+        cdef int span, k, step, tilew, drawn
 
         # With no per-tile offsets and no mosaic, the dot is the only thing
         # moving: everything above stays put for as long as sx stays inside
@@ -886,6 +891,11 @@ cdef class PPU:
                 # A flipped tile is read right to left, so the column walks
                 # backwards through the same eight.
                 step = -1 if hflip else 1
+                # Whether this tile put anything down, kept in a local and
+                # folded into the layer's flag once.  Doing it per dot costs
+                # a read-modify-write on a member array in the innermost
+                # loop, which was measured slower than the pass it saves.
+                drawn = 0
                 for k in range(span):
                     colour = (((plane0 >> (7 - col)) & 1)
                               | (((plane0 >> (15 - col)) & 1) << 1))
@@ -906,7 +916,10 @@ cdef class PPU:
                             self.bg_idx[bg][x + k] = (pal_base
                                                       + palette * (1 << bpp) + colour)
                         self.bg_pri[bg][x + k] = prio
+                        drawn = 1
                     col += step
+                if drawn:
+                    self.bg_prio_seen[bg] |= 1 << prio
                 x += span
             return
 
@@ -976,6 +989,7 @@ cdef class PPU:
                 else:
                     self.bg_idx[bg][x] = pal_base + palette * (1 << bpp) + colour
                 self.bg_pri[bg][x] = prio
+                self.bg_prio_seen[bg] |= 1 << prio
 
     # ------------------------------------------------------- direct colour ---
     #
@@ -1133,6 +1147,7 @@ cdef class PPU:
             if colour:
                 self.bg_idx[0][x] = colour
                 self.bg_pri[0][x] = 0
+                self.bg_prio_seen[0] |= 1
                 if self.direct_active:
                     self.bg_direct[x] = self._direct(colour, 0)
             # With EXTBG the same fetch also feeds BG2, which reads bit 7 as a
@@ -1141,6 +1156,7 @@ cdef class PPU:
             if self.extbg and (colour & 0x7F):
                 self.bg_idx[1][x] = colour & 0x7F
                 self.bg_pri[1][x] = colour >> 7
+                self.bg_prio_seen[1] |= 1 << (colour >> 7)
 
     # ------------------------------------------------------------- windows ---
 
@@ -1207,6 +1223,11 @@ cdef class PPU:
         # region to clip to, and the mask has not been written.
         if not (self.win_enabled[layer] or self.win2_enabled[layer]):
             windowed = 0
+        # Nothing of this priority was drawn, so there is nothing to lay
+        # down.  Hires layers keep their own buffers and are not tracked.
+        if layer < 4 and not (self.true_hires and layer < 2):
+            if not (self.bg_prio_seen[layer] & (1 << prio)):
+                return
 
         if layer == 4:
             for x in range(x0, x1):

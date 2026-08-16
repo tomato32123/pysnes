@@ -1414,3 +1414,36 @@ hours old at the time.  76 of 76 games identical at frame 900, plus krom's
 66 pages, ppucompare's 35 demos exact, the VMAIN pairs and the twenty test
 modules.  Restructuring the innermost loop of the renderer is the kind of
 change that would otherwise have to be argued for; here it could be checked.
+
+## Declining a pass the layer has nothing for
+
+In mode 1 the painter is asked for BG1, BG2 and BG3 at two priorities each
+and the sprites at four, on both screens -- up to twenty passes over the
+line -- and most layers put down only one of the two priorities they are
+asked about.  `_render_bg` records which ones it used and `_paint` returns
+at once for the others.
+
+    7.609 -> 7.192 s on Super Mario World  (-5.5%)
+
+Two things went wrong before that number was trustworthy.
+
+**The flag was set in the wrong loop.**  `bg_prio_seen[bg] |= 1 << prio` on
+every drawn pixel is a read-modify-write on a member array in the innermost
+loop, and it cost more than the passes it saved: the first version measured
+6% *slower*.  Kept in a local across the span and folded in once, it is a
+win.
+
+**And the first measurement was meaningless anyway.**  Swapping one `.so`
+between timed runs works only while the change is inside that module.  This
+one added a field to `ppu.pxd`, which moves the struct for everything that
+cimports PPU, so `build.py` rebuilt bus, board and the rest -- and copying
+an old `ppu.so` over a new set gives a build whose modules disagree about
+where the fields are.  The giveaway was the next run reporting 0.015 s for a
+benchmark that takes eight.
+
+So: when the change touches a `.pxd`, keep two complete sets of the fifteen
+`.so` files and alternate the whole set.  When it does not, one file is
+enough.
+
+Guards, as before: 76 of 76 library games identical, krom's 66 pages,
+ppucompare's 35 demos exact, twenty test modules.
