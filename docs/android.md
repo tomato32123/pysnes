@@ -118,6 +118,20 @@ was built:
 Fifteen of fifteen is right.  Anything less means the packaging and the build
 disagree.
 
+The app itself is `main.pyc` inside `assets/private.tar`, a separate tar in
+the same APK, and it goes stale independently:
+
+    python -c "
+    import zipfile, tarfile, io
+    z = zipfile.ZipFile('android/bin/pysnes-0.1-arm64-v8a-debug.apk')
+    m = tarfile.open(fileobj=io.BytesIO(z.read('assets/private.tar')))
+    d = m.extractfile('main.pyc').read()
+    print('fps readout:', b'fps' in d)"
+
+-- or whatever string the newest change added.  A compiled module keeps the
+strings its source had, so this one does work, unlike searching a `.so` for
+a `cdef` field that has no name in it.
+
 Searching the binary for a symbol does not work as a freshness check and
 looked as though it did.  A `cdef` struct member has no name in the compiled
 object, so its absence proves nothing -- and `strings` is not on the PATH
