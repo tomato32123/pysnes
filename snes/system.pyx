@@ -44,7 +44,16 @@ cdef class System:
     cdef readonly object rom_path
     cdef readonly object sram_path
 
-    def __init__(self, rom_path=None, bytes rom_data=None):
+    def __init__(self, rom_path=None, bytes rom_data=None, bint use_saves=True):
+        """`use_saves=False` starts from an empty battery and never writes one.
+
+        A run meant to be compared against another run must depend on the
+        cartridge and nothing else.  With saves on it also depends on what is
+        in pysnes/saves/ and on any .srm sitting beside the ROM, so the same
+        image in two folders can reach two different screens -- which is
+        exactly what happened when a library baseline was first taken, and
+        looked like the emulator had stopped being deterministic.
+        """
         self.rom_path = rom_path
         self.cart = PyCart(rom_path, rom_data)
         self.ppu = PyPPU()
@@ -52,7 +61,7 @@ cdef class System:
         self.bus = PyBus(self.cart, self.ppu, self.apu)
         self.cpu = PyCPU(self.bus)
         self.sram_path = None
-        if rom_path and self.cart.sram_size:
+        if use_saves and rom_path and self.cart.sram_size:
             # Battery saves live in pysnes/saves/, never next to the ROM: an
             # existing .srm there belongs to whatever emulator wrote it and
             # must not be overwritten.  It is still read once, to import it.

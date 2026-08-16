@@ -1243,6 +1243,29 @@ build did three times over earlier the same day.
 `tools/checkall.py --slow` runs the comparison last, so everything else has
 reported by the time it finishes.
 
+Three things had to be fixed before the first baseline was worth anything,
+and each was invisible until the file existed:
+
+* **It was keyed by file name.**  Two names appear twice in this library, in
+  different folders, so their answers overwrote each other and every run
+  would have reported a change decided by which was read last.  Keyed by
+  path from the ROM directory now.
+* **A subset counted as a disappearance.**  With `--filter` or `--start` the
+  rest were not attempted, and calling that "gone" made every subset check
+  fail.  Only a whole run can say something has gone.
+* **The runs were not reproducible.**  Two byte-identical copies of one
+  cartridge gave two different final frames, which looked like the emulator
+  had stopped being deterministic.  It had not: one of them had a `.srm`
+  beside it and the other did not, so one booted into a saved game.  A run
+  meant to be compared has to depend on the cartridge and nothing else, so
+  `System(..., use_saves=False)` exists and batchtest uses it.
+
+That last one turned up something else on the way.  Battery saves are keyed
+by the ROM's *base name* in `pysnes/saves/`, so two different games with the
+same file name share a save slot.  Nothing in this library is hurt by it --
+the two duplicate pairs are byte-identical files -- but it is a real hole
+and it is written down here rather than fixed blind.
+
 The baseline is not in the repository and `.gitignore` keeps it out.  It is
 a list of one machine's game library, and a collection that exists here does
 not belong in a tree anyone else will clone -- the same reason the ROM path

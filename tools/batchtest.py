@@ -83,7 +83,7 @@ def analyse_frame(fb):
 def run_one(path, frames, shots_dir, play=False):
     result = {"path": path, "name": os.path.basename(path)}
     try:
-        machine = System(path)
+        machine = System(path, use_saves=False)
     except Exception as exc:
         result["status"] = "header"
         result["detail"] = "%s: %s" % (type(exc).__name__, exc)
@@ -259,6 +259,12 @@ def main():
         if i < args.start:
             continue
         res = run_one(path, args.frames, args.shots, play=args.play)
+        # Keyed by where it is, not what it is called.  Two of the files in
+        # this library share a name -- a Super Mario World and a hack of it
+        # in another folder -- and a baseline keyed by name has them
+        # overwriting each other's answer, so every run reports a change that
+        # depends only on which was read last.
+        res["key"] = os.path.relpath(path, args.romdir)
         results.append(res)
         chip = res.get("coproc") or ""
         print("%3d/%-3d %-9s %-46s %-8s $%02X %-8s %s%s"
@@ -278,13 +284,17 @@ def main():
     if args.baseline:
         changed, missing, added = [], [], []
         for r in results:
-            was = base.get(r["name"])
+            was = base.get(r["key"])
             if was is None:
-                added.append(r["name"])
+                added.append(r["key"])
             elif was != (r["status"], r.get("digest", "")):
-                changed.append((r["name"], was, (r["status"], r.get("digest", ""))))
-        seen = {r["name"] for r in results}
-        missing = [n for n in base if n not in seen]
+                changed.append((r["key"], was, (r["status"], r.get("digest", ""))))
+        seen = {r["key"] for r in results}
+        # Only a whole run can say something has gone.  With --filter or
+        # --start the rest were not attempted, and calling that a
+        # disappearance turns every subset check into a failure.
+        whole = not args.filter and args.start == 1
+        missing = [n for n in base if n not in seen] if whole else []
         if changed:
             print(flush=True)
             print("== different from the baseline ==", flush=True)
@@ -295,6 +305,9 @@ def main():
             print("  new since the baseline: %s" % n, flush=True)
         for n in missing:
             print("  in the baseline but not run: %s" % n, flush=True)
+        if not whole:
+            print("  (a subset: %d of the baseline's %d were run)"
+                  % (len(results), len(base)), flush=True)
         print(flush=True)
         print("%d of %d match the baseline" % (len(results) - len(changed),
                                                len(results)), flush=True)
@@ -308,8 +321,8 @@ def main():
             fh.write("# pysnes library baseline, frames=%d%s" % (args.frames, NL))
             fh.write("# %d ROMs; the final frame of each, as it was on this "
                      "build%s" % (len(results), NL))
-            for r in sorted(results, key=lambda r: r["name"]):
-                fh.write("%s%s%s%s%s%s" % (r["name"], TAB, r["status"], TAB,
+            for r in sorted(results, key=lambda r: r["key"]):
+                fh.write("%s%s%s%s%s%s" % (r["key"], TAB, r["status"], TAB,
                                            r.get("digest", ""), NL))
         print("baseline written to %s" % args.write_baseline, flush=True)
     return 0
