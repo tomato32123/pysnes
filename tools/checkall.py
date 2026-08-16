@@ -77,6 +77,11 @@ CHECKS = [
     # no --baseline file present, on a build whose other checks all pass.
     # An hour is not enough for it on a loaded machine, which is why it is
     # last: everything above will have reported by the time it gives up.
+    # Every cartridge driven by random input for about a minute, watching for
+    # anything whose picture stops moving.  Nine stand still for reasons the
+    # tool carries; anything else is a regression.
+    ("every cartridge under random input",
+     [sys.executable, "tools/soakall.py", ROMS + "/snes", "4000"], True),
     ("the library against its baseline",
      [sys.executable, "tools/batchtest.py", ROMS + "/snes",
       "--frames", "900", "--baseline", ".library-baseline"], True),

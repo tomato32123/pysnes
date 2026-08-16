@@ -1619,3 +1619,37 @@ the one `test_timing.py` uses.  So it finds them instead -- any function in
 `tests/` whose body appends to FAILURES or raises.  An auditor that does not
 know its subject invents faults and misses real ones, and the second kind is
 the one that matters.
+
+## Every cartridge under random input
+
+The checks so far all walk fixed paths: boot and look, or press Start and A
+on a schedule.  Menus, saves, a coprocessor's rarer instructions and the
+state changes between them are not on those paths, and they are exactly
+where this session's changes -- HDMA channel gating, when an interrupt is
+taken, a rewritten renderer inner loop, a trimmed save state -- would break
+first.
+
+So every cartridge is driven for four thousand frames, about a minute of
+play, with pseudo-random input from a fixed seed.
+
+    0 of 76 stopped moving or crashed unexpectedly
+
+Nine stand still and the tool carries why: three images that are destroyed,
+three waiting on DSP firmware, the CX4 title whose error screen is static by
+definition, and the two SPC7110 cartridges sitting on their own check
+program's "power off please".  Anything else that stops is a regression.
+
+Two things about the verdict, both learned by getting it wrong first.
+
+**A snapshot cannot tell a hang from a blink.**  The first version judged
+the final frame and called eight cartridges black; all eight were drawing
+again a few hundred frames later, having gone through a fade or a menu.  It
+judges on whether the picture *changes* across eight samples now.
+
+**And the second criterion was worse.**  It sampled the program counter four
+times and called a repeat a hang, which is what an idle loop looks like on
+every working game.  It reported 27 of 76 as bad.  None of them were.
+
+**The list is only valid at the length it was measured over.**  At 600
+frames five more cartridges are still on a boot logo and look stopped, so
+the tool says so when asked to run shorter.
