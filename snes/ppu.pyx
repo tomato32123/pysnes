@@ -822,6 +822,93 @@ cdef class PPU:
         # -- the scroll, the mosaic, per-tile offsets in modes 2, 4 and 6, the
         # flips -- changes one of them first.
         cdef uint32_t last_map = 0xFFFFFFFF, last_chr = 0xFFFFFFFF
+        cdef int span, k, step, tilew
+
+        # With no per-tile offsets and no mosaic, the dot is the only thing
+        # moving: everything above stays put for as long as sx stays inside
+        # the same eight, which is where a character row lives.  So the work
+        # is done once per eight dots and the inner loop is a shift and a
+        # store.  A sixteen-wide tile keeps its map entry for sixteen but
+        # changes character at eight, and eight is the smaller step, so the
+        # same span serves both.
+        if not opt and (not self.mosaic_enable[bg] or self.mosaic_size == 0):
+            tilew = 1 << tile_shift
+            x = x0
+            while x < x1:
+                sx = x + hofs
+                tile_x = sx >> tile_shift
+                tile_y = y >> tile_shift
+                screen = 0
+                if self.bg_map_wide[bg] and (tile_x & 0x20):
+                    screen += 0x400
+                if self.bg_map_tall[bg] and (tile_y & 0x20):
+                    screen += 0x800 if self.bg_map_wide[bg] else 0x400
+                map_addr = (map_base + screen + ((tile_y & 0x1F) << 5)
+                            + (tile_x & 0x1F)) & 0x7FFF
+                if map_addr != last_map:
+                    last_map = map_addr
+                    last_chr = 0xFFFFFFFF
+                    entry = self.vram[map_addr]
+                    tile_base = entry & 0x03FF
+                    palette = (entry >> 10) & 7
+                    prio = (entry >> 13) & 1
+                    hflip = (entry >> 14) & 1
+                    vflip = (entry >> 15) & 1
+
+                px_in_tile = sx & (tilew - 1)
+                py_in_tile = y & (tilew - 1)
+                if hflip:
+                    px_in_tile = (tilew - 1) - px_in_tile
+                if vflip:
+                    py_in_tile = (tilew - 1) - py_in_tile
+
+                tile_num = tile_base
+                if self.bg_tile_size[bg]:
+                    tile_num = (tile_num + ((py_in_tile >> 3) & 1) * 16
+                                + ((px_in_tile >> 3) & 1)) & 0x03FF
+                row_in = py_in_tile & 7
+                col = px_in_tile & 7
+
+                chr_addr = (chr_base + tile_num * words_per_tile + row_in) & 0x7FFF
+                if chr_addr != last_chr:
+                    last_chr = chr_addr
+                    plane0 = self.vram[chr_addr]
+                    if bpp >= 4:
+                        plane1 = self.vram[(chr_addr + 8) & 0x7FFF]
+                    if bpp == 8:
+                        plane2 = self.vram[(chr_addr + 16) & 0x7FFF]
+                        plane3 = self.vram[(chr_addr + 24) & 0x7FFF]
+
+                # Dots left before sx crosses into the next character row.
+                span = 8 - (sx & 7)
+                if x + span > x1:
+                    span = x1 - x
+                # A flipped tile is read right to left, so the column walks
+                # backwards through the same eight.
+                step = -1 if hflip else 1
+                for k in range(span):
+                    colour = (((plane0 >> (7 - col)) & 1)
+                              | (((plane0 >> (15 - col)) & 1) << 1))
+                    if bpp >= 4:
+                        colour |= ((((plane1 >> (7 - col)) & 1) << 2)
+                                   | (((plane1 >> (15 - col)) & 1) << 3))
+                    if bpp == 8:
+                        colour |= ((((plane2 >> (7 - col)) & 1) << 4)
+                                   | (((plane2 >> (15 - col)) & 1) << 5))
+                        colour |= ((((plane3 >> (7 - col)) & 1) << 6)
+                                   | (((plane3 >> (15 - col)) & 1) << 7))
+                    if colour:
+                        if bpp == 8:
+                            self.bg_idx[bg][x + k] = colour
+                            if self.direct_active:
+                                self.bg_direct[x + k] = self._direct(colour, palette)
+                        else:
+                            self.bg_idx[bg][x + k] = (pal_base
+                                                      + palette * (1 << bpp) + colour)
+                        self.bg_pri[bg][x + k] = prio
+                    col += step
+                x += span
+            return
 
         for x in range(x0, x1):
             if opt:

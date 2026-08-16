@@ -1384,3 +1384,33 @@ the README's claim written beside it in the output:
 Not to make the number go green.  A check that is permanently red is a check
 people stop reading, and the fact worth keeping is which of the two is
 evidence and which is a typo -- so both are on the line.
+
+## Doing the tile arithmetic once per tile
+
+Holding the last fetch turned seven VRAM reads in eight into a compare, but
+the address arithmetic that produced those addresses still ran on every dot:
+the scroll added, the map coordinates shifted out, the screen selected, the
+flips applied, the sub-tile chosen and the character address formed, all to
+find out that nothing had moved.
+
+With no per-tile offsets and no mosaic -- which is most layers of most
+frames -- the dot is the only thing changing, and everything above holds for
+as long as `sx` stays inside the same eight.  So there is a path that does
+it once per eight dots and leaves a shift and a store in the inner loop.  A
+sixteen-wide tile keeps its map entry across sixteen dots but changes
+character at eight, and eight is the smaller step, so one span serves both.
+A flipped tile reads right to left, so the column walks backwards through
+the same eight.
+
+    Super Mario World   9.423 -> 7.985 s   (-15.3%)
+    Bahamut Lagoon      3.595 -> 3.355 s   ( -6.7%)
+
+Both interleaved run by run between two saved `.so` files, because on this
+machine measuring one build and then the other compares two stretches of
+time as much as two builds.
+
+The guard that made this worth attempting at all: the library baseline, six
+hours old at the time.  76 of 76 games identical at frame 900, plus krom's
+66 pages, ppucompare's 35 demos exact, the VMAIN pairs and the twenty test
+modules.  Restructuring the innermost loop of the renderer is the kind of
+change that would otherwise have to be argued for; here it could be checked.
