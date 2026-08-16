@@ -1246,3 +1246,31 @@ level.  The delay routine and the alignment are full of branches.
 
 Nothing changed.  Every measurement in this entry was taken on a build that
 was thrown away.
+
+--------------------------------------------------------------------------------
+Polling a cycle early on a taken branch: tried, and it makes things worse.
+
+The nesdev page describing it is about the 6502 and says of itself that it
+is work in progress with unanswered questions, so this was always going to
+be a trial rather than a citation.  Implemented as written -- a taken branch
+decides on its second cycle and the end-of-instruction decision is skipped
+for it -- the four cartridges do not move at all, `dma_irq_test` still reads
+14 of 14, and one unit test breaks:
+
+    test_mid_scanline_split_lands_near_the_requested_dot
+
+That one is anchored to hardware in the way that matters here.  A program
+sets HTIME, spins, and takes an H-IRQ that changes the screen mid-line; the
+test scans the row for the transition and checks it is where HTIME put it.
+The spin is a branch, so polling early delays the interrupt by an
+instruction and walks the split away from its dot.
+
+So: a rule that changes nothing the four cartridges measure, and moves a
+split that is currently in the right place.  Reverted.
+
+What it does establish is that the branches in the delay routine are not
+where test_irq's missing dot is.  Of the two candidates read out of other
+implementations, that leaves the transition latch -- sampling that the line
+*went up* rather than that it *is* up -- and that one cannot be tried the
+same way, because it changes the shape of the model rather than a constant
+in it.
