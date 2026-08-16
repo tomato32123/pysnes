@@ -1,5 +1,14 @@
 """Every cartridge, random input, watching for anything that stops.
 
+Random input goes wide, not deep.  It rarely gets a menu-driven game into
+play: Star Fox needs Start on a rhythm and then A, and four thousand frames
+of random presses never find it.  Mixing the two -- random play with a
+steady confirm underneath -- is worse than either, because the random
+directions move the cursor and B backs out of what Start just entered.
+Reaching gameplay reliably wants a script per cartridge, which is a lot of
+work for coverage this already has by accident on the games that start
+themselves.
+
 The verdict is whether the picture still *moves*, not what the last frame
 happened to hold.  The first version of this called eight cartridges black
 because frame 4000 was mid-fade or in a menu; all eight were drawing again a
