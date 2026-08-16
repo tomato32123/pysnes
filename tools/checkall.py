@@ -80,6 +80,11 @@ CHECKS = [
     # Every cartridge driven by random input for about a minute, watching for
     # anything whose picture stops moving.  Nine stand still for reasons the
     # tool carries; anything else is a regression.
+    # Save a state mid-play, put it back, and see whether the machine carries
+    # on the same way.  Anything the state does not carry diverges within a
+    # few frames.
+    ("every cartridge across a save and reload",
+     [sys.executable, "tools/statediff.py", ROMS + "/snes", "1200", "120"], True),
     ("every cartridge under random input",
      [sys.executable, "tools/soakall.py", ROMS + "/snes", "4000"], True),
     ("the library against its baseline",
