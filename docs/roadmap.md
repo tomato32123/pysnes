@@ -450,3 +450,34 @@ This is the part that decides whether any of the above converges.
 Coprocessors sit deliberately below the PPU and the timing work: they add
 titles, but they do not make the titles that already run any more correct, and
 each one is easier to write against a core whose behaviour is pinned by tests.
+
+## Where this stands
+
+Everything on the list above is done except two lines, and they are not the
+same kind of unfinished.
+
+**$2140-$2143 against the SPC700's own clock** is unmodelled and has no
+failing evidence.  The ports are read and written with the sound chip caught
+up to the current master cycle, which is a model, not the model; the real
+thing has two clocks and a write becomes visible on the other side after a
+delay in the reader's own time.  Nothing on this machine says the difference
+shows: blargg's `spc_mem_access_times` passes, his DSP tests pass sample for
+sample against his own implementation, and a game's driver through both
+chips correlates at 0.98.  So it stays as it is, with the gap written down
+rather than closed by guesswork.
+
+**The DSP-series chips, CX4 and ST010/011** need dumps that are not here and
+will not be fetched, and every route around that -- reimplementing what the
+program does from its documented effects -- is the one this project has
+turned down with reasons, twice, in writing.
+
+Beyond the list, one hardware reading is still unexplained: the second gate
+of tukuyomi's `test_irq`.  Five families of explanation have been eliminated
+by measurement, one of them by proof rather than search, and what remains is
+not reachable by adjusting any term the emulator has.  It needs a console or
+another implementation to diff against.
+
+Which is to say: this is at the limit of what the evidence available here
+can settle.  Everything that can be checked, is checked, and runs -- the
+routine is thirteen checks, all of them executing, and the last thing it
+found was itself.
