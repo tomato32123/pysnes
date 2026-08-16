@@ -22,7 +22,10 @@ cdef enum:
     # holds $4212 bit 0 for this many master cycles -- about three lines.
     JOYPAD_READ_CYCLES = 4224
     CYCLES_PER_LINE = 1364
-    HDMA_DOT = 278              # HDMA transfers late in the line, not at its end
+    # The reference puts it at clock 1104 of the line, which is dot 276; this
+    # was 278, chosen as "late in the line, not at its end" rather than from
+    # a number anyone had written down.
+    HDMA_DOT = 276
     APU_SYNC_CYCLES = 1364      # catch the APU up at least once per line
     # Once a scanline the CPU is halted while DRAM is refreshed.  It is not
     # optional and not skippable, so it shortens every line's usable time.

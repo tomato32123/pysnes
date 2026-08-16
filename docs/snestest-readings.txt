@@ -1374,3 +1374,27 @@ later session finds it wrong, this is what it rested on: a number in a
 reference, no contradiction, and low risk.  The version distinction is not
 modelled here -- this emulator has no notion of CPU revisions -- which is the
 part most likely to be wrong.
+
+--------------------------------------------------------------------------------
+HDMA runs at dot 276, not 278.
+
+    //HDMA triggers once every visible scanline
+    if(vcounter() < ppu.vdisp()) {
+      status.hdmaPosition = 1104;
+
+1104 clocks is dot 276.  This emulator had 278, and the comment beside it
+said "late in the line, not at its end" -- which is a description of where it
+ought to be, not a number anyone had written down.
+
+Same class as the refresh phase above, and the same honesty applies: nothing
+here measures it.  The interrupt cartridges, dma_irq_test, the twenty-four
+test modules and every reference picture are unchanged, and one animated
+game -- Star Fox again -- draws a different frame at 900.
+
+Two changes in a row now rest on the reference alone.  That is worth naming
+as a pattern rather than letting it accumulate quietly: both replace a
+number this project reasoned its way to with one bsnes states outright, both
+are unmeasurable here, and both moved a frame of a game with animation in
+it.  If the reference turns out to be describing a different CPU revision --
+it distinguishes version 1 from version 2 for the refresh and this emulator
+models neither -- these are the two to look at first.
